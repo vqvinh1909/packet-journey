@@ -62,7 +62,7 @@ export const LAB_GROUPS = [
   { id: 'c1', title: '📗 CCNA trực quan — Ch.1 Khái niệm cốt lõi' },
   { id: 'c2', title: '📗 CCNA trực quan — Ch.2 Các bước cấu hình' },
   { id: 'c3', title: '📗 CCNA trực quan — Ch.3 Xử lý sự cố' },
-  { id: 'adv', title: '🔬 Chuyên đề nâng cao — VTP · PVLAN · IPsec · BGP' },
+  { id: 'adv', title: '🔬 Chuyên đề nâng cao — VTP · PVLAN · IPsec · BGP · STP' },
 ];
 
 const INFRA_LABS = [
@@ -852,6 +852,8 @@ export function makeApi(net) {
     ospfIf: (rid, ifn) => N.ospfIfaces(ctx(), rid).find((e) => e.ifn === ifn) || null,
     bundle: (s, p) => N.bundleOf(net, net.devices[s], p),
     stpRoot: (v) => N.stpRoot(net, v)?.id || null,
+    stpRole: (dev, port, v) => N.stpState(net, v).ports[`${dev}|${port}`] || null,
+    l2path: (src, ip) => (N.resolve(net, { dev: src, ifn: 'fa0' }, ip).hops || []).map((h) => h.to),
     hsrpActive: (dev, ifn, g, proto = 'hsrp') => N.hsrpView(net, dev, ifn).find((x) => x.group === g && x.proto === proto)?.ep.dev || null,
     dhcp: (pcId) => N.dhcpRequest(N.cloneNet(net), pcId, {}),
     hasIp: (id, nw, p) => !!net.devices[id].ip && N.inNet(net.devices[id].ip, nw, p),

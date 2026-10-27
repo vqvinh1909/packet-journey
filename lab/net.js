@@ -396,6 +396,7 @@ export function flood(net, src, diag) {
   const seen = new Set();
   const note = (s) => { if (diag && !diag.includes(s)) diag.push(s); };
   const srcMac = epMac(net, src);
+  const blocked = stpBlockedFn(net);
   const add = (dev, ifn, hops) => {
     const k = dev + '|' + ifn;
     if (dev === src.dev && ifn === src.ifn) return;
@@ -473,6 +474,7 @@ export function flood(net, src, diag) {
         if (!allowedHas(e, vlan)) { note(`${d.name} trunk ${longIf(e.bundle || it.port)} không cho phép VLAN ${vlan} (allowed vlan) → bỏ frame`); continue; }
       }
       if (!d.vlans[vlan]) { note(`${d.name}: VLAN ${vlan} không tồn tại trong VLAN database → bỏ frame`); continue; }
+      if (blocked(it.dev, it.port, vlan)) { note(`${d.name} ${longIf(e.bundle || it.port)} đang STP BLOCKING cho VLAN ${vlan} → bỏ frame (chống vòng lặp)`); continue; }
       q.push({ k: 'sw', dev: it.dev, vlan, inPort: it.port, inBundle: e.bundle, hops: it.hops });
     } else {
       const key = it.dev + '#' + it.vlan;
@@ -491,6 +493,7 @@ export function flood(net, src, diag) {
         if (e.bundle && used.has(e.bundle)) continue;
         if (e.shutdown || !lineUp(net, it.dev, p)) continue;
         if (inProt && d.ports[p].protected) continue; // Protected Port: 2 cổng protected không nói chuyện trực tiếp
+        if (e.mode !== 'private-vlan' && blocked(it.dev, p, it.vlan)) continue; // STP: không gửi ra cổng BLOCKING
         let tag;
         if (e.mode === 'private-vlan') {
           if (!pvCarries(d, e.pv, it.vlan)) continue;
@@ -1655,6 +1658,107 @@ export function stpRoot(net, vlan) {
   const sws = Object.values(net.devices).filter((d) => d.type === 'switch' && d.vlans[vlan]);
   sws.sort((a, b) => stpPriority(a, vlan) - stpPriority(b, vlan) || (switchMac(net, a.id) < switchMac(net, b.id) ? -1 : 1));
   return sws[0] || null;
+}
+const STP_COST = { g: 4, fa: 19, e: 100 };
+/** Cost STP (short) của cổng logic: 1G = 4, 100M = 19; EtherChannel ≥ 2 sợi rẻ hơn (2×1G = 3, 2×100M = 12). */
+function stpCost(d, members) {
+  const base = STP_COST[kindOf(members[0])] ?? 19;
+  return members.length >= 2 ? ({ 4: 3, 19: 12 }[base] ?? base) : base;
+}
+const bidCmp = (net, v) => (a, b) => stpPriority(a, v) - stpPriority(b, v) || (switchMac(net, a.id) < switchMac(net, b.id) ? -1 : switchMac(net, a.id) > switchMac(net, b.id) ? 1 : 0);
+/**
+ * STP (802.1D/PVST) cho 1 VLAN: mỗi miền switch liền nhau bầu Root Bridge (priority + MAC thấp nhất),
+ * mỗi switch chọn Root Port (cost tới root thấp nhất → bridge ID láng giềng → cổng), mỗi đoạn dây
+ * switch–switch có 1 Designated Port; cổng còn lại là Alternate/BLOCKING. EtherChannel = 1 cổng logic.
+ * Trả { root: {devId: rootId}, dist: {devId: cost}, ports: {'dev|cổng': {role, sts, cost, peer}} }.
+ */
+export function stpState(net, v) {
+  const sws = Object.values(net.devices).filter((d) => d.type === 'switch' && d.vlans[v]);
+  const cmp = bidCmp(net, v);
+  const ports = {}, edges = [], lports = {};
+  // cổng logic đang chở VLAN v (thành viên bundle gộp về Port-channel)
+  for (const d of sws) {
+    const groups = new Map();
+    for (const p of Object.keys(d.ports).filter((x) => !x.startsWith('po')).sort(ifSort)) {
+      const e = effPort(net, d, p);
+      if (e.shutdown || !lineUp(net, d.id, p) || !portCarries(net, d, p, v)) continue;
+      const name = e.bundle || p;
+      if (!groups.has(name)) groups.set(name, []);
+      groups.get(name).push(p);
+    }
+    lports[d.id] = groups;
+    for (const [name, mem] of groups) ports[d.id + '|' + name] = { role: 'Desg', sts: 'FWD', cost: stpCost(d, mem), name, members: mem, peer: null };
+  }
+  // cạnh switch–switch (mỗi cổng logic chỉ có 1 láng giềng)
+  for (const d of sws) {
+    for (const [name, mem] of lports[d.id]) {
+      const l = linkAt(net, d.id, mem[0]);
+      const pe = peerOf(l, d.id, mem[0]);
+      const pd = net.devices[pe.dev];
+      if (pd?.type !== 'switch' || !lports[pd.id]) continue;
+      const pn = effPort(net, pd, pe.port).bundle || pe.port;
+      if (!ports[pd.id + '|' + pn]) continue;
+      ports[d.id + '|' + name].peer = { dev: pd.id, port: pn };
+      if (d.id < pd.id || (d.id === pd.id && name < pn)) edges.push({ a: d.id, ap: name, b: pd.id, bp: pn });
+    }
+  }
+  // từng miền liền nhau: root + Dijkstra theo cost cổng NHẬN
+  const root = {}, dist = {};
+  const adj = {};
+  for (const e of edges) { (adj[e.a] ||= []).push(e); (adj[e.b] ||= []).push(e); }
+  for (const d of sws) {
+    if (root[d.id]) continue;
+    const comp = [d], seen = new Set([d.id]);
+    for (let i = 0; i < comp.length; i++) for (const e of adj[comp[i].id] || []) { const o = e.a === comp[i].id ? e.b : e.a; if (!seen.has(o)) { seen.add(o); comp.push(net.devices[o]); } }
+    const r = [...comp].sort(cmp)[0];
+    for (const x of comp) root[x.id] = r.id;
+    dist[r.id] = 0;
+    const done = new Set();
+    for (;;) {
+      let u = null;
+      for (const x of comp) if (!done.has(x.id) && dist[x.id] != null && (u === null || dist[x.id] < dist[u])) u = x.id;
+      if (u === null) break;
+      done.add(u);
+      for (const e of adj[u] || []) {
+        const [o, op] = e.a === u ? [e.b, e.bp] : [e.a, e.ap];
+        const nd = dist[u] + ports[o + '|' + op].cost;
+        if (dist[o] == null || nd < dist[o]) dist[o] = nd;
+      }
+    }
+  }
+  // Root Port của mỗi switch không phải root
+  const key = (dev, port) => [dist[dev], dev, port];
+  const less = (x, y) => x[0] - y[0] || cmp(net.devices[x[1]], net.devices[y[1]]) || (x[2] < y[2] ? -1 : x[2] > y[2] ? 1 : 0);
+  for (const d of sws) {
+    if (root[d.id] === d.id) continue;
+    let best = null;
+    for (const [name] of lports[d.id]) {
+      const P = ports[d.id + '|' + name];
+      if (!P.peer) continue;
+      const k = [dist[P.peer.dev] + P.cost, P.peer.dev, P.peer.port];
+      if (!best || less(k, best.k) < 0) best = { k, name };
+    }
+    if (best) ports[d.id + '|' + best.name].role = 'Root';
+  }
+  // Designated trên mỗi đoạn: phía có (cost tới root, bridge ID, cổng) nhỏ hơn; phía kia nếu không phải Root Port → BLK
+  for (const e of edges) {
+    const A = ports[e.a + '|' + e.ap], B = ports[e.b + '|' + e.bp];
+    const aWins = less(key(e.a, e.ap), key(e.b, e.bp)) < 0;
+    const [W, L] = aWins ? [A, B] : [B, A];
+    W.role = W.role === 'Root' ? 'Root' : 'Desg';
+    if (L.role !== 'Root') { L.role = 'Altn'; L.sts = 'BLK'; }
+  }
+  return { root, dist, ports };
+}
+/** Cổng (vật lý hoặc Port-channel) có đang BLOCKING cho VLAN v không — dùng trong flood. */
+function stpBlockedFn(net) {
+  const memo = {};
+  return (dev, port, v) => {
+    const st = (memo[v] ||= stpState(net, v));
+    const d = net.devices[dev];
+    const name = d.ports[port] ? (effPort(net, d, port).bundle || port) : port;
+    return st.ports[dev + '|' + name]?.sts === 'BLK';
+  };
 }
 /**
  * VTP: đồng bộ VLAN database giữa các switch nối nhau bằng TRUNK, cùng domain + password.

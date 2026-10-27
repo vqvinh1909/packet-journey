@@ -313,6 +313,7 @@ export function openLab(onRun) {
     }
     const pairN = {}, pairI = {};
     for (const l of net.links) { const k = [l.a, l.b].sort().join('|'); pairN[k] = (pairN[k] || 0) + 1; }
+    const blk = stpBlocked(net);
     const layerLinks = el('g', {}), layerLabels = el('g', {}), layerNodes = el('g', {});
     svg.append(layerLinks, layerLabels, layerNodes);
     for (const l of net.links) {
@@ -337,10 +338,13 @@ export function openLab(onRun) {
       }
       for (const [D, port, t] of [[A, l.ap, 0.24], [B, l.bp, 0.76]]) {
         const px = A.x + dx * t + ox, py = A.y + dy * t + oy;
-        const label = isHost(D) ? 'Fa0' : N.shortIf(port);
+        const bv = blk.get(D.id + '|' + port);
+        const label = (isHost(D) ? 'Fa0' : N.shortIf(port)) + (bv ? ' ✕' : '');
         const w = label.length * 6.6 + 8;
-        layerLabels.appendChild(el('rect', { x: px - w / 2, y: py - 8, width: w, height: 15, rx: 4, class: 'lab-port-bg' }));
-        const tx = el('text', { x: px, y: py + 3.5, 'text-anchor': 'middle', class: 'lab-port' });
+        const bg = el('rect', { x: px - w / 2, y: py - 8, width: w, height: 15, rx: 4, class: 'lab-port-bg' + (bv ? ' blk' : '') });
+        if (bv) { const tt = el('title', {}); tt.textContent = `STP BLOCKING — VLAN ${bv.join(', ')}`; bg.appendChild(tt); }
+        layerLabels.appendChild(bg);
+        const tx = el('text', { x: px, y: py + 3.5, 'text-anchor': 'middle', class: 'lab-port' + (bv ? ' blk' : '') });
         tx.textContent = label;
         layerLabels.appendChild(tx);
       }
@@ -781,6 +785,21 @@ export function openLab(onRun) {
   selectLab(lab.id);
 }
 
+/** Cổng switch đang STP BLOCKING: Map 'dev|cổng vật lý' → [VLAN...] (để đánh dấu trên topology). */
+function stpBlocked(net) {
+  const out = new Map();
+  const vlans = new Set();
+  for (const d of Object.values(net.devices)) if (d.type === 'switch') for (const v of Object.keys(d.vlans)) vlans.add(+v);
+  if (vlans.size > 24) return out; // quá nhiều VLAN: bỏ qua phần trang trí này cho nhẹ
+  for (const v of [...vlans].sort((x, y) => x - y)) {
+    for (const [k, P] of Object.entries(N.stpState(net, v).ports)) {
+      if (P.sts !== 'BLK') continue;
+      const dev = k.slice(0, k.indexOf('|'));
+      for (const m of P.members) { const key = dev + '|' + m; if (!out.has(key)) out.set(key, []); out.get(key).push(v); }
+    }
+  }
+  return out;
+}
 function fmtTime(sec) { const m = Math.floor(sec / 60), x = sec % 60; return `${String(m).padStart(2, '0')}:${String(x).padStart(2, '0')}`; }
 function el(name, attrs) { const n = document.createElementNS(SVG, name); for (const k in attrs) n.setAttribute(k, attrs[k]); return n; }
 function esc(s) { return String(s ?? '').replace(/[&<>"]/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[m])); }

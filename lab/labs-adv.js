@@ -148,4 +148,32 @@ export const ADV_LABS = [
     ],
     hints: ['Xem "🧭 Cách giải chi tiết".', 'Phiên iBGP lên cần: IGP tới loopback đầu kia + "neighbor X update-source lo0" ở CẢ 2 đầu.', 'R2 thấy route 192.0.2.0/24 trong "show ip bgp" nhưng không có trong bảng định tuyến? → next-hop không tới được → next-hop-self trên R1.'],
   },
+
+  // =====================================================================
+  // D05 — STP: đặt Root Bridge đúng chỗ (cổng BLOCKING thật)
+  // =====================================================================
+  {
+    id: 'D05', group: 'adv', lesson: 'Chuyên đề — STP & vị trí Root Bridge', level: 2, kind: 'ticket',
+    title: 'STP: Root Bridge nằm nhầm ở switch access → dữ liệu đi đường vòng',
+    story: '🎫 Tam giác L2: SW-ACC (switch cũ nhất, MAC thấp nhất) nối DS1 và DS2; DS1–DS2 nối trực tiếp bằng Gi0/2. Không ai cấu hình STP nên SW-ACC thắng bầu Root cho mọi VLAN → cổng DS1–DS2 bị BLOCK, mọi frame giữa SRV-DS1 và PC-DS2 phải vòng qua switch access yếu nhất. Yêu cầu: DS1 làm Root primary, DS2 Root secondary cho VLAN 10, để đường DS1–DS2 được dùng và cổng bị chặn chuyển về phía SW-ACC. Dùng "show spanning-tree vlan 10" để quan sát Role/Sts trước và sau.',
+    build: () => makeNet([
+      sw('acc', 'SW-ACC', 500, 300, ['fa0/1', 'g0/1', 'g0/2']),
+      sw('ds1', 'DS1', 260, 120, ['fa0/1', 'g0/1', 'g0/2']),
+      sw('ds2', 'DS2', 740, 120, ['fa0/1', 'g0/1', 'g0/2']),
+      pc('pa', 'PC-ACC', 500, 430, { ip: '10.0.10.11' }),
+      server('srv', 'SRV-DS1', 90, 230, { ip: '10.0.10.100' }),
+      pc('pb', 'PC-DS2', 910, 230, { ip: '10.0.10.22' }),
+    ], [['acc', 'g0/1', 'ds1', 'g0/1'], ['acc', 'g0/2', 'ds2', 'g0/1'], ['ds1', 'g0/2', 'ds2', 'g0/2'], ['pa', 'fa0', 'acc', 'fa0/1'], ['srv', 'fa0', 'ds1', 'fa0/1'], ['pb', 'fa0', 'ds2', 'fa0/1']]),
+    init: ['acc', 'ds1', 'ds2'].map((d) => [d, cfg('vtp mode transparent', 'vlan 10', 'name DATA', 'exit', 'interface fa0/1', 'switchport mode access', 'switchport access vlan 10', 'interface range g0/1 - 2', 'switchport mode trunk')]),
+    tasks: [
+      { text: 'DS1 là Root Bridge VLAN 10 (priority thấp nhất), DS2 là dự phòng (secondary)', verify: 'show spanning-tree vlan 10', check: (a) => a.stpRoot(10) === 'ds1' && N.stpPriority(a.d('ds2'), 10) < N.stpPriority(a.d('acc'), 10) && N.stpPriority(a.d('ds1'), 10) < N.stpPriority(a.d('ds2'), 10) },
+      { text: 'Đường DS1 ↔ DS2 (Gi0/2) đang FORWARDING ở cả 2 đầu; cổng BLOCKING nằm ở SW-ACC', verify: 'show spanning-tree vlan 10 (cột Sts)', check: (a) => a.stpRole('ds1', 'g0/2', 10)?.sts === 'FWD' && a.stpRole('ds2', 'g0/2', 10)?.sts === 'FWD' && a.stpRole('acc', 'g0/2', 10)?.sts === 'BLK' },
+      { text: 'Frame SRV-DS1 → PC-DS2 đi thẳng DS1 → DS2, KHÔNG qua SW-ACC', verify: 'ping 10.0.10.22 → "▶ Xem gói tin"', check: (a) => { const p = a.l2path('srv', '10.0.10.22'); return p.length > 0 && !p.includes('acc') && a.ping('srv', '10.0.10.22'); } },
+      { text: 'PC-ACC vẫn tới được cả SRV-DS1 và PC-DS2', verify: 'ping', check: (a) => a.ping('pa', '10.0.10.100') && a.ping('pa', '10.0.10.22') },
+      { text: 'Dự phòng: dây DS1–DS2 đứt → STP mở lại cổng SW-ACC, PC-DS2 vẫn tới SRV-DS1', verify: 'DS1: interface g0/2 → shutdown', check: (a) => a.whatIf((n) => { n.devices.ds1.ports['g0/2'].shutdown = true; }, (b) => b.stpRole('acc', 'g0/2', 10)?.sts === 'FWD' && b.ping('pb', '10.0.10.100')) },
+      quiz('Trước khi sửa, vì sao SW-ACC lại thắng bầu Root?', ['Mọi switch cùng priority 32768+VLAN → so MAC, switch cũ nhất có MAC thấp nhất thắng', 'Vì nó nối nhiều PC nhất', 'Vì nó là switch access', 'Vì cổng của nó nhanh nhất'], 0, 'Luôn chủ động đặt priority cho switch core/distribution, đừng để STP "tự chọn".'),
+    ],
+    hints: ['show spanning-tree vlan 10 trên cả 3 switch: Root ID là ai? Cổng nào Altn BLK?', 'DS1: spanning-tree vlan 10 root primary ; DS2: spanning-tree vlan 10 root secondary', 'Sau khi đổi: DS2 Gi0/2 thành Root Port, cổng BLK chuyển sang SW-ACC Gi0/2.'],
+    solution: [['ds1', cfg('spanning-tree vlan 10 root primary')], ['ds2', cfg('spanning-tree vlan 10 root secondary')]],
+  },
 ];

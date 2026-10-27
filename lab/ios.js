@@ -2214,49 +2214,25 @@ export function createCli(net) {
     return L;
   }
   function stpView(d, v) {
-    const root = N.stpRoot(net, v);
-    const dist = { [root.id]: 0 };
-    const q = [root.id];
-    while (q.length) {
-      const u = q.shift();
-      const du = net.devices[u];
-      for (const p of Object.keys(du.ports)) {
-        if (p.startsWith('po') || !N.lineUp(net, u, p) || !N.portCarries(net, du, p, v)) continue;
-        const l = N.linkAt(net, u, p);
-        const pe = N.peerOf(l, u, p);
-        const pd = net.devices[pe.dev];
-        if (pd.type === 'switch' && pd.vlans[v] && dist[pe.dev] == null) { dist[pe.dev] = dist[u] + 1; q.push(pe.dev); }
-      }
-    }
+    // dùng đúng kết quả STP mà engine dùng để chặn cổng khi chuyển frame (N.stpState)
+    const st = N.stpState(net, v);
+    const root = net.devices[st.root[d.id]] || d;
     const rows = [];
-    let rootPortChosen = false;
-    const seenPo = new Set();
-    for (const n of Object.keys(d.ports).filter((p) => !p.startsWith('po')).sort(ifSort)) {
-      const e = N.effPort(net, d, n);
-      if (e.shutdown || !N.lineUp(net, d.id, n) || !N.portCarries(net, d, n, v)) continue;
-      const name = e.bundle || n;
-      if (seenPo.has(name)) continue;
-      seenPo.add(name);
-      const l = N.linkAt(net, d.id, n);
-      const pe = N.peerOf(l, d.id, n);
-      const pd = net.devices[pe.dev];
-      let role = 'Desg', sts = 'FWD';
-      if (d.id !== root.id && pd.type === 'switch' && dist[pe.dev] != null) {
-        if (dist[pe.dev] < dist[d.id] && !rootPortChosen) { role = 'Root'; rootPortChosen = true; }
-        else if (dist[pe.dev] < dist[d.id] || (dist[pe.dev] === dist[d.id] && N.stpPriority(pd, v) < N.stpPriority(d, v))) { role = 'Altn'; sts = 'BLK'; }
-      }
-      const cost = e.bundle ? 12 : n.startsWith('g') ? 4 : 19;
-      const edge = d.ports[n].portfast || d.stp.portfastDefault;
-      rows.push({ name, role, sts, cost, prio: `128.${Object.keys(d.ports).indexOf(n) + 1}`, edge: edge && pd.type !== 'switch' });
+    for (const [k, P] of Object.entries(st.ports)) {
+      if (!k.startsWith(d.id + '|')) continue;
+      const first = P.members[0];
+      const edge = !P.peer && (d.ports[first].portfast || d.stp.portfastDefault);
+      rows.push({ name: P.name, role: P.role, sts: P.sts, cost: P.cost, prio: `128.${Object.keys(d.ports).indexOf(first) + 1}`, edge });
     }
-    return { root, rows };
+    rows.sort((x, y) => ifSort(x.name, y.name));
+    return { root, rows, dist: st.dist[d.id] ?? 0 };
   }
   function showStp(d, v) {
     if (!d.vlans[v]) return [`Spanning tree instance(s) for vlan ${v} does not exist.`];
-    const { root, rows } = stpView(d, v);
+    const { root, rows, dist } = stpView(d, v);
     const me = root.id === d.id;
     const L = [`VLAN${String(v).padStart(4, '0')}`, `  Spanning tree enabled protocol ${d.stp.mode === 'rapid-pvst' ? 'rstp' : 'ieee'}`, `  Root ID    Priority    ${N.stpPriority(root, v)}`, `             Address     ${N.ciscoMac(N.switchMac(net, root.id))}`];
-    L.push(me ? '             This bridge is the root' : `             Cost        ${rows.find((r) => r.role === 'Root')?.cost ?? 19}`);
+    L.push(me ? '             This bridge is the root' : `             Cost        ${dist}`);
     if (!me) L.push(`             Port        ${rows.findIndex((r) => r.role === 'Root') + 1}(${longIf(rows.find((r) => r.role === 'Root')?.name || '')})`);
     L.push('             Hello Time   2 sec  Max Age 20 sec  Forward Delay 15 sec', '', `  Bridge ID  Priority    ${N.stpPriority(d, v)}  (priority ${d.stp.prio[v] ?? 32768} sys-id-ext ${v})`, `             Address     ${N.ciscoMac(N.switchMac(net, d.id))}`, '             Hello Time   2 sec  Max Age 20 sec  Forward Delay 15 sec', '             Aging Time  20', '', 'Interface        Role Sts Cost      Prio.Nbr Type', '---------------- ---- --- --------- -------- --------------------------------');
     for (const r of rows) L.push(`${pad(shortIf(r.name), 17)}${pad(r.role, 5)}${pad(r.sts, 4)}${pad(r.cost, 10)}${pad(r.prio, 9)}P2p${r.edge ? ' Edge' : ''}`);
@@ -2271,7 +2247,7 @@ export function createCli(net) {
     return L.length ? L : ['No spanning tree instance exists.'];
   }
   function showStpSummary(d) {
-    const roots = Object.keys(d.vlans).map(Number).filter((v) => N.stpRoot(net, v)?.id === d.id);
+    const roots = Object.keys(d.vlans).map(Number).filter((v) => N.stpState(net, v).root[d.id] === d.id);
     return [`Switch is in ${d.stp.mode} mode`, `Root bridge for: ${roots.length ? roots.map((v) => 'VLAN' + String(v).padStart(4, '0')).join(', ') : 'none'}`, `Portfast Default             is ${d.stp.portfastDefault ? 'enabled' : 'disabled'}`, `PortFast BPDU Guard Default  is ${d.stp.bpduDefault ? 'enabled' : 'disabled'}`];
   }
   function showMac(d) {
