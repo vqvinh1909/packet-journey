@@ -48,7 +48,7 @@ Với Lab CLI (`tests/lab.test.js`), MỖI lab trong 101 lab phải: trước kh
 cấu hình chưa đạt; chạy lời giải (`applySolution` — `solution` hoặc `guide`, bước `'@link'` = cắm dây)
 không sinh lỗi CLI `% Invalid/Incomplete/Ambiguous/Unknown`; sau đó `checkLab(lab, net, quizAnswers(lab))`
 đạt toàn bộ. `tests/sandbox.test.js` kiểm chế độ tự dựng mạng (thêm/xoá/nối dây, đổi tên, nhân bản, hoàn tác,
-mạng mẫu, xuất-nhập JSON, nhiệm vụ); `tests/ip6.test.js` + `tests/net6.test.js` kiểm IPv6 (địa chỉ, SLAAC, OSPFv3, ping);
+mạng mẫu, xuất-nhập JSON kể cả file cũ, nhiệm vụ, mẫu theo hãng + Add node, Start/Stop/Wipe + link down); `tests/ip6.test.js` + `tests/net6.test.js` kiểm IPv6 (địa chỉ, SLAAC, OSPFv3, ping);
 `tests/fw.test.js` + `tests/guifw.test.js` kiểm firewall; `tests/l2sec.test.js` kiểm DHCP snooping/DHCP giả, DAI,
 IP Source Guard, login block-for, AAA.
 
@@ -102,7 +102,13 @@ node tools/ui-smoke.cjs   # tự bật server tĩnh, in PASS/FAIL từng mục
   - **🔎 Tìm lab** không dấu nhiều từ khoá (ví dụ "ospf nat"), lọc Chưa xong / Đã xong, mỗi nhóm hiện đã xong/tổng.
   - Topology đánh dấu cổng đang **STP BLOCKING** (✕, rê chuột xem VLAN).
   - **🔗 Nối dây** cho lab kéo-thả (A04): chọn 2 thiết bị rồi chọn cổng; ✂ gỡ dây bằng cách bấm vào dây.
-  - **🧱 Tự dựng mạng riêng (sandbox)**: thêm PC / Server / Switch 2960 / Switch L3 3560 / Router / **firewall 6 hãng** (Cisco ASA, FortiGate, Palo Alto bằng CLI; Sophos, Check Point, pfSense bằng trang quản trị web), nối dây, xoá, kéo thả, ✏ đổi tên, ⧉ nhân bản, ↶ hoàn tác / ↷ làm lại (Ctrl+Z/Ctrl+Y ngoài console), 📐 5 mạng mẫu, cấu hình bằng CLI; tự lưu trong trình duyệt (`pj_sandbox-net`), ⬇ xuất / ⬆ nhập JSON; kèm 6 nhiệm vụ gợi ý lộ trình (LAN → VLAN → định tuyến → DHCP → OSPF/EIGRP).
+  - **🧱 Tự dựng mạng riêng — workspace toàn màn hình kiểu EVE-NG** (`ui/workspace.js`, logic `lab/sandbox.js`):
+    - Canvas lớn: kéo thả thiết bị, kéo nền (hoặc lăn chuột) để cuộn, Ctrl + lăn chuột / nút −, +, ⤢ để phóng to, thu nhỏ, vừa khung.
+    - **Bảng thiết bị chia theo hãng**: Cisco (Router, Switch 2960, Switch L3 3560, ASA), Fortinet (FortiGate), Palo Alto, Sophos, Check Point, pfSense, Host (PC, Server). Bấm hoặc kéo vào canvas → hộp thoại **Add node**: mẫu, số lượng, tiền tố tên, số cổng, xem trước tên cổng theo mẫu (Gi0/0…, port1…, ethernet1/1…, eth1…, em0…).
+    - **Trạng thái thiết bị**: mới thêm thì **tắt** (icon xám); **Start** → log khởi động trong console rồi mới gõ lệnh (icon xanh); **Stop** → mọi cổng down, dây nối tới nó down, mất kết nối (cấu hình đang chạy được giữ). Có ▶ Start all / ■ Stop all.
+    - **Chuột phải** vào thiết bị: Start, Stop, Wipe (về cấu hình trống), Console, Nối dây từ đây, Đổi tên, Nhân bản, Xoá; vào dây: Xoá dây; vào nền: Add node….
+    - **Nhiều cửa sổ console cùng lúc** (nháy đúp thiết bị): kéo, đổi kích thước, thu nhỏ xuống thanh dưới, đóng; mỗi console giữ lịch sử ↑/↓, Tab, `?`, dán nhiều dòng. Sophos / Check Point / pfSense mở trang quản trị web trong cửa sổ.
+    - 🔗 Nối dây, ↶ hoàn tác / ↷ làm lại (Ctrl+Z/Ctrl+Y ngoài console), Delete xoá thiết bị đang chọn, 📐 5 mạng mẫu; tự lưu trong trình duyệt (`pj_sandbox-net`, khung nhìn `pj_sandbox-view`), ⬇ xuất / ⬆ nhập JSON (file cũ chưa có trạng thái bật/tắt vẫn mở được — thiết bị coi như đang chạy); 🧭 6 nhiệm vụ gợi ý lộ trình (LAN → VLAN → định tuyến → DHCP → OSPF/EIGRP).
   - Tiến độ + cấu hình đã gõ được lưu, mở lại vẫn còn; có gợi ý từng bước và lời giải mẫu (nút "▶ Gõ lời giải" chạy `applySolution` ngay trong console).
 - **🛠️ Tự tạo (Builder)**: nhập IP/mask/gateway cho PC1–PC2 (± router) → app tự dựng & chạy mô phỏng ping, đúng cho 3 trường hợp: cùng mạng, khác mạng (gateway đúng), và sai gateway (ping hỏng).
 - **✏️ Vẽ mạng (Canvas)**: kéo-thả thêm PC/Switch/Router, nối dây, cấu hình IP/gateway từng thiết bị, rồi chọn 2 PC bấm "Chạy ping" → app tìm đường (BFS) và mô phỏng gói tin trên topology BẤT KỲ bạn vẽ (ARP, định tuyến qua router, TTL−1), báo lỗi rõ nếu sai gateway/không nối dây/khác subnet.
@@ -145,7 +151,8 @@ lab/        net (máy mô phỏng mạng tính từ cấu hình), net6 + ip6 (IP
             kit (helper soạn lab), sandbox (tự dựng mạng)
 tools/      ui-smoke.cjs (kiểm tra giao diện bằng Playwright, tuỳ chọn)
 scenarios/  s01..s08 (xem danh sách dưới)
-ui/         topology, controls, layerstack, fieldtree, hexview, explain, i18n, store, app
+ui/         topology, controls, layerstack, fieldtree, hexview, explain, i18n, store, app,
+            lab (Lab CLI), workspace (tự dựng mạng kiểu EVE-NG), topo (vẽ thiết bị dùng chung), guifw (trang web firewall)
 i18n/       vi, en  (chuỗi giao diện)
 tests/      *.test.js  (node --test)
 styles/     theme (biến màu, sáng/tối), app (bố cục)

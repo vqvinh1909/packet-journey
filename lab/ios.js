@@ -952,7 +952,8 @@ export function createCli(net) {
     const s = sess(id);
     const line = String(raw ?? '');
     let res;
-    if (d.type === 'pc' || d.type === 'server') res = s.pw === 'ssh' ? sshPw(d, s, line) : pcExec(d, line.trim());
+    if (d.off) res = R(['% Thiết bị đang TẮT — chuột phải → Start (hoặc ▶ Start all) để bật.']);
+    else if (d.type === 'pc' || d.type === 'server') res = s.pw === 'ssh' ? sshPw(d, s, line) : pcExec(d, line.trim());
     else if (VENDOR[d.os]) res = VENDOR[d.os].exec(d, s, line.trim());
     else if (d.rommon) res = R(['(Lab: thiết bị đang ở ROMMON vì không có file IOS khởi động được — bấm "↺ Làm lại" để khôi phục lab.)']);
     else if (s.ask) {
@@ -3008,6 +3009,7 @@ export function createCli(net) {
   function complete(id, line0) {
     const d = net.devices[id];
     const s = sess(id);
+    if (d.off) return null;
     if (VENDOR[d.os]) return VENDOR[d.os].complete?.(d, s, line0) ?? null; // FortiOS / PAN-OS có cây lệnh riêng
     const m = String(line0).match(/^(.*?)(\S*)$/);
     const head = m[1], part = m[2].toLowerCase();

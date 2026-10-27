@@ -1,0 +1,63 @@
+// ui/topo.js — phần vẽ dùng chung cho Lab CLI (ui/lab.js) và workspace tự dựng mạng (ui/workspace.js):
+// biểu tượng thiết bị SVG tự vẽ, cổng STP BLOCKING, trạng thái cổng, phân loại dòng console để tô màu.
+
+import * as N from '../lab/net.js';
+
+export const SVG = 'http://www.w3.org/2000/svg';
+export const isHost = (d) => d.type === 'pc' || d.type === 'server';
+export function el(name, attrs) { const n = document.createElementNS(SVG, name); for (const k in attrs) n.setAttribute(k, attrs[k]); return n; }
+export function esc(s) { return String(s ?? '').replace(/[&<>"]/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[m])); }
+
+/** Vẽ biểu tượng thiết bị d (toạ độ d.x, d.y) vào nhóm SVG g. */
+export function drawGlyph(g, d) {
+  const { x, y } = d;
+  if (d.fw && d.os) {
+    // firewall: bức tường gạch (router chạy Zone-Based Firewall vẫn vẽ như router)
+    g.appendChild(el('rect', { x: x - 24, y: y - 18, width: 48, height: 36, rx: 4, class: 'lab-g fw' }));
+    g.appendChild(el('path', { d: `M${x - 24} ${y - 6}h48 M${x - 24} ${y + 6}h48 M${x - 8} ${y - 18}v12 M${x + 10} ${y - 18}v12 M${x} ${y - 6}v12 M${x - 16} ${y - 6}v12 M${x + 16} ${y - 6}v12 M${x - 8} ${y + 6}v12 M${x + 10} ${y + 6}v12`, class: 'lab-gl fwl' }));
+  } else if (d.type === 'router') {
+    g.appendChild(el('circle', { cx: x, cy: y, r: 22, class: 'lab-g router' }));
+    for (const [ax, ay, bx, by] of [[-11, -11, 11, 11], [11, -11, -11, 11]]) g.appendChild(el('line', { x1: x + ax, y1: y + ay, x2: x + bx, y2: y + by, class: 'lab-gl' }));
+    for (const [px, py] of [[-11, -11], [11, 11], [11, -11], [-11, 11]]) g.appendChild(el('circle', { cx: x + px, cy: y + py, r: 2.6, class: 'lab-gd' }));
+  } else if (d.type === 'switch') {
+    g.appendChild(el('rect', { x: x - 28, y: y - 16, width: 56, height: 32, rx: 6, class: 'lab-g switch' + (d.model === '3560' ? ' l3' : '') }));
+    g.appendChild(el('path', { d: `M${x - 16} ${y - 5}h28m-6 -5l6 5l-6 5 M${x + 16} ${y + 6}h-28m6 -5l-6 5l6 5`, class: 'lab-gl' }));
+  } else if (d.type === 'server') {
+    g.appendChild(el('rect', { x: x - 15, y: y - 22, width: 30, height: 44, rx: 4, class: 'lab-g host' }));
+    for (const yy of [-12, -2, 8]) g.appendChild(el('line', { x1: x - 9, y1: y + yy, x2: x + 9, y2: y + yy, class: 'lab-gl' }));
+  } else {
+    g.appendChild(el('rect', { x: x - 20, y: y - 18, width: 40, height: 27, rx: 3, class: 'lab-g host' }));
+    g.appendChild(el('path', { d: `M${x - 9} ${y + 17}h18 M${x} ${y + 9}v8`, class: 'lab-gl' }));
+  }
+}
+/** Cổng đang bật về mặt quản trị (không shutdown) — để tô dây "admin down". */
+export function adminUp(net, dev, port) {
+  const d = net.devices[dev];
+  if (isHost(d)) return true;
+  if (d.type === 'switch') return !d.ports[port]?.shutdown;
+  return !d.ifaces[port]?.shutdown;
+}
+/** Lớp màu cho một dòng output console. */
+export function classifyLine(l) {
+  if (/^ERROR:/.test(l) || /^\s*\^$/.test(l) || /^% (Invalid|Incomplete|Ambiguous|Unknown|Bad|Login|Auth)/.test(l) || l.startsWith('Command rejected') || /^% (Access VLAN|Please|Connection)/.test(l) || l === 'Invalid Command.' || l.startsWith('VTP VLAN configuration not allowed')) return 'err';
+  if (/^%[A-Z]+-\d-/.test(l)) return 'log';
+  if (/^(Reply from .* bytes=|!!!!!|\.!!!!|Success rate is [1-9])/.test(l) || l.includes('...Open')) return 'good';
+  if (l.startsWith('[Lab]') || l.startsWith('(Lab:')) return 'note';
+  return '';
+}
+
+/** Cổng switch đang STP BLOCKING: Map 'dev|cổng vật lý' → [VLAN...] (để đánh dấu trên topology). */
+export function stpBlocked(net) {
+  const out = new Map();
+  const vlans = new Set();
+  for (const d of Object.values(net.devices)) if (d.type === 'switch') for (const v of Object.keys(d.vlans)) vlans.add(+v);
+  if (vlans.size > 24) return out; // quá nhiều VLAN: bỏ qua phần trang trí này cho nhẹ
+  for (const v of [...vlans].sort((x, y) => x - y)) {
+    for (const [k, P] of Object.entries(N.stpState(net, v).ports)) {
+      if (P.sts !== 'BLK') continue;
+      const dev = k.slice(0, k.indexOf('|'));
+      for (const m of P.members) { const key = dev + '|' + m; if (!out.has(key)) out.set(key, []); out.get(key).push(v); }
+    }
+  }
+  return out;
+}

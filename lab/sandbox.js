@@ -1,49 +1,116 @@
 // lab/sandbox.js — chế độ "🧱 Tự dựng mạng riêng": thêm/xoá thiết bị, nối/gỡ dây, xuất/nhập
-// JSON và vài nhiệm vụ hướng dẫn chấm tự động trên mạng bất kỳ. Phần giao diện ở ui/lab.js.
+// JSON, bật/tắt/wipe thiết bị (kiểu EVE-NG) và vài nhiệm vụ hướng dẫn chấm tự động trên mạng bất kỳ.
+// Phần giao diện (workspace toàn màn hình) ở ui/workspace.js.
 
 import * as N from './net.js';
 import { fa } from './kit.js';
 
-/** Loại thiết bị được thêm: nhãn nút, tiền tố tên, hàm tạo. */
+const range = (n, f) => Array.from({ length: n }, (_, i) => f(i));
+/**
+ * Mẫu thiết bị (kiểu "template" của EVE-NG): hãng, nhãn, tiền tố tên, số cổng và cách đặt tên cổng, hàm tạo.
+ * ports = null: số cổng cố định (PC/Server một cổng Fa0). make(id, name, x, y, danhSáchCổng).
+ */
 export const SANDBOX_KINDS = {
-  pc: { label: '🖥 PC', prefix: 'PC', make: (id, name, x, y) => N.pc(id, name, x, y) },
-  server: { label: '🗄 Server', prefix: 'SRV', make: (id, name, x, y) => N.server(id, name, x, y) },
-  sw2960: { label: '⇄ Switch 2960', prefix: 'SW', make: (id, name, x, y) => N.sw(id, name, x, y, fa(24, ['g0/1', 'g0/2'])) },
-  sw3560: { label: '⇶ Switch L3 3560', prefix: 'L3SW', make: (id, name, x, y) => { const d = N.sw(id, name, x, y, fa(24, ['g0/1', 'g0/2'])); d.model = '3560'; return d; } },
-  router: { label: '⛁ Router', prefix: 'R', make: (id, name, x, y) => N.router(id, name, x, y, ['g0/0', 'g0/1', 'g0/2', 's0/0/0', 's0/0/1']) },
-  asa: { label: '🛡 Firewall ASA', prefix: 'ASA', make: (id, name, x, y) => N.firewall(id, name, x, y, ['g1/1', 'g1/2', 'g1/3', 'g1/4'], 'asa') },
-  fortios: { label: '🛡 FortiGate', prefix: 'FGT', make: (id, name, x, y) => N.firewall(id, name, x, y, ['port1', 'port2', 'port3', 'port4'], 'fortios') },
-  panos: { label: '🛡 Palo Alto', prefix: 'PA', make: (id, name, x, y) => N.firewall(id, name, x, y, ['e1/1', 'e1/2', 'e1/3', 'e1/4'], 'panos') },
-  sophos: { label: '🛡 Sophos (web)', prefix: 'XG', make: (id, name, x, y) => N.firewall(id, name, x, y, ['port1', 'port2', 'port3', 'port4'], 'sophos') },
-  checkpoint: { label: '🛡 Check Point (web)', prefix: 'CP', make: (id, name, x, y) => N.firewall(id, name, x, y, ['eth1', 'eth2', 'eth3', 'eth4'], 'checkpoint') },
-  pfsense: { label: '🛡 pfSense (web)', prefix: 'PFS', make: (id, name, x, y) => N.firewall(id, name, x, y, ['em0', 'em1', 'em2', 'em3'], 'pfsense') },
+  router: { vendor: 'cisco', label: 'Router', prefix: 'R', ports: { def: 3, min: 1, max: 8, unit: 'cổng Gigabit (+ 2 Serial)', names: (n) => [...range(n, (i) => `g0/${i}`), 's0/0/0', 's0/0/1'] }, make: (id, name, x, y, ps) => N.router(id, name, x, y, ps) },
+  sw2960: { vendor: 'cisco', label: 'Switch 2960', prefix: 'SW', ports: { def: 24, choices: [8, 16, 24, 48], unit: 'cổng FastEthernet (+ 2 Gigabit uplink)', names: (n) => fa(n, ['g0/1', 'g0/2']) }, make: (id, name, x, y, ps) => N.sw(id, name, x, y, ps) },
+  sw3560: { vendor: 'cisco', label: 'Switch L3 3560', prefix: 'L3SW', ports: { def: 24, choices: [8, 16, 24, 48], unit: 'cổng FastEthernet (+ 2 Gigabit uplink)', names: (n) => fa(n, ['g0/1', 'g0/2']) }, make: (id, name, x, y, ps) => { const d = N.sw(id, name, x, y, ps); d.model = '3560'; return d; } },
+  asa: { vendor: 'cisco', label: 'ASA Firewall', prefix: 'ASA', ports: { def: 4, min: 2, max: 8, unit: 'cổng Gigabit', names: (n) => range(n, (i) => `g1/${i + 1}`) }, make: (id, name, x, y, ps) => N.firewall(id, name, x, y, ps, 'asa') },
+  fortios: { vendor: 'fortinet', label: 'FortiGate', prefix: 'FGT', ports: { def: 4, min: 2, max: 10, unit: 'cổng (port1…)', names: (n) => range(n, (i) => `port${i + 1}`) }, make: (id, name, x, y, ps) => N.firewall(id, name, x, y, ps, 'fortios') },
+  panos: { vendor: 'paloalto', label: 'Palo Alto VM', prefix: 'PA', ports: { def: 4, min: 2, max: 10, unit: 'cổng (ethernet1/1…)', names: (n) => range(n, (i) => `e1/${i + 1}`) }, make: (id, name, x, y, ps) => N.firewall(id, name, x, y, ps, 'panos') },
+  sophos: { vendor: 'sophos', label: 'Sophos Firewall', prefix: 'XG', ports: { def: 4, min: 2, max: 8, unit: 'cổng (Port1…)', names: (n) => range(n, (i) => `port${i + 1}`) }, make: (id, name, x, y, ps) => N.firewall(id, name, x, y, ps, 'sophos') },
+  checkpoint: { vendor: 'checkpoint', label: 'Check Point Gateway', prefix: 'CP', ports: { def: 4, min: 2, max: 8, unit: 'cổng (eth1…)', names: (n) => range(n, (i) => `eth${i + 1}`) }, make: (id, name, x, y, ps) => N.firewall(id, name, x, y, ps, 'checkpoint') },
+  pfsense: { vendor: 'pfsense', label: 'pfSense', prefix: 'PFS', ports: { def: 4, min: 2, max: 8, unit: 'cổng (em0…)', names: (n) => range(n, (i) => `em${i}`) }, make: (id, name, x, y, ps) => N.firewall(id, name, x, y, ps, 'pfsense') },
+  pc: { vendor: 'host', label: 'PC', prefix: 'PC', ports: null, make: (id, name, x, y) => N.pc(id, name, x, y) },
+  server: { vendor: 'host', label: 'Server', prefix: 'SRV', ports: null, make: (id, name, x, y) => N.server(id, name, x, y) },
 };
+/** Bảng thiết bị chia theo hãng (thứ tự hiển thị). */
+export const SANDBOX_VENDORS = [
+  { id: 'cisco', name: 'Cisco', kinds: ['router', 'sw2960', 'sw3560', 'asa'] },
+  { id: 'fortinet', name: 'Fortinet', kinds: ['fortios'] },
+  { id: 'paloalto', name: 'Palo Alto', kinds: ['panos'] },
+  { id: 'sophos', name: 'Sophos', kinds: ['sophos'] },
+  { id: 'checkpoint', name: 'Check Point', kinds: ['checkpoint'] },
+  { id: 'pfsense', name: 'pfSense', kinds: ['pfsense'] },
+  { id: 'host', name: 'Host', kinds: ['pc', 'server'] },
+];
 const TYPES = ['pc', 'server', 'switch', 'router'];
-export const SANDBOX_VIEW = { w: 1000, h: 440 };
+/** Khung làm việc (toạ độ thế giới) — rộng để workspace cuộn/phóng to được. */
+export const SANDBOX_VIEW = { w: 2400, h: 1600 };
+
+/** Số cổng hợp lệ của mẫu (giá trị lạ → mặc định). */
+export function portCount(kind, n) {
+  const P = SANDBOX_KINDS[kind]?.ports;
+  if (!P) return 1;
+  n = Math.round(+n);
+  if (P.choices) return P.choices.includes(n) ? n : P.def;
+  return Number.isFinite(n) ? Math.max(P.min, Math.min(P.max, n)) : P.def;
+}
+/** Tên cổng của mẫu với n cổng (để xem trước trong hộp thoại Add node). */
+export function portNames(kind, n) { const P = SANDBOX_KINDS[kind]?.ports; return P ? P.names(portCount(kind, n)) : ['fa0']; }
+/** Số cổng theo nghĩa của mẫu (router: số cổng Gigabit, switch: số cổng FastEthernet — không tính 2 Serial / 2 uplink). */
+export function portCountOf(d) { const k = kindOf(d), n = physPorts(d).length; return k === 'router' || k === 'sw2960' || k === 'sw3560' ? n - 2 : n; }
+/** Mẫu của một thiết bị (kể cả thiết bị trong file JSON cũ chưa ghi "kind"). */
+export function kindOf(d) {
+  if (d.kind && SANDBOX_KINDS[d.kind]) return d.kind;
+  if (d.type === 'switch') return d.model === '3560' ? 'sw3560' : 'sw2960';
+  return SANDBOX_KINDS[d.os] ? d.os : d.type;
+}
 
 export function emptySandbox() { return N.makeNet([], []); }
 
-/** Thêm thiết bị loại `kind` tại (x, y) — tự đặt id/tên không trùng. Trả id. */
-export function addDevice(net, kind, x, y) {
+/**
+ * Thêm thiết bị mẫu `kind` tại (x, y) — tự đặt id/tên không trùng (tiền tố + số). Trả id.
+ * o = { prefix, ports (số cổng), off (true = mới thêm ở trạng thái TẮT, như node EVE-NG) }.
+ */
+export function addDevice(net, kind, x, y, o = {}) {
   const k = SANDBOX_KINDS[kind];
   if (!k) throw new Error('Loại thiết bị không hợp lệ: ' + kind);
+  const prefix = o.prefix || k.prefix;
+  const idp = prefix.toLowerCase().replace(/[^a-z0-9_-]/g, '') || 'dev';
   let i = 1;
   const names = new Set(Object.values(net.devices).map((d) => d.name.toUpperCase()));
-  while (net.devices[k.prefix.toLowerCase() + i] || names.has(k.prefix + i)) i++;
-  const id = k.prefix.toLowerCase() + i;
-  net.devices[id] = k.make(id, k.prefix + i, clamp(x, 40, SANDBOX_VIEW.w - 40), clamp(y, 40, SANDBOX_VIEW.h - 50));
+  while (net.devices[idp + i] || names.has((prefix + i).toUpperCase())) i++;
+  const id = idp + i;
+  const d = k.make(id, prefix + i, clamp(x, 40, SANDBOX_VIEW.w - 40), clamp(y, 40, SANDBOX_VIEW.h - 50), k.ports ? k.ports.names(portCount(kind, o.ports ?? k.ports.def)) : null);
+  d.kind = kind;
+  if (o.off) d.off = true;
+  net.devices[id] = d;
   return id;
+}
+/** Hộp thoại "Add node": thêm `count` thiết bị cùng mẫu, xếp thành hàng từ (x, y). Trả { ids } hoặc { error }. */
+export function addNodes(net, kind, o = {}, x = 120, y = 100) {
+  if (!SANDBOX_KINDS[kind]) return { error: 'Chọn mẫu thiết bị' };
+  const count = Math.round(+(o.count ?? 1));
+  if (!(count >= 1 && count <= 20)) return { error: 'Số lượng từ 1 đến 20' };
+  const prefix = String(o.prefix ?? '').trim() || SANDBOX_KINDS[kind].prefix;
+  if (!/^[A-Za-z][A-Za-z0-9_-]{0,19}$/.test(prefix)) return { error: 'Tiền tố tên: bắt đầu bằng chữ cái, chỉ gồm chữ, số, "-" hoặc "_" (tối đa 20 ký tự)' };
+  const ids = [];
+  for (let i = 0; i < count; i++) ids.push(addDevice(net, kind, x + (i % 6) * 120, y + Math.floor(i / 6) * 110, { prefix, ports: o.ports, off: o.off ?? true }));
+  return { ids };
 }
 /** Vị trí trống gợi ý cho thiết bị mới (lưới, tránh chồng lên thiết bị có sẵn). */
 export function freeSpot(net) {
   const ds = Object.values(net.devices);
-  for (let row = 0; row < 5; row++) {
+  for (let row = 0; row < 12; row++) {
     for (let col = 0; col < 8; col++) {
       const x = 90 + col * 115, y = 70 + row * 85;
       if (ds.every((d) => Math.hypot(d.x - x, d.y - y) > 70)) return { x, y };
     }
   }
   return { x: 500, y: 220 };
+}
+/** Chỗ trống gần (x, y) đủ cho `count` thiết bị xếp hàng như addNodes (6 cột, cách 120 × 110). */
+export function freeSpotNear(net, x, y, count = 1) {
+  const ds = Object.values(net.devices);
+  const free = (px, py) => ds.every((d) => Math.hypot(d.x - px, d.y - py) > 110);
+  const fits = (px, py) => Array.from({ length: count }, (_, i) => [px + (i % 6) * 120, py + Math.floor(i / 6) * 110]).every(([a, b]) => free(a, b));
+  for (let r = 0; r < 30; r++) {
+    for (let dx = -r; dx <= r; dx++) {
+      for (const dy of [-r, r]) { const px = x + dx * 60, py = y + dy * 55; if (fits(px, py)) return { x: px, y: py }; }
+    }
+    for (let dy = -r + 1; dy <= r - 1; dy++) for (const dx of [-r, r]) { const px = x + dx * 60, py = y + dy * 55; if (fits(px, py)) return { x: px, y: py }; }
+  }
+  return { x, y };
 }
 export function moveDevice(net, id, x, y) {
   const d = net.devices[id];
@@ -54,6 +121,65 @@ export function moveDevice(net, id, x, y) {
 export function removeDevice(net, id) {
   delete net.devices[id];
   net.links = net.links.filter((l) => l.a !== id && l.b !== id);
+}
+
+// ---------------------------------------------------------------- bật / tắt / wipe (như node EVE-NG)
+/** Thiết bị đang tắt? (file JSON cũ không có trường "off" → coi như đang chạy) */
+export const isOff = (d) => !!d?.off;
+/** Bật thiết bị; trả các dòng log khởi động để console hiện trước khi cho gõ lệnh. */
+export function startDevice(net, id) {
+  const d = net.devices[id];
+  if (!d) return [];
+  d.off = false;
+  return bootLog(d);
+}
+/** Tắt thiết bị: mọi cổng xuống (dây nối tới nó cũng down), xoá bảng động; cấu hình đang chạy được giữ. */
+export function stopDevice(net, id) {
+  const d = net.devices[id];
+  if (!d) return;
+  d.off = true;
+  d.arp = {};
+  if (d.macTable) d.macTable = [];
+  if (d.natTable) d.natTable = [];
+  if (d.fw?.conns) d.fw.conns = [];
+  if (d.snoop?.bindings) d.snoop.bindings = [];
+  if (d.dhcp?.bindings) d.dhcp.bindings = [];
+}
+/** Start all / Stop all. Trả danh sách id đã đổi trạng thái. */
+export function powerAll(net, on) {
+  const ids = Object.values(net.devices).filter((d) => isOff(d) === on).map((d) => d.id);
+  for (const id of ids) (on ? startDevice : stopDevice)(net, id);
+  return ids;
+}
+/** Wipe: đưa thiết bị về cấu hình trống (giữ id, tên, vị trí, cổng nên dây vẫn còn) và để ở trạng thái TẮT. */
+export function wipeDevice(net, id) {
+  const d = net.devices[id];
+  if (!d) return false;
+  const kind = kindOf(d);
+  const k = SANDBOX_KINDS[kind];
+  const fresh = k.make(d.id, d.name, d.x, d.y, k.ports ? physPorts(d) : null);
+  fresh.kind = kind;
+  fresh.off = true;
+  net.devices[id] = fresh;
+  return true;
+}
+/** Log khởi động ngắn (tự soạn, mô phỏng) theo loại thiết bị. */
+export function bootLog(d) {
+  const ports = physPorts(d).length;
+  switch (kindOf(d)) {
+    case 'router': case 'sw2960': case 'sw3560':
+      return ['Bootstrap: kiểm tra bộ nhớ ... OK', 'Nạp hệ điều hành từ flash ... ########## [OK]', `Phát hiện ${ports} cổng mạng`, 'Đọc startup-config từ NVRAM ... ' + (d.startupCfg ? 'có cấu hình' : 'trống'), '%SYS-5-RESTART: System restarted', '', 'Press RETURN to get started.'];
+    case 'asa':
+      return ['Bootstrap: kiểm tra bộ nhớ ... OK', 'Nạp hệ điều hành firewall ... ########## [OK]', `Phát hiện ${ports} cổng mạng`, 'Khởi động bảng phiên stateful ... OK', '', 'Type help or \'?\' for a list of available commands.'];
+    case 'fortios':
+      return ['FortiGate VM (mô phỏng) đang khởi động ...', 'Khởi tạo bảng phiên và chính sách firewall ... OK', `Phát hiện ${ports} cổng: port1 … port${ports}`, 'System is started.', '', `${d.name} login: admin (lab tự đăng nhập)`];
+    case 'panos':
+      return ['PAN-OS VM (mô phỏng) đang khởi động ...', 'Khởi động management plane ... OK', 'Khởi động data plane ... OK', 'Auto-commit running config ... OK', '', 'login: admin (lab tự đăng nhập)'];
+    case 'sophos': case 'checkpoint': case 'pfsense':
+      return [`${SANDBOX_KINDS[kindOf(d)].label} (mô phỏng) đang khởi động ...`, `Phát hiện ${ports} cổng mạng`, 'Dịch vụ firewall ... OK', 'Trang quản trị web sẵn sàng.'];
+    default:
+      return ['Đang khởi động máy trạm ...', 'Card mạng Fa0 ... OK', 'Sẵn sàng.'];
+  }
 }
 
 /** Cổng vật lý của thiết bị (không tính port-channel / subinterface / loopback / tunnel). */
@@ -94,13 +220,13 @@ export function renameDevice(net, id, name) {
 export function duplicateDevice(net, id) {
   const src = net.devices[id];
   if (!src) return null;
-  const kind = src.type === 'switch' ? (src.model === '3560' ? 'sw3560' : 'sw2960') : SANDBOX_KINDS[src.os] ? src.os : src.type;
-  const nid = addDevice(net, kind, src.x + 60, src.y + 50);
+  const kind = kindOf(src);
+  const nid = addDevice(net, kind, src.x + 60, src.y + 50, { ports: portCountOf(src), off: isOff(src) });
   const fresh = net.devices[nid];
   // FortiGate / Palo Alto / firewall web giữ cấu hình (kể cả IP) trong model riêng của hãng → bản sao để trống
   if (src.os && src.os !== 'asa') return nid;
   const d = N.cloneNet({ devices: { x: src }, links: [] }).devices.x;
-  Object.assign(d, { id: nid, name: fresh.name, x: fresh.x, y: fresh.y, arp: {} });
+  Object.assign(d, { id: nid, name: fresh.name, x: fresh.x, y: fresh.y, arp: {}, kind, off: fresh.off });
   if (isHostLike(d)) { d.ip = ''; d.gateway = ''; }
   for (const f of Object.values(d.ifaces || {})) f.ip = null;
   for (const f of Object.values(d.svis || {})) f.ip = null;
@@ -189,10 +315,10 @@ const sameNet = (x, y) => x.prefix === y.prefix && N.netOf(x.ip, x.prefix) === N
 export const SANDBOX_LAB = {
   id: 'SBX', group: 'sbx', kind: 'sandbox', level: 1, lesson: 'Chế độ tự do',
   title: 'Tự dựng mạng riêng (sandbox)',
-  story: 'Thêm PC / Server / Switch 2960 / Switch L3 3560 / Router / firewall (Cisco ASA, FortiGate, Palo Alto, Sophos, Check Point, pfSense) bằng thanh công cụ, kéo thả để sắp xếp, 🔗 Nối dây (chọn 2 thiết bị rồi chọn cổng), bấm vào thiết bị để mở console và cấu hình như thiết bị thật (Sophos / Check Point / pfSense mở trang quản trị web). Mạng được tự lưu trong trình duyệt; dùng ⬇ Xuất / ⬆ Nhập JSON để chia sẻ. Các nhiệm vụ bên phải chỉ là gợi ý lộ trình — mạng của bạn, luật của bạn.',
+  story: 'Thêm thiết bị từ bảng bên trái (chia theo hãng) hoặc chuột phải vào nền → Add node; thiết bị mới ở trạng thái TẮT — chuột phải → Start (hoặc ▶ Start all). 🔗 Nối dây: chọn 2 thiết bị rồi chọn cổng. Nháy đúp thiết bị để mở console (nhiều console cùng lúc, kéo/đổi kích thước được); Sophos / Check Point / pfSense mở trang quản trị web. Mạng được tự lưu trong trình duyệt; ⬇ Xuất / ⬆ Nhập JSON để chia sẻ. Các nhiệm vụ chỉ là gợi ý lộ trình — mạng của bạn, luật của bạn.',
   build: emptySandbox,
   tasks: [
-    { text: 'Thêm ít nhất 2 PC và 1 switch, mọi PC đều đã cắm dây', verify: 'Thanh công cụ: 🖥 PC, ⇄ Switch, 🔗 Nối dây', check: (a) => { const ds = Object.values(a.net.devices); const pcs = ds.filter((d) => d.type === 'pc'); return pcs.length >= 2 && ds.some((d) => d.type === 'switch') && pcs.every((d) => N.linkAt(a.net, d.id, 'fa0')); } },
+    { text: 'Thêm ít nhất 2 PC và 1 switch, mọi PC đều đã cắm dây', verify: 'Bảng thiết bị: Host → PC, Cisco → Switch; 🔗 Nối dây', check: (a) => { const ds = Object.values(a.net.devices); const pcs = ds.filter((d) => d.type === 'pc'); return pcs.length >= 2 && ds.some((d) => d.type === 'switch') && pcs.every((d) => N.linkAt(a.net, d.id, 'fa0')); } },
     { text: 'Đặt IP cho 2 máy cùng subnet và ping được nhau', verify: 'PC: ipconfig <IP> <mask> <gateway> → ping <IP>', check: (a) => pairs(a, sameNet) },
     { text: 'Có VLAN khác VLAN 1 trên switch và ít nhất 1 cổng access (đang cắm dây) thuộc VLAN đó', verify: 'show vlan brief', check: (a) => Object.values(a.net.devices).some((d) => d.type === 'switch' && Object.entries(d.ports).some(([p, c]) => c.modeSet && c.mode === 'access' && c.vlan !== 1 && d.vlans[c.vlan] && N.linkAt(a.net, d.id, p))) },
     { text: 'Định tuyến: một máy ping được máy ở subnet KHÁC (qua router hoặc switch L3)', verify: 'ping ; tracert', check: (a) => pairs(a, (x, y) => !sameNet(x, y)) },
@@ -204,7 +330,8 @@ export const SANDBOX_LAB = {
     'Thêm router, nối G0/0 vào switch: enable → conf t → interface g0/0 → ip address 192.168.1.1 255.255.255.0 → no shutdown. Thêm subnet thứ 2 trên G0/1.',
     'DHCP trên router: ip dhcp pool LAN → network 192.168.1.0 255.255.255.0 → default-router 192.168.1.1 ; PC: ipconfig /renew',
     'Hai router nối nhau qua G0/2 (hoặc Serial) rồi: router ospf 1 → network 0.0.0.0 255.255.255.255 area 0',
-    'Kéo thiết bị để sắp xếp; chọn thiết bị rồi bấm 🗑 để xoá; ✂ Gỡ dây rồi bấm vào dây cần gỡ.',
+    'Kéo thiết bị để sắp xếp; chuột phải vào thiết bị: Start / Stop / Wipe / Console / Đổi tên / Nhân bản / Xoá; chuột phải vào dây: Xoá dây.',
+    'Thiết bị đang tắt thì mọi dây nối tới nó đều down — nhớ Start trước khi ping.',
   ],
   solution: [],
 };
