@@ -61,10 +61,12 @@ server.listen(8799, '127.0.0.1', async () => {
   await p.selectOption('#ws-tpl', 'lan');
   await p.dblclick('.ws-node[data-id="pc1"]');
   const pcIn = '.ws-win[data-id="pc1"] .lab-in';
-  await p.fill(pcIn, 'ipconfig 10.0.0.1 255.255.255.0'); await p.press(pcIn, 'Enter');
+  ok((await p.textContent('.ws-win[data-id="pc1"] .lab-prompt')).trim() === 'PC1>', 'workspace: PC mặc định là VPCS (dấu nhắc PC1>)');
+  await p.fill(pcIn, 'ip 10.0.0.1/24'); await p.press(pcIn, 'Enter');
   ok((await wsText('.ws-svg')).includes('10.0.0.1/24'), 'workspace: console nổi gõ lệnh → topology cập nhật');
+  ok((await wsText('.ws-win[data-id="pc1"]')).includes('PC1 : 10.0.0.1 255.255.255.0'), 'workspace: VPCS "ip 10.0.0.1/24" in đúng kiểu VPCS');
   await p.press(pcIn, 'ArrowUp');
-  ok((await p.inputValue(pcIn)).startsWith('ipconfig'), 'workspace: lịch sử ↑ trong console');
+  ok((await p.inputValue(pcIn)).startsWith('ip 10.0.0.1'), 'workspace: lịch sử ↑ trong console');
   await p.fill(pcIn, '');
   await p.click('#ws-undo');
   ok(!(await wsText('.ws-svg')).includes('10.0.0.1/24'), 'workspace: hoàn tác lệnh CLI');
@@ -107,13 +109,13 @@ server.listen(8799, '127.0.0.1', async () => {
   await p.click('.ws-menu button:has-text("Start capture")');
   const cw = `.ws-win[data-id="cap:${capLink}"]`;
   ok(await p.isVisible(cw) && !!(await p.$('.ws-cap-ico')), 'Start capture: mở cửa sổ capture + kính lúp trên dây');
-  for (const [dev, c] of [['pc3', 'ipconfig 10.0.0.3 255.255.255.0'], ['pc2', 'ipconfig 10.0.0.2 255.255.255.0'], ['pc2', 'ping 10.0.0.3']]) {
+  for (const [dev, c] of [['pc3', 'ip 10.0.0.3/24'], ['pc2', 'ip 10.0.0.2/24'], ['pc2', 'ping 10.0.0.3']]) {
     await p.dblclick(`.ws-node[data-id="${dev}"]`);
     const i = `.ws-win[data-id="${dev}"] .lab-in`;
     await p.fill(i, c); await p.press(i, 'Enter');
   }
   const capRows = await p.$$eval(`${cw} tbody tr`, (x) => x.map((e) => e.textContent));
-  ok(capRows.some((r) => r.includes('Who has 10.0.0.3? Tell 10.0.0.2')) && capRows.filter((r) => r.includes('Echo (ping) request')).length === 4, 'capture: ARP + 4 Echo request của lệnh ping');
+  ok(capRows.some((r) => r.includes('Who has 10.0.0.3? Tell 10.0.0.2')) && capRows.filter((r) => r.includes('Echo (ping) request')).length === 5, 'capture: ARP + 5 Echo request của lệnh ping (VPCS gửi 5 gói)');
   await p.fill(`${cw} .ws-cap-f`, 'arp'); await p.press(`${cw} .ws-cap-f`, 'Enter');
   ok((await p.$$eval(`${cw} tbody tr`, (x) => x.every((e) => e.textContent.includes('ARP')))) && (await p.textContent(`${cw} .ws-cap-foot`)).startsWith('Đang hiển thị 2 /'), 'capture: bộ lọc "arp"');
   await p.click(`${cw} .ws-wn`); // đưa cửa sổ capture lên trên console
@@ -236,6 +238,93 @@ server.listen(8799, '127.0.0.1', async () => {
   await p.click('#btn-progress');
   ok((await p.textContent('#pg-body')).includes('Phá mạng ngẫu nhiên: 1 lượt'), 'Tiến độ: tóm tắt phá mạng (lưu trong xuất/nhập tiến độ)');
   await p.click('.modal .modal-x');
+  // 11) 🧮 Luyện subnet: trả lời đúng (dạng N host), sai → giải từng bước, bộ 10 câu tính giờ, thống kê, tiến độ
+  await p.click('#btn-subnet');
+  await p.selectOption('#sn-kind', 'hosts');
+  const snTxt = await p.textContent('.sn-q');
+  const need = +snTxt.match(/ít nhất ([\d.]+) host/)[1].replace(/\./g, '');
+  let hb = 2; while (2 ** hb - 2 < need) hb++;
+  await p.fill('[data-k="prefix"]', '/' + (32 - hb));
+  await p.press('[data-k="prefix"]', 'Enter');
+  ok((await p.textContent('.sn-verdict')).includes('Đúng'), 'subnet: trả lời đúng dạng N host → ✅ (' + need + ' host → /' + (32 - hb) + ')');
+  await p.press('#sn-check', 'Enter');
+  await p.selectOption('#sn-kind', 'info');
+  await p.click('#sn-skip');
+  ok((await p.textContent('.sn-verdict')).includes('Chưa đúng') && (await p.textContent('.sn-steps pre')).includes('Bước nhảy'), 'subnet: bỏ trống → ❌ + giải từng bước (bước nhảy, nhị phân)');
+  await p.click('#sn-run');
+  await p.waitForTimeout(300);
+  ok((await p.textContent('#sn-clock')).startsWith('Câu 1/10'), 'subnet: chế độ 10 câu tính giờ có đồng hồ');
+  for (let i = 0; i < 10; i++) { await p.click('#sn-skip'); await p.click('#sn-check'); }
+  ok((await p.textContent('.sn-verdict')).includes('Hoàn thành 10 câu'), 'subnet: xong bộ 10 câu → bảng kết quả');
+  await p.click('#sn-stats-btn');
+  ok((await p.$$eval('.sn-tbl tr', (x) => x.length)) === 7, 'subnet: thống kê theo 6 dạng');
+  await p.click('.sn-modal .modal-x');
+  await p.click('#btn-progress');
+  ok((await p.textContent('#pg-body')).includes('Luyện subnet: 12 câu'), 'Tiến độ: tóm tắt luyện subnet');
+  await p.click('.modal .modal-x');
+  // 12) 📊 Điểm yếu: gõ sai lệnh trong lab → ghi nhận + gợi ý cú pháp; biểu đồ; lab nên làm; nút phá mạng theo chủ đề
+  await p.click('#btn-lab');
+  await p.click('.lab-item[data-id="L04"]');
+  await p.click('.lab-tab[data-id="t3"]');
+  for (const c of ['enable', 'configure terminal', 'interface g0/1', 'switchport trunk native 999', 'switchport trunk native 999', 'end']) await type(c);
+  await p.click('.lab-modal .modal-x');
+  await p.click('#btn-weak');
+  ok((await p.$$eval('.wk-chart .wk-row', (x) => x.length)) >= 15, 'điểm yếu: biểu đồ SVG đủ các chủ đề');
+  const wkTxt = await p.textContent('.wk-tbl');
+  ok(wkTxt.includes('switchport trunk native 999') && wkTxt.includes('switchport trunk native vlan <num>'), 'điểm yếu: lệnh gõ sai nhiều nhất kèm cú pháp đúng');
+  const nRec = await p.$$eval('.wk-recs li', (x) => x.length);
+  ok(nRec >= 3 && nRec <= 5, 'điểm yếu: gợi ý ' + nRec + ' lab nên làm');
+  const recId = await p.getAttribute('.wk-open', 'data-id');
+  await p.click('.wk-open');
+  ok((await p.inputValue('#lab-select')) === recId, 'điểm yếu: bấm lab gợi ý → mở đúng lab ' + recId);
+  await p.click('.lab-modal .modal-x');
+  await p.click('#btn-weak');
+  if (await p.$('#wk-break')) {
+    const bid = await p.getAttribute('#wk-break', 'data-id');
+    await p.click('#wk-break');
+    ok((await p.inputValue('#brk-lab')) === bid, 'điểm yếu: 🎲 phá mạng chủ đề yếu → hộp thoại chọn sẵn lab ' + bid);
+    await p.click('#brk-x');
+    await p.click('.lab-modal .modal-x');
+  } else ok(false, 'điểm yếu: thiếu nút phá mạng chủ đề yếu');
+  // 13) ⏱ đồng hồ mô phỏng: OSPF đi INIT… → FULL theo thời gian, "⚡ Hội tụ ngay", log IOS + show logging
+  await p.click('#btn-lab');
+  await p.click('.lab-item[data-id="L10"]');
+  await p.click('#lab-sol');
+  await p.click('#lab-runsol');
+  if (await p.$('#lab-clock .lab-conv')) await p.click('#lab-clock .lab-conv');
+  await p.click('#lab-clock [data-sp="1"]');
+  await p.click('.lab-tab[data-id="r1"]');
+  for (const c of ['configure terminal', 'interface g0/1', 'shutdown', 'no shutdown', 'end', 'show ip ospf neighbor']) await type(c);
+  const outTxt = async () => (await p.$$eval('#lab-out .lab-ln', (x) => x.map((e) => e.textContent))).join('\n');
+  ok(/FULL to DOWN/.test(await outTxt()) && /INIT\/|2WAY\//.test(await outTxt()), 'đồng hồ: shutdown → log FULL to DOWN; no shutdown → láng giềng INIT/2WAY');
+  ok((await p.textContent('#lab-clock')).includes('đang hội tụ'), 'đồng hồ: thanh báo đang hội tụ');
+  ok((await p.textContent('.lab-score')).split('/')[0] === (await p.textContent('.lab-score')).split('/')[1], 'đồng hồ: đang hội tụ vẫn chấm đạt (chấm theo trạng thái đã hội tụ)');
+  await p.click('#lab-clock .lab-conv');
+  await p.waitForTimeout(150);
+  ok(/LOADING to FULL, Loading Done/.test(await outTxt()) && (await p.textContent('#lab-clock')).includes('đã hội tụ'), 'đồng hồ: ⚡ Hội tụ ngay → log LOADING to FULL');
+  await type('show logging');
+  ok(/Log Buffer[\s\S]*%OSPF-5-ADJCHG/.test(await outTxt()), 'show logging có log OSPF');
+  await p.click('#lab-clock [data-sp="5"]');
+  await p.click('.lab-modal .modal-x');
+  // 14) 📄 cấu hình dạng văn bản trong workspace: nạp (dán, tách theo hostname) → đặt startup-config → Wipe về startup
+  await p.click('#btn-lab'); await p.click('#lab-sbx-open');
+  await p.selectOption('#ws-tpl', 'lan');
+  await p.click('#ws-start');
+  await p.waitForTimeout(400);
+  await p.selectOption('#ws-cfg', 'imp');
+  await p.fill('#cf-text', 'hostname PC1\nip 10.0.0.31/24 10.0.0.1\nset pcname PC2\nip 10.0.0.32/24 10.0.0.1\nhostname KHONGCO\ninterface g0/0');
+  await p.click('#cf-go');
+  const rep = await p.textContent('#cf-rep');
+  ok(rep.includes('✓ PC1') && rep.includes('✓ PC2') && rep.includes('KHONGCO: không có thiết bị'), 'nạp cấu hình: tách theo hostname / set pcname, báo thiết bị không có');
+  await p.click('#cf-x');
+  ok((await wsText('.ws-svg')).includes('10.0.0.31/24'), 'nạp cấu hình: sơ đồ cập nhật IP');
+  await p.selectOption('#ws-cfg', 'save');
+  ok((await p.textContent('.ws-dlg')).includes('startup-config'), 'Đặt làm startup-config: báo số thiết bị đã lưu');
+  await p.click('#cf-ok');
+  const [dl] = await Promise.all([p.waitForEvent('download'), p.selectOption('#ws-cfg', 'exp')]);
+  const txt = require('fs').readFileSync(await dl.path(), 'utf8');
+  ok(/! ===== Thiết bị: PC1 \(VPCS\) =====\nset pcname PC1\nip 10\.0\.0\.31\/24 10\.0\.0\.1/.test(txt), 'xuất tất cả cấu hình (.txt) theo từng thiết bị');
+  await p.click('#ws-close');
   ok(errs.length === 0, 'không có lỗi JS: ' + JSON.stringify(errs).slice(0, 300));
   await b.close();
   server.close();

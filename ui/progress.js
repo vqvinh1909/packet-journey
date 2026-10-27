@@ -41,7 +41,10 @@ export function openProgress() {
     const brkOk = brk.filter((h) => !h.revealed);
     const extra = `<div class="pg-row"><span class="pg-chk">🧪</span><span class="pg-name">Lab CLI đã xong</span><span class="pg-quiz">${labsDone} lab</span></div>` +
       `<div class="pg-row"><span class="pg-chk">🎲</span><span class="pg-name">Phá mạng ngẫu nhiên: ${brk.length} lượt (tự sửa không xem đáp án ${brkOk.length})</span><span class="pg-quiz">${brk[0] ? 'gần nhất ' + esc(brk[0].src) : '—'}</span></div>`;
-    body.innerHTML = extra + rows;
+    const sn = Object.values(load('subnet-stats', {})).reduce((a, x) => ({ n: a.n + x.n, ok: a.ok + x.ok }), { n: 0, ok: 0 });
+    const snRuns = load('subnet-runs', []);
+    const subnet = `<div class="pg-row"><span class="pg-chk">🧮</span><span class="pg-name">Luyện subnet: ${sn.n} câu, đúng ${sn.n ? Math.round((sn.ok / sn.n) * 100) : 0}%</span><span class="pg-quiz">${snRuns.length} bộ 10 câu</span></div>`;
+    body.innerHTML = extra + subnet + rows;
     modal.querySelector('#pg-sum').textContent = `Đã xem ${nDone}/${SCENARIOS.length} kịch bản`;
   }
   render();

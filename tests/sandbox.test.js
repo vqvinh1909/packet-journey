@@ -54,9 +54,9 @@ test('nhiệm vụ sandbox chấm được trên mạng tự dựng', () => {
   runScript(cli, 'sw1', cfg('vlan 10', 'interface range fa0/1 - 2', 'switchport mode access', 'switchport access vlan 10', 'interface g0/1', 'switchport mode access', 'switchport access vlan 10'));
   runScript(cli, 'r1', cfg('interface g0/0', 'ip address 192.168.1.1 255.255.255.0', 'no shutdown', 'interface g0/1', 'ip address 10.0.12.1 255.255.255.252', 'no shutdown', 'exit', 'ip dhcp excluded-address 192.168.1.1 192.168.1.10', 'ip dhcp pool LAN', 'network 192.168.1.0 255.255.255.0', 'default-router 192.168.1.1', 'exit', 'router ospf 1', 'network 0.0.0.0 255.255.255.255 area 0'));
   runScript(cli, 'r2', cfg('interface g0/0', 'ip address 192.168.2.1 255.255.255.0', 'no shutdown', 'interface g0/1', 'ip address 10.0.12.2 255.255.255.252', 'no shutdown', 'exit', 'router ospf 1', 'network 0.0.0.0 255.255.255.255 area 0'));
-  runScript(cli, 'pc1', ['ipconfig 192.168.1.20 255.255.255.0 192.168.1.1']);
-  runScript(cli, 'pc2', ['ipconfig /renew']);
-  runScript(cli, 'pc3', ['ipconfig 192.168.2.20 255.255.255.0 192.168.2.1']);
+  runScript(cli, 'pc1', ['ip 192.168.1.20/24 192.168.1.1']);
+  runScript(cli, 'pc2', ['ip dhcp']);
+  runScript(cli, 'pc3', ['ip 192.168.2.20/24 192.168.2.1']);
   const r = checkLab(lab, net);
   assert.deepEqual(lab.tasks.filter((_, i) => !r[i]).map((t) => t.text), []);
 });
@@ -115,7 +115,7 @@ test('sandbox: thêm firewall các hãng (CLI + web), nhân bản đúng loại,
   S.connect(net, pc, 'fa0', 'pfs1', 'em1');
   S.connect(net, 'pfs1', 'em0', srv, 'fa0');
   const cli = createCli(net);
-  runScript(cli, pc, ['ipconfig 10.1.1.10 255.255.255.0 10.1.1.1']);
+  runScript(cli, pc, ['ip 10.1.1.10/24 10.1.1.1']);
   runScript(cli, srv, ['ipconfig 203.0.113.10 255.255.255.0 203.0.113.2']);
   for (const c of ['if em0 ip=203.0.113.2/24 zone=WAN', 'if em1 ip=10.1.1.1/24 zone=LAN', 'apply']) assert.ok(!cli.exec('pfs1', c).out.some((l) => l.startsWith('ERROR')), c);
   const ok = (n) => checkLab({ tasks: [{ check: (a) => a.ping(pc, '203.0.113.10') }] }, n, [])[0];
@@ -170,7 +170,7 @@ test('workspace: Start / Stop / Wipe — thiết bị tắt thì link down, khô
   assert.ok(!N.lineUp(net, r1, 'g0/0'), 'PC vẫn tắt → link vẫn down');
   assert.deepEqual(S.powerAll(net, true), [pc], 'Start all chỉ bật máy đang tắt');
   runScript(cli, r1, cfg('interface g0/0', 'ip address 10.0.0.1 255.255.255.0', 'no shutdown'));
-  runScript(cli, pc, ['ipconfig 10.0.0.10 255.255.255.0 10.0.0.1']);
+  runScript(cli, pc, ['ip 10.0.0.10/24 10.0.0.1']);
   assert.ok(N.lineUp(net, pc, 'fa0') && N.sendPacket(net, { src: pc, dst: '10.0.0.1' }).ok);
   S.stopDevice(net, r1);
   assert.ok(!N.lineUp(net, pc, 'fa0'), 'Stop → link xuống');
@@ -198,7 +198,7 @@ test('workspace: nhập JSON cũ (chưa có "kind"/"off") — thiết bị coi n
   assert.equal(S.kindOf(back.devices.r1), 'router');
   const cli = createCli(back);
   runScript(cli, 'r1', cfg('interface g0/0', 'ip address 10.0.0.1 255.255.255.0', 'no shutdown'));
-  runScript(cli, 'pc1', ['ipconfig 10.0.0.10 255.255.255.0 10.0.0.1']);
+  runScript(cli, 'pc1', ['ip 10.0.0.10/24 10.0.0.1']);
   assert.ok(N.sendPacket(back, { src: 'pc1', dst: '10.0.0.1' }).ok);
   // trạng thái tắt được lưu qua xuất / nhập
   S.stopDevice(back, 'r1');
@@ -224,7 +224,7 @@ test('Cloud / Internet: vẽ đám mây nhưng vẫn là server; tự nhận the
   S.powerAll(net, true);
   const cli = createCli(net);
   runScript(cli, cl, ['ipconfig 8.8.8.8 255.255.255.0 8.8.8.1']);
-  runScript(cli, pc, ['ipconfig 8.8.8.20 255.255.255.0 8.8.8.1']);
+  runScript(cli, pc, ['ip 8.8.8.20/24 8.8.8.1']);
   assert.ok(N.sendPacket(net, { src: pc, dst: '8.8.8.8' }).ok, 'đặt IP/gateway và ping như server');
   assert.ok(N.sendPacket(net, { src: pc, dst: '8.8.8.8', proto: 'tcp', dport: 80 }).ok, 'vẫn mở dịch vụ web như server');
   const back = S.importSandbox(JSON.parse(JSON.stringify(S.exportSandbox(net))));

@@ -59,13 +59,13 @@ export function adminUp(net, dev, port) {
 /** Lớp màu cho một dòng output console. */
 export function classifyLine(l) {
   if (/^ERROR:/.test(l) || /^\s*\^$/.test(l) || /^% (Invalid|Incomplete|Ambiguous|Unknown|Bad|Login|Auth)/.test(l) || l.startsWith('Command rejected') || /^% (Access VLAN|Please|Connection)/.test(l) || l === 'Invalid Command.' || l.startsWith('VTP VLAN configuration not allowed')) return 'err';
-  if (/^%[A-Z]+-\d-/.test(l)) return 'log';
+  if (/^%[A-Z]+-\d-/.test(l) || /^\*\w{3}\s+\d+ [\d:.]+: /.test(l)) return 'log';
   if (/^(Reply from .* bytes=|!!!!!|\.!!!!|Success rate is [1-9])/.test(l) || l.includes('...Open')) return 'good';
   if (l.startsWith('[Lab]') || l.startsWith('(Lab:')) return 'note';
   return '';
 }
 
-/** Cổng switch đang STP BLOCKING: Map 'dev|cổng vật lý' → [VLAN...] (để đánh dấu trên topology). */
+/** Cổng switch đang STP BLOCKING (hoặc LISTENING/LEARNING khi đang hội tụ): Map 'dev|cổng vật lý' → [VLAN...] (để đánh dấu trên topology). */
 export function stpBlocked(net) {
   const out = new Map();
   const vlans = new Set();
@@ -73,9 +73,16 @@ export function stpBlocked(net) {
   if (vlans.size > 24) return out; // quá nhiều VLAN: bỏ qua phần trang trí này cho nhẹ
   for (const v of [...vlans].sort((x, y) => x - y)) {
     for (const [k, P] of Object.entries(N.stpState(net, v).ports)) {
-      if (P.sts !== 'BLK') continue;
+      if (P.sts === 'FWD') continue;
       const dev = k.slice(0, k.indexOf('|'));
-      for (const m of P.members) { const key = dev + '|' + m; if (!out.has(key)) out.set(key, []); out.get(key).push(v); }
+      // BLK = Alternate; LSN/LRN = đang hội tụ (⏱ đồng hồ mô phỏng) — mảng VLAN, .sts = trạng thái "nhẹ" nhất
+      for (const m of P.members) {
+        const key = dev + '|' + m;
+        if (!out.has(key)) out.set(key, Object.assign([], { sts: P.sts }));
+        const a = out.get(key);
+        a.push(v);
+        if (P.sts === 'BLK') a.sts = 'BLK';
+      }
     }
   }
   return out;

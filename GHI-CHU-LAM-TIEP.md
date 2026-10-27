@@ -1,5 +1,58 @@
 # Ghi chú làm tiếp — Packet Journey
 
+## ⏳ ĐANG DỞ (dừng vì hết credit, 2026-10-27) — việc 6/11 xuất/nạp cấu hình
+- Đã xong: `lab/configio.js` (exportConfigs / splitConfigs / importConfigs / saveAllStartup), `S.wipeDevice` về
+  startup-config, `cfgSnap` bỏ logBuf/debug/off, workspace menu "📁 Lưu / Nạp…" (gộp Xuất/Nhập JSON + cấu hình .txt
+  + Đặt làm startup-config, hộp thoại nạp có báo cáo), `tests/configio.test.js` (4 test) — `node --test` 257/257 đạt.
+- CÒN LẠI: `node tools/ui-smoke.cjs` dừng ở bước capture (~28 PASS): select "📁 Lưu / Nạp…" quá rộng làm thanh công cụ
+  workspace xuống 2 dòng → cửa sổ capture che node PC3. Đã thêm CSS `#ws-cfg { max-width: 160px }` nhưng CHƯA chạy
+  lại smoke để xác nhận; bước smoke 14 (nạp/xuất cấu hình) mới viết, chưa chạy được tới. README chưa ghi việc 6.
+- Việc 7 → 11 chưa làm: 7 thư mục lab + .unl EVE-NG, 8 chú thích sơ đồ + kiểu dây, 9 ghi chú + cheat sheet (dùng
+  `weak.cmds` từ việc 3), 10 so sánh cấu hình + "🩺 Vì sao không ping được?", 11 đề thi thử CCNA.
+
+## 🐧 VPCS cho PC (2026-10-27, việc 5/11)
+- `lab/ios.js` `vpcsExec` khi `d.shell === 'vpcs'` (prompt `PC1> `); PC không có cờ → `pcExec` kiểu Windows như cũ.
+  `save` lưu `d.vpcsSaved`; `S.wipeDevice` nạp lại. VPCS không có telnet/ssh (như thật) — cần thì đổi shell.
+- `lab/sandbox.js`: kind `pc` tạo với `shell: 'vpcs'`; boot log VPCS. Workspace: menu chuột phải PC đổi shell;
+  capture lặp 5 gói cho ping VPCS. Test sandbox/capture đã đổi sang cú pháp VPCS (test trunk capture giữ Windows vì telnet).
+
+## ⏱ Thời gian hội tụ thật + log IOS (2026-10-27, việc 4/11)
+- `lab/net.js` (cuối file): `net.clock` tuỳ chọn. Không có → tức thì như cũ (mọi test cũ, breaker, chấm điểm).
+  `phaseOf(net, key, kind, meta)` = pha theo tuổi của mục (`PHASES`: stp/rstp/ospf/eigrp/bgp/hsrp/vrrp). Chỗ chặn:
+  `stpState` (FWD → LSN/LRN, `stpBlockedFn` coi khác FWD là chặn; PortFast cổng không nối switch thì bỏ qua), `ospfAll`
+  (SPF dùng `adjUp` — chỉ láng giềng đã FULL; `ospfNeighbors` hiện pha), `eigrpAll` (adj chờ 5 s), `bgpAll` (state),
+  `fhrpActives` (thành viên còn Listen/Speak không được bầu; ghi `role` để log failover). `fhrpPhase` cho show standby.
+- `attachClock` (hiện trạng = đã hội tụ), `clockSync(net, quietDev)` = quét toàn mạng (`clockSweep`) → mục mới
+  since = t, mục mất → log down; `clockTick(net, dt)` → log qua mốc pha (in đủ từng bước kể cả tick lớn) rồi sync;
+  `clockConverge` ("⚡ Hội tụ ngay"); `logPush`/`drainLogs` (buffer `d.logBuf` cho show logging + hàng đợi console);
+  `withoutClock` (checkLab dùng). `cloneNet` bỏ `clock`; `exportSandbox` bỏ `logBuf`.
+- `lab/ios.js`: exec → `clockSync(net, id)` + nối log đang chờ của thiết bị vào output; khi có đồng hồ thì `diffSnap`
+  không in log OSPF/EIGRP/BGP/HSRP (đồng hồ in đúng lúc). `%SYS-5-CONFIG_I` khi rời chế độ cấu hình. Lệnh debug/
+  show logging/clear logging/logging synchronous. HSRP log đổi sang `%HSRP-5-STATECHANGE` (khi có đồng hồ).
+- `ui/clock.js` (thanh tốc độ, `clockStep`, `pullLogs`) dùng ở `ui/lab.js` (dưới tab thiết bị) và `ui/workspace.js`
+  (góc trên trái khung sơ đồ). Tốc độ lưu `pj_clock-speed` (mặc định ×5). Chưa làm: hold-timer khi Active chết
+  (Standby lên ngay chứ không chờ 10 s), DR wait timer 40 s.
+
+## 📊 Điểm yếu của tôi (2026-10-27, việc 3/11)
+- `lab/weak.js`: `TOPICS` (regex) → `labTopics(lab)` (ưu tiên `lab.topics`; đã thêm `topics` cho T01/T05/T06/P01/X04/B02),
+  `taskTopics`, `cmdTopic(cmd|spec)`, `cmdError(out)`. Reducer `recordCmd` (lệnh sai → `errs[lệnh]` kèm `sug`; lệnh
+  đúng → `cmds["mode|spec"]` — nguồn cho cheat sheet việc 9) và `recordLab(type: hint|sol|fail|quiz|done|time)`.
+  `topicScores(w, {subnet, breaks, labOf})`: điểm Laplace (tốt+1)/(tốt+xấu+2), trọng số ở `GOOD`/`BAD`, < 3 bằng chứng → null.
+  `recommend(scores, LABS, done)` 3–5 lab; `breakLabFor(topic)`.
+- `lab/ios.js`: `exec` trả thêm `spec` (mẫu lệnh đã khớp); `cli.suggest(dev, line)` xếp mẫu lệnh theo số từ khớp, thử mọi
+  chế độ (đánh dấu `here:false` khi sai chế độ), sửa chính tả từ đầu (edit distance ≤ 2).
+- `ui/lab.js` ghi: lệnh tự gõ/dán (không ghi mật khẩu, `?`, lệnh mẫu; lệnh của đề 🎲 tính cho lab gốc), gợi ý, lời giải
+  (+ nhiệm vụ chưa đạt → fail), quiz (lần chọn đầu), nộp thi thử (fail), xong lab (done; > độ khó × 15 phút → slow),
+  thời gian (cộng khi đổi lab / đóng). `ui/quiz.js` ghi quiz kịch bản. `openLab(onRun, {labId, breakLab})`.
+
+## 🧮 Luyện subnet vô hạn (2026-10-27, việc 2/11 — phiên "SAP PROMPT App Hoc Mang")
+- `lab/subnet.js` thuần logic: `generate(kind|'mix', level, rng)` → `{kind, level, text, fields:[[key,label]], ans, data}`;
+  `grade(q, input)` chuẩn hoá cách gõ (prefix "26" = "/26", "1.022" = 1022, có/không/khong/k/no…), VLSM chấm theo luật
+  (prefix tối thiểu, căn biên, không chồng lấn, trong khối) chứ không so phương án mẫu `vlsmPlan`; `explain(q)` trả các
+  dòng giải; `addStat`/`statRows` thống kê; `makeRun(level, seed)` bộ 10 câu đủ 6 dạng, xáo theo seed.
+- `ui/subnet.js`: modal, lưu `subnet-opt`, `subnet-stats` {kind:{n,ok,secs}}, `subnet-runs` (50 bộ gần nhất).
+  Việc 3 (điểm yếu) đọc `subnet-stats` để tính điểm chủ đề "Subnet".
+
 ## 🎲 Phá mạng ngẫu nhiên (2026-10-27, chức năng 1/3 cho người tự học — phiên "SAP PROMPT App Hoc Mang")
 - `lab/breaker.js`: `solvedNet(lab)` (build + applySolution, mọi nhiệm vụ cấu hình đạt) → `faultCandidates(net)` (thư viện
   lỗi: mỗi lỗi có `brk`/`fix` là lệnh CLI, `layer`/`detail` cho gợi ý) → `makeBreak(lab, n, seed)`: xáo theo `rng(seed)`
@@ -64,7 +117,7 @@
      trong test), quiet-mode access-class; `aaa new-model` thay "login local"; `security passwords min-length`;
      `ip http server` mở cổng 80; `exec-timeout`, `ip ssh version` lưu và hiện trong running-config.
 6. ⏳ Kịch bản tấn công byte-thật (ARP spoofing, DHCP giả/starvation, VLAN hopping) trong scenarios/.
-- Tổng hiện tại: 101 lab, `node --test` 223/223, `node tools/ui-smoke.cjs` 60/60; workspace tự dựng mạng kiểu EVE-NG + capture; phá mạng ngẫu nhiên.
+- Tổng hiện tại: 101 lab, `node --test` 253/253, `node tools/ui-smoke.cjs` 78/78; workspace tự dựng mạng kiểu EVE-NG + capture; phá mạng ngẫu nhiên; luyện subnet; điểm yếu; đồng hồ hội tụ + log IOS; VPCS.
 
 
 ## ✅ ĐÃ XONG Lab CLI đợt 3 (session 2026-10-27/28) — 7 cải tiến

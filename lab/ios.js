@@ -151,6 +151,15 @@ function matchOne(toks, words) {
   if (wi < words.length) return { fail: wi, kwAt };
   return { ok: true, args, score, kwAt };
 }
+function editDist(a, b) {
+  const dp = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    let prev = dp[0];
+    dp[0] = i;
+    for (let j = 1; j <= b.length; j++) { const t = dp[j]; dp[j] = Math.min(dp[j] + 1, dp[j - 1] + 1, prev + (a[i - 1] === b[j - 1] ? 0 : 1)); prev = t; }
+  }
+  return dp[b.length];
+}
 function parse(table, words) {
   const res = table.map((entry) => ({ entry, r: matchOne(entry.toks, words) }));
   const oks = res.filter((x) => x.r.ok).sort((a, b) => b.r.score - a.r.score);
@@ -220,7 +229,21 @@ export function createCli(net) {
   // ================== Bảng lệnh: SHOW ==================
   const SHOW_COMMON = [
     c('show login', (x) => R(showLogin(x.d))),
-    c('show logging', (x) => R(['Syslog logging: enabled (0 messages dropped, 0 flushes, 0 overruns)', `    Trap logging: level informational${x.d.logging.length ? ', ' + x.d.logging.map((h) => `logging to ${h}`).join(', ') : ''}`, '', 'Log Buffer (4096 bytes):', ...(x.d.secLog || [])])),
+    c('show logging', (x) => {
+      const buf = [...(x.d.secLog || []), ...(x.d.logBuf || [])];
+      return R(['Syslog logging: enabled (0 messages dropped, 0 messages rate-limited, 0 flushes, 0 overruns, xml disabled, filtering disabled)', '', 'No Active Message Discriminator.', '', '', 'No Inactive Message Discriminator.', '', '', `    Console logging: level debugging, ${buf.length} messages logged, xml disabled,`, '                     filtering disabled', `    Buffer logging:  level debugging, ${buf.length} messages logged, xml disabled,`, '                    filtering disabled', '', `    Trap logging: level informational, ${buf.length} message lines logged${x.d.logging.length ? '' : ''}`, ...x.d.logging.map((h) => `        Logging to ${h}  (udp port 514, audit disabled,`), '', 'Log Buffer (8192 bytes):', '', ...buf]);
+    }),
+    c('debug ip ospf adj', (x) => { (x.d.debug ||= {}).ospfAdj = true; return R(['OSPF adjacency debugging is on']); }),
+    c('debug ip ospf adjacency', (x) => { (x.d.debug ||= {}).ospfAdj = true; return R(['OSPF adjacency debugging is on']); }),
+    c('debug ip icmp', (x) => { (x.d.debug ||= {}).icmp = true; return R(['ICMP packet debugging is on']); }),
+    c('no debug ip ospf adj', (x) => { (x.d.debug ||= {}).ospfAdj = false; return R(['OSPF adjacency debugging is off']); }),
+    c('no debug ip icmp', (x) => { (x.d.debug ||= {}).icmp = false; return R(['ICMP packet debugging is off']); }),
+    c('undebug all', (x) => { x.d.debug = {}; return R(['All possible debugging has been turned off']); }),
+    c('no debug all', (x) => { x.d.debug = {}; return R(['All possible debugging has been turned off']); }),
+    c('undebug ip icmp', (x) => { (x.d.debug ||= {}).icmp = false; return R(['ICMP packet debugging is off']); }),
+    c('undebug ip ospf adj', (x) => { (x.d.debug ||= {}).ospfAdj = false; return R(['OSPF adjacency debugging is off']); }),
+    c('show debugging', (x) => { const g = x.d.debug || {}; const L = []; if (g.ospfAdj) L.push('OSPF:', '  OSPF adjacency debugging is on'); if (g.icmp) L.push('IP:', '  ICMP packet debugging is on'); return R(L); }),
+    c('clear logging', (x) => { x.d.logBuf = []; return R(['Clear logging buffer [confirm]', '']); }),
     c('show running-config', (x) => R(runningConfig(x.d))),
     c('show running-config interface <if>', (x) => R(runIfBlock(x.d, x.a[0]))),
     c('show startup-config', (x) => R(showStartup(x.d))),
@@ -822,7 +845,8 @@ export function createCli(net) {
     c('no exec-timeout', (x) => { line(x).execTimeout = null; return R([]); }),
     c('login authentication <word>', (x) => { if (!x.d.aaa?.newModel) return R(['% AAA chưa bật — gõ "aaa new-model" trước']); line(x).authList = x.a[0]; return R([]); }),
     c('no login authentication', (x) => { line(x).authList = null; return R([]); }),
-    c('logging synchronous', () => R([])),
+    c('logging synchronous', (x) => { line(x).logSync = true; return R([]); }),
+    c('no logging synchronous', (x) => { line(x).logSync = false; return R([]); }),
     c('exit', (x) => { x.s.mode = 'config'; return R([]); }),
     c('end', (x) => toPriv(x)),
     c('do <rest>', (x) => doExec(x)),
@@ -937,7 +961,7 @@ export function createCli(net) {
   function prompt(id) {
     const d = net.devices[id];
     const s = sess(id);
-    if (d.type === 'pc' || d.type === 'server') return s.pw === 'ssh' ? 'Password: ' : 'C:\\>';
+    if (d.type === 'pc' || d.type === 'server') return s.pw === 'ssh' ? 'Password: ' : d.shell === 'vpcs' ? `${d.name}> ` : 'C:\\>';
     if (d.rommon) return 'rommon 1 > ';
     if (s.ask) { const st = s.ask.steps[s.ask.i]; return typeof st.p === 'function' ? st.p(s.ask.data) : st.p; }
     if (s.pw) return s.pwPrompt || 'Password: ';
@@ -954,7 +978,7 @@ export function createCli(net) {
     const line = String(raw ?? '');
     let res;
     if (d.off) res = R(['% Thiết bị đang TẮT — chuột phải → Start (hoặc ▶ Start all) để bật.']);
-    else if (d.type === 'pc' || d.type === 'server') res = s.pw === 'ssh' ? sshPw(d, s, line) : pcExec(d, line.trim());
+    else if (d.type === 'pc' || d.type === 'server') res = s.pw === 'ssh' ? sshPw(d, s, line) : d.shell === 'vpcs' ? vpcsExec(d, line.trim()) : pcExec(d, line.trim());
     else if (VENDOR[d.os]) res = VENDOR[d.os].exec(d, s, line.trim());
     else if (d.rommon) res = R(['(Lab: thiết bị đang ở ROMMON vì không có file IOS khởi động được — bấm "↺ Làm lại" để khôi phục lab.)']);
     else if (s.ask) {
@@ -976,15 +1000,26 @@ export function createCli(net) {
         let cmd = t, pipe = null;
         const k = t.indexOf('|');
         if (k > 0) { cmd = t.slice(0, k).trim(); pipe = t.slice(k + 1).trim(); }
-        const before = SUB.has(s.mode) || s.mode === 'config' ? snap(d) : null;
+        const inCfg = SUB.has(s.mode) || s.mode === 'config';
+        // có đồng hồ mô phỏng: log OSPF/EIGRP/BGP/HSRP do đồng hồ in đúng lúc hội tụ, không in ngay
+        const before = inCfg && !net.clock ? snap(d) : null;
         res = dispatch(d, s, cmd.split(/\s+/), cmd, prompt(id));
         if (pipe && res.out) res.out = applyPipe(res.out, pipe);
         if (d.type === 'switch') N.vtpSync(net);
         if (before) res.out = (res.out || []).concat(diffSnap(d, before, snap(d)));
         if (d.type === 'switch') res.out = (res.out || []).concat(pendingLogs(d, s));
+        if (inCfg && s.mode === 'priv' && d.os !== 'asa') res.out = (res.out || []).concat('%SYS-5-CONFIG_I: Configured from console by console');
       }
     }
     res.out = res.out || [];
+    if (d.type === 'router' || d.type === 'switch') {
+      // dòng log in ngay (%LINK, %LINEPROTO, %SYS…) cũng vào buffer "show logging"
+      for (const l of res.out) if (/^%[A-Z0-9_]+-\d-[A-Z0-9_]+:/.test(l)) N.logPush(net, id, l, false, true);
+    }
+    if (net.clock) {
+      N.clockSync(net, id);
+      if (d.type === 'router' || d.type === 'switch') res.out = res.out.concat(N.drainLogs(net, id));
+    }
     res.prompt = prompt(id);
     res.password = !!s.pw;
     return res;
@@ -992,10 +1027,12 @@ export function createCli(net) {
 
   function dispatch(d, s, words, raw, pr) {
     const p = parse(tableFor(d, s), words);
-    if (p.hit) return p.hit.fn({ d, s, a: p.args, words, raw });
+    // spec = mẫu lệnh đã khớp (vd "switchport trunk allowed vlan <vlist>") — cho thống kê / cheat sheet
+    const withSpec = (r, spec) => (r && typeof r === 'object' ? { ...r, spec } : r);
+    if (p.hit) return withSpec(p.hit.fn({ d, s, a: p.args, words, raw }), p.hit.spec);
     if (SUB.has(s.mode)) {
       const g = parse(cfgTable(d), words);
-      if (g.hit) { s.mode = 'config'; s.ifs = []; return g.hit.fn({ d, s, a: g.args, words, raw }); }
+      if (g.hit) { s.mode = 'config'; s.ifs = []; return withSpec(g.hit.fn({ d, s, a: g.args, words, raw }), g.hit.spec); }
     }
     return errOut(p, s, raw, words, pr);
   }
@@ -1768,8 +1805,19 @@ export function createCli(net) {
   }
 
   // ---------- ping / traceroute / telnet / ssh ----------
+  /** debug ip icmp: router nguồn in "echo reply rcvd", router đích in "echo reply sent" (qua hàng đợi log). */
+  function icmpDebug(d, ip, r, n) {
+    if (!r.ok) return;
+    const ctx = ctxOf();
+    const src = d.type === 'pc' || d.type === 'server' ? d.ip : IFS(d)[N.lookup(ctx, d.id, ip)?.iface]?.ip || '0.0.0.0';
+    const tail = 'topology BASE, dscp 0 topoid 0';
+    if (d.debug?.icmp) for (let i = 0; i < n; i++) N.logPush(net, d.id, `ICMP: echo reply rcvd, src ${ip}, dst ${src}, ${tail}`, true);
+    const t = r.at && net.devices[r.at.dev];
+    if (t && t !== d && t.debug?.icmp) for (let i = 0; i < n; i++) N.logPush(net, t.id, `ICMP: echo reply sent, src ${ip}, dst ${src}, ${tail}`, true);
+  }
   function iosPing(d, ip) {
     const r = N.sendPacket(net, { src: d.id, dst: ip, record: true, anim: true });
+    icmpDebug(d, ip, r, 5);
     const marks = r.ok ? (r.firstArp ? '.!!!!' : '!!!!!') : r.kind === 'unreach' ? 'U.U.U' : '.....';
     const okN = (marks.match(/!/g) || []).length;
     return R(['Type escape sequence to abort.', `Sending 5, 100-byte ICMP Echos to ${ip}, timeout is 2 seconds:`, marks, `Success rate is ${okN * 20} percent (${okN}/5)${okN ? ', round-trip min/avg/max = 1/1/4 ms' : ''}`], { sim: r.sim, simLabel: `${d.name} ping ${ip}`, why: r.ok ? null : r.fail?.why, ok: r.ok });
@@ -1829,7 +1877,7 @@ export function createCli(net) {
   // ---------- IOS / flash / NVRAM ----------
   function cfgSnap(d) {
     const o = JSON.parse(JSON.stringify(d));
-    for (const k of ['id', 'type', 'x', 'y', 'flash', 'flashSize', 'image', 'version', 'startupCfg', 'arp', 'macTable', 'natTable', 'rommon']) delete o[k];
+    for (const k of ['id', 'type', 'x', 'y', 'flash', 'flashSize', 'image', 'version', 'startupCfg', 'arp', 'macTable', 'natTable', 'rommon', 'logBuf', 'debug', 'off']) delete o[k];
     if (o.dhcp) o.dhcp.bindings = [];
     if (o.ports) for (const p of Object.values(o.ports)) p.errdis = false;
     for (const a of Object.values(o.acls || {})) for (const e of a.entries) e.matches = 0;
@@ -1965,6 +2013,7 @@ export function createCli(net) {
   }
   function pcPing(d, ip) {
     const r = N.sendPacket(net, { src: d.id, dst: ip, record: true, anim: true });
+    icmpDebug(d, ip, r, 4);
     const L = ['', `Pinging ${ip} with 32 bytes of data:`, ''];
     let got = 0;
     for (let i = 0; i < 4; i++) {
@@ -1995,6 +2044,152 @@ export function createCli(net) {
     L.push('', 'Trace complete.');
     return R(L, { sim: r.sim, simLabel: `${d.name} tracert ${ip}`, why: r.ok ? null : r.fail?.why, ok: r.ok });
   }
+  // ---------- VPCS (Virtual PC Simulator — PC mặc định trong EVE-NG / GNS3) ----------
+  const VPCS_HELP = [
+    '?                        Print help',
+    'arp                      Shortcut for: show arp. Show arp table',
+    'clear ARG                Clear IPv4/IPv6, arp/neighbor cache, command history',
+    'dhcp [OPTION]            Shortcut for: ip dhcp. Get IPv4 address via DHCP',
+    'ip ARG ... [OPTION]      Configure the current VPC\'s IP settings. See ip ?',
+    'ping HOST [OPTION ...]   Ping HOST with ICMP (default) or TCP/UDP. See ping ?',
+    'save [FILENAME]          Save the configuration to the file FILENAME',
+    'show [ARG]               Print the information of VPCs (default). See show ?',
+    'trace HOST [OPTION ...]  Print the path packets take to network HOST',
+    'version                  Print the version information',
+  ];
+  const VPCS_IP_HELP = ['ip ARG ... [OPTION]', 'Configure the current VPC\'s IP settings', '  ARG ...:', '  address [mask] [gateway]', '  address [gateway] [mask]', '                 Set the VPC\'s ip, default gateway ip and network mask', '                 Default IPv4 mask is /24, IPv6 is /64. Example:', '                 ip 10.1.1.70/26 10.1.1.65 set the VPC\'s ip to 10.1.1.70,', '                 the gateway to 10.1.1.65, the netmask to 255.255.255.192.', '                 In tap mode, the ip of the tapx is the maximum host ID', '                 of the subnet. In the example above,', '                 the tapx ip would be 10.1.1.126', '  auto           Attempt to obtain IPv6 address, mask and gateway using SLAAC', '  dhcp [OPTION]  Attempt to obtain IPv4 address, mask, gateway, DNS via DHCP', '  dns ip         Set DNS server ip, delete if ip is \'0\''];
+  const vmac = (d) => N.epMac(net, { dev: d.id, ifn: 'fa0' });
+  const vms = (i) => (0.5 + ((i * 37) % 70) / 100).toFixed(3);
+  function vpcsShowIp(d) {
+    return [
+      '', `NAME        : ${d.name}[1]`, `IP/MASK     : ${d.ip ? `${d.ip}/${d.prefix}` : '0.0.0.0/0'}`, `GATEWAY     : ${d.gateway || '0.0.0.0'}`, `DNS         : ${d.dns || ''}`,
+      ...(d.dhcp && d.ip ? [`DHCP SERVER : ${d.dhcpServer || d.gateway || ''}`, 'DHCP LEASE  : 86391, 86400/43200/75600'] : []),
+      `MAC         : ${vmac(d)}`, 'LPORT       : 20000', 'RHOST:PORT  : 127.0.0.1:30000', 'MTU         : 1500', '',
+    ];
+  }
+  function vpcsSetIp(d, w) {
+    // ip A.B.C.D[/len] [gw] [mask]  |  ip A.B.C.D mask|len [gw]  — như VPCS: mask mặc định /24
+    let [addr, len] = w[1].split('/');
+    if (!isIp(addr)) return R(['Invalid address']);
+    let pfx = len != null ? +len : null, gw = '';
+    for (const x of w.slice(2)) {
+      if (/^\d{1,2}$/.test(x) && pfx == null) pfx = +x;
+      else if (isIp(x)) {
+        let mp = null;
+        try { mp = maskToPrefix(x); } catch { mp = null; }
+        if (pfx == null && mp != null && /^255\./.test(x)) pfx = mp; else if (!gw) gw = x; else return R(['Invalid gateway']);
+      } else return R(['Invalid options']);
+    }
+    pfx ??= 24;
+    if (!(pfx >= 1 && pfx <= 32)) return R(['Invalid netmask']);
+    if (gw && !N.inNet(gw, addr, pfx)) return R([`Gateway ${gw} is not in the subnet ${N.netOf(addr, pfx)}/${pfx}`]);
+    // VPCS gửi gratuitous ARP kiểm tra trùng IP trước khi nhận địa chỉ
+    const out = ['Checking for duplicate address...'];
+    const old = { ip: d.ip, prefix: d.prefix };
+    d.ip = addr; d.prefix = pfx;
+    const dup = N.resolve(net, { dev: d.id, ifn: 'fa0' }, addr);
+    if (!dup.fail && !dup.proxy && !dup.fhrp && dup.ep && dup.ep.dev !== d.id) {
+      d.ip = old.ip; d.prefix = old.prefix;
+      return R([...out, `${addr} is being used by MAC ${dup.mac}`, 'Address not changed']);
+    }
+    d.gateway = gw; d.dhcp = false;
+    return R([...out, `${d.name} : ${addr} ${N.prefixToMask(pfx)}${gw ? ` gateway ${gw}` : ''}`]);
+  }
+  function vpcsDhcp(d) {
+    const r = N.dhcpRequest(net, d.id, { record: true, anim: true });
+    d.dhcp = true;
+    if (r.ok) {
+      d.ip = r.ip; d.prefix = r.prefix; d.gateway = r.gw; d.dns = r.dns; d.dhcpServer = r.gw || '';
+      return R([`DDORA IP ${r.ip}/${r.prefix} GW ${r.gw || '0.0.0.0'}`], { sim: r.sim, simLabel: `${d.name} DHCP`, ok: true });
+    }
+    return R(['DDD', "Can't find dhcp server"], { sim: r.sim, simLabel: `${d.name} DHCP (thất bại)`, why: 'Không nhận được DHCP OFFER. ' + (r.why || ''), ok: false });
+  }
+  function vpcsPing(d, ip, n = 5) {
+    const r = N.sendPacket(net, { src: d.id, dst: ip, record: true, anim: true });
+    icmpDebug(d, ip, r, n);
+    const L = [];
+    if (r.fail?.kind === 'nogw' || r.fail?.kind === 'noip') return R([`host (${ip}) not reachable`], { why: r.fail?.why, ok: false });
+    for (let i = 1; i <= n; i++) {
+      if (r.ok) L.push(`84 bytes from ${ip} icmp_seq=${i} ttl=${r.ttl ?? 64} time=${vms(i)} ms`);
+      else if (r.kind === 'unreach' && r.fail?.ip) L.push(`*${r.fail.ip} icmp_seq=${i} ttl=255 time=${vms(i)} ms (ICMP type:3, code:1, Destination host unreachable)`);
+      else L.push(`${ip} icmp_seq=${i} timeout`);
+    }
+    return R(L, { sim: r.sim, simLabel: `${d.name} ping ${ip}`, why: r.ok ? null : r.fail?.why, ok: r.ok });
+  }
+  function vpcsTrace(d, ip) {
+    const r = N.sendPacket(net, { src: d.id, dst: ip, record: false, anim: true });
+    if (r.fail?.kind === 'nogw' || r.fail?.kind === 'noip') return R([`host (${ip}) not reachable`], { ok: false });
+    const L = [`trace to ${ip}, 8 hops max, press Ctrl+C to stop`];
+    let n = 0;
+    for (const h of r.hops) if (h.ip !== ip) L.push(` ${++n}   ${pad(h.ip, 15)} ${vms(n)} ms  ${vms(n + 1)} ms  ${vms(n + 2)} ms`);
+    if (r.ok) L.push(` ${++n}   *${ip}   ${vms(n)} ms (ICMP type:3, code:3, Destination port unreachable)`);
+    else while (n < 8) L.push(` ${++n}   *  *  *`);
+    return R(L, { sim: r.sim, simLabel: `${d.name} trace ${ip}`, why: r.ok ? null : r.fail?.why, ok: r.ok });
+  }
+  function vpcsArp(d) {
+    const ent = Object.entries(d.arp || {});
+    if (!ent.length) return R(['', 'arp table is empty', '']);
+    return R(['', ...ent.map(([ip, e], i) => `${e.mac}  ${ip} expires in ${117 - ((i * 7) % 40)} seconds `), '']);
+  }
+  function vpcsExec(d, line) {
+    const w = line.split(/\s+/).filter(Boolean);
+    const cmd = (w[0] || '').toLowerCase();
+    const is = (full, min = 2) => cmd.length >= Math.min(min, full.length) && full.startsWith(cmd);
+    if (!cmd) return R([]);
+    if (cmd === '?' || is('help', 1)) return R(VPCS_HELP);
+    if (cmd === 'ip') {
+      const a = (w[1] || '').toLowerCase();
+      if (!a || a === '?') return R(VPCS_IP_HELP);
+      if (a === 'dhcp') return vpcsDhcp(d);
+      if (a === 'dns') {
+        if (!w[2] || !isIp(w[2])) return R(['Invalid address']);
+        d.dns = w[2] === '0' || w[2] === '0.0.0.0' ? '' : w[2];
+        return R([]);
+      }
+      if (a === 'auto') {
+        const r = V6.slaac(net, d.id);
+        d.slaac = true;
+        if (!r.ok) return R(['No router answered ICMPv6 Router Solicitation'], { why: r.why, ok: false });
+        d.ip6 = r.ip; d.prefix6 = r.prefix; d.gw6 = r.gw;
+        return R([`GLOBAL SCOPE      : ${r.ip}/${r.prefix}`, `ROUTER LINK-LAYER : ${r.router}`]);
+      }
+      return vpcsSetIp(d, w);
+    }
+    if (is('dhcp')) return vpcsDhcp(d);
+    if (is('show', 2) || is('arp', 2)) {
+      const a = cmd.startsWith('a') ? 'arp' : (w[1] || '').toLowerCase();
+      if (!a) return R(['', `NAME   IP/MASK              GATEWAY           MAC                LPORT  RHOST:PORT`, `${pad(d.name, 7)}${pad(d.ip ? `${d.ip}/${d.prefix}` : '0.0.0.0/0', 21)}${pad(d.gateway || '0.0.0.0', 18)}${pad(vmac(d), 19)}20000  127.0.0.1:30000`, `       ${d.ip6 ? `${d.ip6}/${d.prefix6}` : 'fe80::250:79ff:fe66:6800/64'}`, '']);
+      if ('ip'.startsWith(a)) return R(vpcsShowIp(d));
+      if ('arp'.startsWith(a)) return vpcsArp(d);
+      if (a === '?') return R(['show [ARG]', '  Show information of VPCs', '  ARG:', '    arp      Show arp table', '    ip       Show IPv4 details', '    ipv6     Show IPv6 details', '    history  List the command history', '    version  Show the version information']);
+      if (a === 'ipv6') return R(['', `NAME              : ${d.name}[1]`, 'LINK-LOCAL SCOPE  : fe80::250:79ff:fe66:6800/64', `GLOBAL SCOPE      : ${d.ip6 ? `${d.ip6}/${d.prefix6}` : ''}`, `ROUTER LINK-LAYER : ${d.gw6 || ''}`, `MAC               : ${vmac(d)}`, '']);
+      if (a === 'version' || a === 'history') return vpcsExec(d, a);
+      return R(['Invalid arguments']);
+    }
+    if (is('ping', 1)) {
+      const ip = w.slice(1).find(isIp);
+      if (!ip) return R([w[1] ? `host (${w[1]}) not found` : 'Incomplete command']);
+      const c = w.indexOf('-c');
+      return vpcsPing(d, ip, c > 0 && /^\d+$/.test(w[c + 1] || '') ? Math.min(20, Math.max(1, +w[c + 1])) : 5);
+    }
+    if (is('trace', 2)) { const ip = w.slice(1).find(isIp); return ip ? vpcsTrace(d, ip) : R(['Incomplete command']); }
+    if (is('save', 2)) {
+      d.vpcsSaved = { ip: d.ip, prefix: d.prefix, gateway: d.gateway, dns: d.dns, dhcp: !!d.dhcp };
+      return R([`Saving startup configuration to ${w[1] || 'startup.vpc'}`, '.  done']);
+    }
+    if (is('clear', 2)) {
+      const a = (w[1] || '').toLowerCase();
+      if (a === 'ip') { d.ip = ''; d.prefix = 24; d.gateway = ''; d.dns = ''; d.dhcp = false; return R(['IPv4 address/mask, gateway, DNS, and DHCP cleared']); }
+      if (a === 'arp') { d.arp = {}; return R([]); }
+      if (a === 'ipv6') { d.ip6 = ''; d.gw6 = ''; d.slaac = false; return R(['IPv6 address/mask and router link-layer address cleared']); }
+      return R(['clear ARG', '  ARG:', '    ip       Clear IPv4 address/mask, gateway, DNS, and DHCP', '    ipv6     Clear IPv6 address/mask and router link-layer address', '    arp      Clear arp table', '    neighbor Clear IPv6 neighbor table', '    hist     Clear the command history']);
+    }
+    if (is('version', 2)) return R(['', 'Welcome to Virtual PC Simulator, version 0.6.2 (mô phỏng trong Packet Journey)', 'Dedicated to Daling.', 'Build time: Oct 27 2026', 'Copyright (c) 2007-2015, Paul Meng (mirnshi@gmail.com)', 'All rights reserved.', '', 'VPCS is free software, distributed under the terms of the "BSD" licence.', '']);
+    if (cmd === 'history' || is('history', 2)) return R((sess(d.id).hist || []).map((h, i) => `${String(i + 1).padStart(4)}  ${h}`));
+    if (cmd === 'ipconfig' || cmd === 'tracert') return R([`Bad command: "${line}". Use ? for help.`, `(Lab: đây là VPCS, không phải Windows — dùng "${cmd === 'ipconfig' ? 'ip 10.0.0.10/24 10.0.0.1 hoặc show ip' : 'trace'}". Chuột phải PC → đổi sang dòng lệnh Windows nếu muốn.)`]);
+    return R([`Bad command: "${line}". Use ? for help.`]);
+  }
+
   function pcExec(d, line) {
     const w = line.split(/\s+/).filter(Boolean);
     const cmd = (w[0] || '').toLowerCase();
@@ -2275,6 +2470,8 @@ export function createCli(net) {
     const cfg = (proto === 'vrrp' ? f.vrrp : f.standby)[g];
     if (!cfg?.ip || !N.ifUp(net, d.id, n)) return { st: 'Init', act: 'unknown', stby: 'unknown' };
     const a = N.hsrpView(net, d.id, n).find((z) => z.group === g && z.proto === proto);
+    const ph = N.fhrpPhase(net, d.id, n, proto, g); // ⏱ đang Listen / Speak (chưa được bầu)
+    if (ph) return { st: ph, act: a ? IFS(net.devices[a.list[0].ep.dev])[a.list[0].ep.ifn].ip : 'unknown', stby: a?.list[1] ? IFS(net.devices[a.list[1].ep.dev])[a.list[1].ep.ifn].ip : 'unknown', vip: cfg.ip, pri: cfg.priority ?? 100 };
     if (!a) return { st: 'Init', act: 'unknown', stby: 'unknown' };
     const ipOf = (m) => IFS(net.devices[m.ep.dev])[m.ep.ifn].ip;
     const me = a.ep.dev === d.id && a.ep.ifn === n;
@@ -2738,12 +2935,14 @@ export function createCli(net) {
     const c0 = d.lines.con, v = d.lines.vty;
     if (c0.password) L.push(` password ${pwShow(d, c0.password)}`);
     if (c0.execTimeout) L.push(` exec-timeout ${c0.execTimeout.join(' ')}`);
+    if (c0.logSync) L.push(' logging synchronous');
     if (c0.authList) L.push(` login authentication ${c0.authList}`);
     if (c0.loginLocal) L.push(' login local'); else if (c0.login) L.push(' login');
     L.push('!', 'line aux 0', '!', 'line vty 0 4');
     if (v.accessClass) L.push(` access-class ${v.accessClass} in`);
     if (v.password) L.push(` password ${pwShow(d, v.password)}`);
     if (v.execTimeout) L.push(` exec-timeout ${v.execTimeout.join(' ')}`);
+    if (v.logSync) L.push(' logging synchronous');
     if (v.authList) L.push(` login authentication ${v.authList}`);
     if (v.loginLocal) L.push(' login local'); else if (v.login) L.push(' login');
     if (v.transport && v.transport !== 'all') L.push(` transport input ${v.transport}`);
@@ -3038,7 +3237,49 @@ export function createCli(net) {
     return cands.size === 1 ? head + [...cands][0] + ' ' : null;
   }
 
-  return { exec, prompt, complete, session: sess, net, runningConfig };
+  /**
+   * Gợi ý cú pháp đúng cho một lệnh gõ sai (📊 Điểm yếu): xếp mẫu lệnh theo số từ khớp liên tiếp từ đầu, xét cả
+   * chế độ hiện tại và các chế độ khác (lỗi hay gặp: gõ lệnh cổng ở (config)#). Từ đầu gõ sai chính tả (≤ 2 ký tự)
+   * vẫn được nhận. Trả [{ spec, mode, here }] (tối đa `k`), mode là chế độ dùng được lệnh đó.
+   */
+  function suggest(id, line, k = 3) {
+    const d = net.devices[id];
+    if (!d || d.type === 'pc' || d.type === 'server' || VENDOR[d.os] || d.os === 'asa') return [];
+    const cur = sess(id);
+    let words = String(line).replace(/\?$/, '').trim().split(/\s+/).filter(Boolean);
+    if (words[0]?.toLowerCase() === 'do' && words.length > 1) words = words.slice(1);
+    if (!words.length) return [];
+    const modes = [[cur.mode, cur]];
+    const fake = (mode, extra = {}) => ({ mode, ifs: ['g0/0'], ...extra });
+    for (const m of ['priv', 'config', 'if', 'vlan', 'line', 'pool', 'acl-ext', 'acl-std', 'bgp']) if (m !== cur.mode) modes.push([m, fake(m)]);
+    for (const rp of ['ospf', 'eigrp']) modes.push(['router', fake('router', { rp })]);
+    const rank = (ws) => {
+      const out = [];
+      for (const [mode, s] of modes) {
+        for (const e of tableFor(d, s)) {
+          const r = matchOne(e.toks, ws);
+          const depth = r.ok ? ws.length : r.inc ? r.wi : r.fail ?? r.amb ?? 0;
+          if (depth < Math.min(2, ws.length) && !(depth >= 1 && e.toks.length === 1)) continue;
+          const score = depth * 10 + (r.ok || r.inc ? 5 : 0) + (mode === cur.mode ? 3 : 0) - e.toks.length * 0.3;
+          out.push({ spec: e.spec, mode, here: mode === cur.mode, score });
+        }
+      }
+      return out;
+    };
+    let cands = rank(words);
+    if (!cands.length) {
+      // từ đầu gõ sai chính tả: thay bằng từ khoá gần nhất (khoảng cách sửa ≤ 2)
+      const firsts = new Set();
+      for (const [, s] of modes) for (const e of tableFor(d, s)) if (e.toks[0][0] !== '<' && e.toks[0][0] !== '{') firsts.add(e.toks[0]);
+      const w0 = words[0].toLowerCase();
+      const best = [...firsts].map((f) => [f, editDist(w0, f)]).filter(([, x]) => x <= 2).sort((a, b) => a[1] - b[1])[0];
+      if (best) cands = rank([best[0], ...words.slice(1)]);
+    }
+    const seen = new Set();
+    return cands.sort((a, b) => b.score - a.score).filter((c0) => !seen.has(c0.spec + c0.mode) && seen.add(c0.spec + c0.mode)).slice(0, k).map(({ spec, mode, here }) => ({ spec, mode, here }));
+  }
+
+  return { exec, prompt, complete, suggest, session: sess, net, runningConfig };
 }
 
 /** Chạy một loạt lệnh trên 1 thiết bị (dùng cho cấu hình khởi tạo lab, lời giải, test). */

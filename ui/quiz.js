@@ -2,6 +2,7 @@
 // Lưu điểm cao nhất vào localStorage theo scenarioId.
 
 import { save, load } from './store.js';
+import { trackLab } from './weak.js';
 
 function esc(s) {
   return String(s ?? '').replace(/[&<>]/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[m]));
@@ -42,6 +43,7 @@ export function openQuiz(scenarioId, titleVi, quiz) {
         if (q.dataset.done) return;
         q.dataset.done = '1';
         const ok = oi === item.correct;
+        trackLab('quiz', { id: 'scn:' + scenarioId, title: titleVi }, { ok, task: { text: item.q } });
         answered += 1;
         if (ok) correct += 1;
         opts.querySelectorAll('.quiz-opt').forEach((x, j) => {

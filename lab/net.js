@@ -207,7 +207,10 @@ export function makeNet(devs, links) {
   return { devices, links: links.map(([a, ap, b, bp]) => mkLink(a, ap, b, bp)) };
 }
 export function mkLink(a, ap, b, bp) { return { id: `${a}:${ap}~${b}:${bp}`, a, ap, b, bp }; }
-export function cloneNet(net) { return JSON.parse(JSON.stringify(net)); }
+export function cloneNet(net) {
+  const { clock, ...rest } = net; // ⏱ đồng hồ mô phỏng thuộc phiên đang chạy, không sao chép / xuất ra file
+  return JSON.parse(JSON.stringify(rest));
+}
 
 // ======================================================================
 // MAC (tất định theo vị trí thiết bị/cổng)
@@ -571,12 +574,14 @@ export function fhrpActives(net, members) {
     if (!d || !isL3(d)) continue;
     const f = l3ifs(d)[m.ifn];
     if (!f || !f.ip || !ifUp(net, m.dev, m.ifn)) continue;
+    // ⏱ thành viên mới: HSRP Listen → Speak (hết hold time 10 s) mới được bầu; VRRP Backup 3 s
+    const ready = (proto, g) => !phaseOf(net, fhrpKey(m, proto, g), proto, { dev: m.dev, ifn: m.ifn, proto, group: g });
     for (const [g, s] of Object.entries(f.standby || {})) {
-      if (!s.ip) continue;
+      if (!s.ip || !ready('hsrp', g)) continue;
       (groups['h' + g] ||= []).push({ proto: 'hsrp', group: g, ep: m, cfg: s.priority ?? 100, pri: hsrpPri(net, d, s), preempt: !!s.preempt, vip: s.ip, ipn: ip2n(f.ip) });
     }
     for (const [g, s] of Object.entries(f.vrrp || {})) {
-      if (!s.ip) continue;
+      if (!s.ip || !ready('vrrp', g)) continue;
       const own = s.ip === f.ip;
       const pr = own ? 255 : s.priority ?? 100;
       (groups['v' + g] ||= []).push({ proto: 'vrrp', group: g, ep: m, cfg: pr, pri: pr, preempt: s.preempt !== false, vip: s.ip, ipn: ip2n(f.ip), owner: own });
@@ -591,9 +596,14 @@ export function fhrpActives(net, members) {
     if (challenger !== win && challenger.pri > win.pri && challenger.preempt) win = challenger;
     const rest = byEff.filter((x) => x !== win);
     act.push({ proto: win.proto, group: win.group, ep: win.ep, vip: win.vip, list: [win, ...rest] });
+    // ghi vai trò để đồng hồ báo log khi đổi (Standby -> Active khi failover / preempt)
+    if (net.clock?.seen) [win, ...rest].forEach((x, i) => noteMeta(net, fhrpKey(x.ep, x.proto, x.group), { role: x.proto === 'vrrp' ? (i ? 'Backup' : 'Master') : i === 0 ? 'Active' : i === 1 ? 'Standby' : 'Listen' }));
   }
   return act;
 }
+const fhrpKey = (m, proto, g) => `fhrp|${m.dev}|${m.ifn}|${proto}|${g}`;
+/** Pha hội tụ của 1 nhóm FHRP trên cổng (Listen/Speak/Backup) hoặc null — cho show standby / vrrp. */
+export const fhrpPhase = (net, dev, ifn, proto, g) => peekPhase(net, fhrpKey({ dev, ifn }, proto, g), proto);
 export const hsrpActives = fhrpActives;
 /** Thành viên FHRP cùng miền L2 với 1 interface (để show standby / vrrp / bầu chọn). */
 export function hsrpView(net, devId, ifn) {
@@ -744,6 +754,9 @@ export function ospfAll(ctx) {
     }
   }
   for (const r of rs) adj[r.id] = adj[r.id].filter((a) => (adj[a.to] || []).some((b) => b.to === r.id));
+  // ⏱ láng giềng chưa xong INIT → … → LOADING thì chưa dùng để tính route (adj vẫn giữ để show neighbor)
+  const adjUp = {};
+  for (const r of rs) adjUp[r.id] = adj[r.id].filter((a) => !phaseOf(net, ospfKey(r.id, a), 'ospf', { dev: r.id, ifn: a.outIf, nbr: rid[a.to], pid: r.ospf.pid }));
   for (const s of rs) ads[s.id] = en[s.id].map((e) => ({ net: netOf(e.ip, e.prefix), prefix: e.prefix, cost: e.cost, area: e.area }));
   const spf = {}, intRoutes = {}, myNetsOf = {};
   Object.assign(ctx.ospf, { spf, intRoutes });
@@ -755,7 +768,7 @@ export function ospfAll(ctx) {
       for (const k of Object.keys(dist)) if (!done.has(k) && (u === null || dist[k] < dist[u])) u = k;
       if (u === null) break;
       done.add(u);
-      for (const a of adj[u] || []) {
+      for (const a of adjUp[u] || []) {
         const nd = dist[u] + a.cost;
         if (dist[a.to] == null || nd < dist[a.to]) { dist[a.to] = nd; first[a.to] = u === r.id ? { nh: a.nh, outIf: a.outIf } : first[u]; }
       }
@@ -827,6 +840,7 @@ function ospfExternals(ctx, s) {
   return out;
 }
 /** Bầu DR/BDR trên 1 segment: priority cao nhất (0 = không bao giờ làm DR), rồi router-id cao nhất. */
+const ospfKey = (rid, a) => `ospf|${rid}|${a.outIf}|${a.to}`;
 export function ospfRoles(ctx, rid, ifn) {
   const o = ospfAll(ctx);
   const me = (o.en[rid] || []).find((e) => e.ifn === ifn);
@@ -846,7 +860,11 @@ export function ospfNeighbors(ctx, rid) {
       // 2 router đều là DROTHER chỉ dừng ở 2-WAY (chỉ trao đổi LSDB với DR/BDR)
       full = role !== 'DROTHER' || r.dr === rid || r.bdr === rid;
     }
-    return { rid: o.rid[a.to], name: net.devices[a.to].name, state: (full ? 'FULL/' : '2WAY/') + (role === '-' ? ' -' : role), addr: a.nh, iface: a.outIf, dev: a.to, prio: a.prio, role, full };
+    // ⏱ đang hình thành adjacency: INIT → 2WAY → EXSTART → EXCHANGE → LOADING (cặp DROTHER dừng ở 2WAY)
+    let ph = phaseOf(net, ospfKey(rid, a), 'ospf', { dev: rid, ifn: a.outIf, nbr: o.rid[a.to], pid: net.devices[rid].ospf.pid, full });
+    if (ph && !full && ph !== 'INIT') ph = null;
+    const st = ph || (full ? 'FULL' : '2WAY');
+    return { rid: o.rid[a.to], name: net.devices[a.to].name, state: st + '/' + (role === '-' ? ' -' : role), addr: a.nh, iface: a.outIf, dev: a.to, prio: a.prio, role, full: full && !ph, phase: ph };
   });
 }
 
@@ -889,6 +907,8 @@ export function eigrpAll(ctx) {
     }
   }
   for (const r of rs) adj[r.id] = adj[r.id].filter((a) => (adj[a.to] || []).some((b) => b.to === r.id));
+  // ⏱ láng giềng EIGRP lên sau hello đầu tiên (5 giây)
+  for (const r of rs) adj[r.id] = adj[r.id].filter((a) => !phaseOf(net, `eigrp|${r.id}|${a.outIf}|${a.to}`, 'eigrp', { dev: r.id, ifn: a.outIf, nh: a.nh, as: r.eigrp.as }));
   const comp = eigrpComp;
   ctx.eigrp.paths = {};
   for (const r of rs) {
@@ -1017,6 +1037,8 @@ export function bgpAll(ctx) {
           if (back && back.remoteAs === r.bgp.as && (!ebgp || rt.code === 'C') && igpLookup(P.id, myIp)) state = 'Established';
         }
       }
+      // ⏱ phiên BGP: Active → OpenSent → OpenConfirm → Established
+      if (state === 'Established') state = phaseOf(net, `bgp|${r.id}|${nip}`, 'bgp', { dev: r.id, ip: nip }) || state;
       sessions[r.id].push({ peer: P?.id || null, ip: nip, myIp, ebgp: P ? r.bgp.as !== P.bgp.as : ncfg.remoteAs !== r.bgp.as, cfg: ncfg, state, remoteAs: ncfg.remoteAs });
     }
   }
@@ -1889,6 +1911,17 @@ export function stpState(net, v) {
     W.role = W.role === 'Root' ? 'Root' : 'Desg';
     if (L.role !== 'Root') { L.role = 'Altn'; L.sts = 'BLK'; }
   }
+  // ⏱ đồng hồ mô phỏng: cổng sắp FORWARDING phải qua listening → learning (PortFast: ngay; RSTP/MST: nhanh)
+  if (net.clock) {
+    for (const [k, P] of Object.entries(ports)) {
+      if (P.sts !== 'FWD') continue;
+      const dev = k.slice(0, k.indexOf('|'));
+      const d = net.devices[dev];
+      if (!P.peer && (d.ports[P.members[0]]?.portfast || d.stp.portfastDefault)) continue;
+      const ph = phaseOf(net, `stp|${k}|${v}`, d.stp.mode === 'pvst' || !d.stp.mode ? 'stp' : 'rstp', { dev, port: P.name, vlan: v });
+      if (ph) P.sts = ph;
+    }
+  }
   return { root, dist, ports };
 }
 /** Cổng (vật lý hoặc Port-channel) có đang BLOCKING cho VLAN v không — dùng trong flood. */
@@ -1898,7 +1931,8 @@ function stpBlockedFn(net) {
     const st = (memo[v] ||= stpState(net, v));
     const d = net.devices[dev];
     const name = d.ports[port] ? (effPort(net, d, port).bundle || port) : port;
-    return st.ports[dev + '|' + name]?.sts === 'BLK';
+    const sts = st.ports[dev + '|' + name]?.sts;
+    return !!sts && sts !== 'FWD'; // BLK, hoặc LSN/LRN khi đang hội tụ (đồng hồ mô phỏng)
   };
 }
 /**
@@ -1962,4 +1996,209 @@ export function ensureFlash(d) {
   d.image ||= d.flash[0].name;
   d.version ||= verOf(d.image) || (d.type === 'router' ? '15.1(4)M4' : '15.0(2)SE4');
   return d;
+}
+
+// ======================================================================
+// ⏱ Đồng hồ mô phỏng: hội tụ theo thời gian (tuỳ chọn, gắn bằng attachClock)
+// ======================================================================
+// Không có net.clock → mọi thứ hội tụ tức thì như trước (test, chấm điểm). Có đồng hồ → mỗi "mục" (cổng STP sắp
+// forwarding, láng giềng OSPF/EIGRP, phiên BGP, thành viên HSRP/VRRP, cổng up) có thời điểm xuất hiện `since`;
+// trạng thái hiển thị và khả năng chuyển gói tuỳ tuổi của mục. Mục được phát hiện bằng một lượt "quét" (sweep)
+// tính lại toàn mạng; mục mới → since = t, mục mất → báo log down. Qua mốc pha → log IOS (+ debug nếu bật).
+/** Pha theo tuổi (giây mô phỏng): [tên pha, hết pha lúc]. Sau mốc cuối = đã hội tụ. */
+export const PHASES = {
+  stp: [['LSN', 15], ['LRN', 30]], // 802.1D: listening 15 s → learning 15 s → forwarding
+  rstp: [['LRN', 2]], // RSTP / MST: proposal–agreement, gần như tức thì
+  ospf: [['INIT', 3], ['2WAY', 6], ['EXSTART', 8], ['EXCHANGE', 10], ['LOADING', 11]],
+  eigrp: [['PENDING', 5]],
+  bgp: [['Active', 3], ['OpenSent', 6], ['OpenConfirm', 8]],
+  hsrp: [['Listen', 3], ['Speak', 10]],
+  vrrp: [['Backup', 3]],
+  link: [],
+};
+const phaseAt = (kind, age) => { for (const [n, until] of PHASES[kind] || []) if (age < until) return n; return null; };
+function ageOf(net, key) { const s = net.clock.since[key]; return s == null ? 0 : net.clock.t - s; }
+/** Pha hiện tại của mục (null = đã hội tụ hoặc không bật đồng hồ); trong lượt quét thì ghi nhận mục. */
+export function phaseOf(net, key, kind, meta) {
+  const c = net.clock;
+  if (!c) return null;
+  if (c.seen) c.seen.set(key, { ...(c.seen.get(key) || {}), kind, ...meta });
+  return phaseAt(kind, ageOf(net, key));
+}
+export function peekPhase(net, key, kind) { return net.clock ? phaseAt(kind, ageOf(net, key)) : null; }
+function noteMeta(net, key, extra) { const c = net.clock; if (c?.seen?.has(key)) Object.assign(c.seen.get(key), extra); }
+
+/** Gắn đồng hồ vào mạng: mọi thứ hiện có coi như đã hội tụ (không log). */
+export function attachClock(net) {
+  net.clock = { t: 0, since: {}, meta: {}, queue: {}, seen: null };
+  for (let i = 0; i < 8; i++) {
+    const seen = clockSweep(net);
+    let fresh = 0;
+    for (const [k, m] of seen) { if (!(k in net.clock.since)) { net.clock.since[k] = -1e6; fresh++; } net.clock.meta[k] = m; }
+    if (!fresh) break;
+  }
+  return net.clock;
+}
+export function detachClock(net) { delete net.clock; }
+/** Chạy fn như mạng đã hội tụ hết (chấm điểm), không đụng trạng thái đồng hồ. */
+export function withoutClock(net, fn) {
+  const c = net.clock;
+  if (!c) return fn();
+  delete net.clock;
+  try { return fn(); } finally { net.clock = c; }
+}
+/** Một lượt tính lại toàn mạng, trả Map key → meta của mọi mục đang tồn tại. */
+function clockSweep(net) {
+  const c = net.clock;
+  c.seen = new Map();
+  try {
+    const devs = Object.values(net.devices);
+    for (const d of devs) {
+      if (d.type !== 'router' && d.type !== 'switch') continue;
+      const names = d.type === 'switch' ? Object.keys(d.ports).filter((p) => !p.startsWith('po')) : Object.keys(d.ifaces).filter((n) => !/^(lo|tu|vlan)/.test(n));
+      for (const n of names) if (lineUp(net, d.id, n)) c.seen.set(`link|${d.id}|${n}`, { kind: 'link', dev: d.id, ifn: n });
+    }
+    const vlans = new Set();
+    for (const d of devs) if (d.type === 'switch') for (const v of Object.keys(d.vlans)) vlans.add(+v);
+    for (const v of vlans) stpState(net, v);
+    const ctx = makeCtx(net);
+    ospfAll(ctx);
+    for (const d of devs) if (isL3(d) && d.ospf) ospfNeighbors(ctx, d.id);
+    eigrpAll(ctx);
+    bgpAll(ctx);
+    for (const d of devs) {
+      if (!isL3(d)) continue;
+      for (const [n, f] of Object.entries(l3ifs(d))) if (f.ip && ifUp(net, d.id, n) && (Object.keys(f.standby || {}).length || Object.keys(f.vrrp || {}).length)) hsrpView(net, d.id, n);
+    }
+    return c.seen;
+  } finally { c.seen = null; }
+}
+const TS = (t) => { const s = Math.max(0, t); const hh = Math.floor(s / 3600), mm = Math.floor((s % 3600) / 60), ss = Math.floor(s % 60), ms = Math.floor((s % 1) * 1000); return `*Mar  1 ${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}:${String(ss).padStart(2, '0')}.${String(ms).padStart(3, '0')}`; };
+/** Ghi 1 dòng log syslog (vào buffer "show logging" + hàng đợi console của thiết bị). debug=true: chỉ khi bật debug. */
+export function logPush(net, devId, text, debug = false, bufOnly = false) {
+  const d = net.devices[devId];
+  if (!d) return;
+  const line = `${TS(net.clock?.t ?? 0)}: ${text}`;
+  if (!debug) { d.logBuf ||= []; d.logBuf.push(line); if (d.logBuf.length > 300) d.logBuf.shift(); }
+  if (net.clock && !bufOnly) (net.clock.queue[devId] ||= []).push(line);
+}
+/** Lấy (và xoá) các dòng log/debug đang chờ hiện trên console của thiết bị. */
+export function drainLogs(net, devId) {
+  const q = net.clock?.queue?.[devId];
+  if (!q?.length) return [];
+  net.clock.queue[devId] = [];
+  return q;
+}
+const LIF = (n) => longIf(n);
+const SIF = (n) => shortIf(n);
+/** Log khi mục chuyển pha a → b (null = hội tụ). */
+function emitPhase(net, m, a, b) {
+  const d = net.devices[m.dev];
+  if (!d) return;
+  const dbg = d.debug || {};
+  if (m.kind === 'ospf') {
+    const pre = `OSPF-${m.pid} ADJ   ${SIF(m.ifn)}:`;
+    if (dbg.ospfAdj) {
+      if (b === '2WAY') logPush(net, m.dev, `${pre} 2 Way Communication to ${m.nbr}, state 2WAY`, true);
+      if (b === 'EXSTART') { logPush(net, m.dev, `${pre} Nbr ${m.nbr}: Prepare dbase exchange`, true); logPush(net, m.dev, `${pre} Send DBD to ${m.nbr} seq 0x${(0x1a2b + m.nbr.length * 97).toString(16)} opt 0x52 flag 0x7 len 32`, true); }
+      if (b === 'EXCHANGE') logPush(net, m.dev, `${pre} NBR Negotiation Done. We are the ${m.nbr > (d.ospf?.rid || '') ? 'SLAVE' : 'MASTER'}`, true);
+      if (b === 'LOADING') logPush(net, m.dev, `${pre} Exchange Done with ${m.nbr}`, true);
+      if (b === null && m.full !== false) logPush(net, m.dev, `${pre} Synchronized with ${m.nbr}, state FULL`, true);
+    }
+    if (b === null && m.full !== false && a) logPush(net, m.dev, `%OSPF-5-ADJCHG: Process ${m.pid}, Nbr ${m.nbr} on ${LIF(m.ifn)} from LOADING to FULL, Loading Done`);
+  } else if (m.kind === 'eigrp' && b === null) logPush(net, m.dev, `%DUAL-5-NBRCHANGE: EIGRP-IPv4 ${m.as}: Neighbor ${m.nh} (${LIF(m.ifn)}) is up: new adjacency`);
+  else if (m.kind === 'bgp' && b === null) logPush(net, m.dev, `%BGP-5-ADJCHANGE: neighbor ${m.ip} Up`);
+  else if (m.kind === 'hsrp' || m.kind === 'vrrp') {
+    if (m.kind === 'hsrp' && b) logPush(net, m.dev, `%HSRP-5-STATECHANGE: ${LIF(m.ifn)} Grp ${m.group} state ${a || 'Init'} -> ${b}`);
+
+  }
+}
+function fhrpRoleLog(net, m, from, to) {
+  if (m.kind === 'vrrp') logPush(net, m.dev, `%VRRP-6-STATECHANGE: ${SIF(m.ifn)} Grp ${m.group} state ${from} -> ${to}`);
+  else if (to === 'Active' && from !== 'Standby') { logPush(net, m.dev, `%HSRP-5-STATECHANGE: ${LIF(m.ifn)} Grp ${m.group} state ${from} -> Standby`); logPush(net, m.dev, `%HSRP-5-STATECHANGE: ${LIF(m.ifn)} Grp ${m.group} state Standby -> Active`); }
+  else logPush(net, m.dev, `%HSRP-5-STATECHANGE: ${LIF(m.ifn)} Grp ${m.group} state ${from} -> ${to}`);
+}
+/** Mục biến mất (cổng down, xoá cấu hình…) → log down. */
+function emitGone(net, m, ph) {
+  if (m.kind === 'ospf') logPush(net, m.dev, `%OSPF-5-ADJCHG: Process ${m.pid}, Nbr ${m.nbr} on ${LIF(m.ifn)} from ${ph || (m.full === false ? '2WAY' : 'FULL')} to DOWN, Neighbor Down: Interface down or detached`);
+  else if (m.kind === 'eigrp' && !ph) logPush(net, m.dev, `%DUAL-5-NBRCHANGE: EIGRP-IPv4 ${m.as}: Neighbor ${m.nh} (${LIF(m.ifn)}) is down: holding time expired`);
+  else if (m.kind === 'bgp' && !ph) logPush(net, m.dev, `%BGP-5-ADJCHANGE: neighbor ${m.ip} Down Peer closed the session`);
+  else if ((m.kind === 'hsrp' || m.kind === 'vrrp') && net.devices[m.dev]) fhrpRoleLog(net, m, ph || m.role || 'Listen', 'Init');
+}
+/**
+ * Đồng bộ sau mỗi thay đổi (lệnh, nối dây) và mỗi tick: quét lại mạng, mục mới bắt đầu tính giờ, mục mất báo log.
+ * `quiet` = id thiết bị vừa gõ lệnh: không lặp log LINK/LINEPROTO mà chính lệnh đó đã in.
+ */
+export function clockSync(net, quiet = null) {
+  const c = net.clock;
+  if (!c) return;
+  const seen = clockSweep(net);
+  for (const [k, m] of seen) {
+    const old = c.meta[k];
+    if (!(k in c.since)) {
+      c.since[k] = c.t;
+      if (m.kind === 'link' && m.dev !== quiet) { logPush(net, m.dev, `%LINK-3-UPDOWN: Interface ${LIF(m.ifn)}, changed state to up`); logPush(net, m.dev, `%LINEPROTO-5-UPDOWN: Line protocol on Interface ${LIF(m.ifn)}, changed state to up`); }
+      if (m.kind === 'hsrp') logPush(net, m.dev, `%HSRP-5-STATECHANGE: ${LIF(m.ifn)} Grp ${m.group} state Init -> Listen`);
+      if (m.kind === 'ospf' && net.devices[m.dev]?.debug?.ospfAdj) logPush(net, m.dev, `OSPF-${m.pid} ADJ   ${SIF(m.ifn)}: Rcv hello from ${m.nbr}, state INIT`, true);
+    } else if (old && (m.kind === 'hsrp' || m.kind === 'vrrp') && m.role && !peekPhase(net, k, m.kind)) {
+      // vai trò đổi (failover / preempt), hoặc lần bầu đầu tiên ngay sau khi hết Speak / Backup
+      const from = old.role || (m.kind === 'hsrp' ? 'Speak' : 'Init');
+      if (from !== m.role) fhrpRoleLog(net, m, from, m.role);
+    }
+    c.meta[k] = { ...(old || {}), ...m };
+  }
+  for (const k of Object.keys(c.since)) {
+    if (seen.has(k)) continue;
+    const m = c.meta[k];
+    if (m) {
+      if (m.kind === 'link' && m.dev !== quiet) { logPush(net, m.dev, `%LINK-3-UPDOWN: Interface ${LIF(m.ifn)}, changed state to down`); logPush(net, m.dev, `%LINEPROTO-5-UPDOWN: Line protocol on Interface ${LIF(m.ifn)}, changed state to down`); }
+      else if (m.kind !== 'link') emitGone(net, m, phaseAt(m.kind, ageOf(net, k)));
+    }
+    delete c.since[k];
+    delete c.meta[k];
+  }
+}
+/** Tiến đồng hồ dt giây mô phỏng: báo log các mục qua mốc pha rồi đồng bộ (phát hiện mục mới nhờ mạng vừa hội tụ thêm). */
+export function clockTick(net, dt) {
+  const c = net.clock;
+  if (!c) return;
+  const t0 = c.t;
+  c.t = Math.round((c.t + dt) * 1000) / 1000;
+  crossings(net, t0);
+  clockSync(net);
+}
+function crossings(net, t0) {
+  const c = net.clock;
+  for (const [k, s] of Object.entries(c.since)) {
+    const m = c.meta[k];
+    if (!m || !PHASES[m.kind]?.length) continue;
+    // đi qua từng pha một (tick lớn ở ×20 vẫn in đủ các bước)
+    const seq = [...PHASES[m.kind].map(([n]) => n), null];
+    const a = phaseAt(m.kind, t0 - s), b = phaseAt(m.kind, c.t - s);
+    if (a === b) continue;
+    for (let i = seq.indexOf(a) + 1; i <= seq.indexOf(b); i++) emitPhase(net, m, seq[i - 1], seq[i]);
+  }
+}
+/** "⚡ Hội tụ ngay": mọi mục đang chờ coi như hết giờ (in đủ log), lặp tới khi không còn mục mới. */
+export function clockConverge(net) {
+  const c = net.clock;
+  if (!c) return;
+  for (let i = 0; i < 8; i++) {
+    clockSync(net);
+    const pending = Object.keys(c.since).filter((k) => c.meta[k] && peekPhase(net, k, c.meta[k].kind));
+    if (!pending.length) break;
+    for (const k of pending) {
+      const m = c.meta[k];
+      const seq = [...PHASES[m.kind].map(([n]) => n), null];
+      const a = phaseAt(m.kind, c.t - c.since[k]);
+      c.since[k] = c.t - 1000;
+      for (let j = seq.indexOf(a) + 1; j < seq.length; j++) emitPhase(net, m, seq[j - 1], seq[j]);
+    }
+  }
+}
+/** Còn mục nào đang hội tụ không (để UI hiện "đang hội tụ…"). */
+export function clockPending(net) {
+  const c = net.clock;
+  if (!c) return 0;
+  return Object.keys(c.since).filter((k) => c.meta[k] && peekPhase(net, k, c.meta[k].kind)).length;
 }

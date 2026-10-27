@@ -655,7 +655,7 @@ export const CCNA_LABS = [
     solution: [['a1', ['ipconfig 192.168.1.2 255.255.255.192 192.168.1.1']], ['a2', ['ipconfig 192.168.1.3 255.255.255.192 192.168.1.1']], ['b1', ['ipconfig 192.168.1.66 255.255.255.224 192.168.1.65']], ['b2', ['ipconfig 192.168.1.67 255.255.255.224 192.168.1.65']], ['c1', ['ipconfig 192.168.1.98 255.255.255.240 192.168.1.97']], ['c2', ['ipconfig 192.168.1.99 255.255.255.240 192.168.1.97']]],
   },
   {
-    id: 'B02', group: 'c2', lesson: 'Ch.2 · Bài 2 — Mô hình mạng 2 lớp (Core/Access)', lessonPath: P.b12, level: 3, kind: 'config',
+    id: 'B02', group: 'c2', topics: ['VLAN/Trunk', 'DHCP', 'Static'], lesson: 'Ch.2 · Bài 2 — Mô hình mạng 2 lớp (Core/Access)', lessonPath: P.b12, level: 3, kind: 'config',
     title: 'Mô hình 2 lớp: Core Layer 3 + 2 switch Access + đường ra Internet',
     story: 'Văn phòng theo mô hình collapsed core 2 lớp: CORE (3560) làm gateway/DHCP cho VLAN 10 (192.168.10.0/24) và 20 (192.168.20.0/24); ACC1, ACC2 đã gán cổng PC sẵn và trunk lên core. Core nối R-EDGE qua VLAN 99 (10.0.99.0/30, R-EDGE .2 đã có route về 192.168.0.0/16). Dựng hoàn chỉnh để mọi PC nhận IP tự động, liên lạc được với nhau và ra "Internet" 8.8.8.8.',
     build: () => makeNet([
