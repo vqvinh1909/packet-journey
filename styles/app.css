@@ -378,7 +378,52 @@ html, body {
 .lab-sol { margin-top: 10px; border-top: 1px dashed var(--border); padding-top: 8px; }
 .lab-sol-h { font-weight: 700; margin-bottom: 6px; }
 .lab-sol-dev { font-weight: 600; font-size: 12px; color: var(--accent); margin-top: 6px; }
-.lab-sol pre { font-family: var(--mono); font-size: 11.5px; background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; margin: 4px 0; white-space: pre-wrap; max-height: 220px; overflow: auto; }
+.lab-sol pre, .lab-guide pre { font-family: var(--mono); font-size: 11.5px; background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; margin: 4px 0; white-space: pre-wrap; max-height: 220px; overflow: auto; }
+/* Lab: nút sandbox ở header, thanh công cụ nối dây / thêm thiết bị */
+.lab-hbtns { display: flex; align-items: center; gap: 8px; }
+.lab-sbx-btn { font: inherit; font-size: 12.5px; font-weight: 600; padding: 5px 10px; border: 1px solid var(--accent-line); background: var(--accent-soft); color: var(--accent); border-radius: 7px; cursor: pointer; }
+.lab-sbx-btn:hover { border-color: var(--accent); }
+.lab-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; }
+.lab-tools button, .lab-wire button { font: inherit; font-size: 12px; padding: 4px 9px; border: 1px solid var(--border); background: var(--panel-2); color: var(--text); border-radius: 7px; cursor: pointer; }
+.lab-tools button:hover, .lab-wire button:hover { border-color: var(--accent); }
+.lab-tools button.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+.lab-tsep { width: 1px; height: 20px; background: var(--border); margin: 0 3px; }
+.lab-tstat { font-size: 12px; color: var(--muted); margin-left: 4px; }
+.lab-wire { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 12.5px; background: var(--accent-soft); border: 1px solid var(--accent-line); border-radius: 8px; padding: 6px 10px; }
+.lab-wire[hidden], .lab-tools[hidden] { display: none; }
+.lab-wire select { font: inherit; font-size: 12px; padding: 3px 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel); color: var(--text); }
+.lab-werr { color: #c0392b; font-size: 12px; }
+.lab-topo.big { height: 300px; }
+.lab-topo.tool .lab-node { cursor: crosshair; }
+.lab-link-hit { stroke: transparent; stroke-width: 16; cursor: pointer; }
+.lab-link-hit:hover { stroke: rgba(192, 57, 43, 0.35); }
+.lab-node.pick .lab-halo { fill: var(--changed-soft); stroke: var(--warn); stroke-width: 2.5; stroke-dasharray: 5 3; }
+.lab-g.switch.l3 { stroke: #1f6f8b; stroke-width: 3.2; }
+.lab-empty { font-size: 16px; fill: var(--muted); }
+/* Lab: nhiệm vụ trắc nghiệm */
+.lab-tasks li.quiz .lab-mk { color: var(--accent); }
+.lab-qopts { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
+.lab-qopt { font: inherit; font-size: 12.5px; text-align: left; padding: 5px 8px; border: 1px solid var(--border); background: var(--panel-2); color: var(--text); border-radius: 7px; cursor: pointer; line-height: 1.35; }
+.lab-qopt:hover { border-color: var(--accent); }
+.lab-qopt.right { background: #d6f0e0; border-color: var(--ok); color: #14532d; font-weight: 600; }
+.lab-qopt.wrong { background: #fbe1dd; border-color: #c0392b; color: #7a1f14; }
+:root[data-theme='dark'] .lab-qopt.right { background: #1d3a2a; color: #a7e5c3; }
+:root[data-theme='dark'] .lab-qopt.wrong { background: #3a1d1a; color: #f2b8af; }
+.lab-qfb { font-size: 12px; margin-top: 5px; }
+.lab-qfb.right { color: var(--ok); }
+.lab-qfb.wrong { color: #c0392b; }
+/* Lab: "🧭 Cách giải chi tiết" */
+.lab-guide { margin-top: 10px; border: 1px solid var(--accent-line); border-radius: 8px; background: var(--panel); }
+.lab-guide > summary { cursor: pointer; font-weight: 700; padding: 8px 10px; color: var(--accent); }
+.lab-guide[open] > summary { border-bottom: 1px solid var(--border); }
+.lab-guide-note { font-size: 11.5px; color: var(--muted); padding: 6px 10px 0; }
+.lab-guide-note code { font-family: var(--mono); font-size: 11px; }
+.lab-gstep { padding: 8px 10px; border-bottom: 1px dashed var(--border); }
+.lab-gstep:last-child { border-bottom: none; }
+.lab-gtitle { font-weight: 700; font-size: 13px; }
+.lab-gwhy { font-size: 12.5px; color: var(--muted); margin: 3px 0 2px; line-height: 1.45; }
+.lab-grun { font: inherit; font-size: 12px; padding: 4px 9px; margin-top: 4px; border: 1px solid var(--accent-line); background: var(--accent-soft); color: var(--accent); border-radius: 7px; cursor: pointer; }
+.lab-grun:hover { border-color: var(--accent); }
 @media (max-width: 1100px) {
   .lab-body { grid-template-columns: minmax(0, 1fr) 300px; }
   .lab-list { display: none; }
@@ -390,6 +435,8 @@ html, body {
   .lab-side { border-left: none; border-top: 1px solid var(--border); }
   .lab-term { min-height: 320px; }
   .lab-topo { height: 180px; }
+  .lab-topo.big { height: 260px; }
+  .lab-sbx-btn { font-size: 11.5px; padding: 4px 7px; }
 }
 
 /* Responsive */

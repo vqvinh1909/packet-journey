@@ -925,7 +925,8 @@ export function eigrpExt(ctx) {
       if (src === 'connected') base.filter((r) => r.code === 'C').forEach(take);
       if (src === 'static') base.filter((r) => r.code[0] === 'S').forEach(take);
       if (src === 'ospf' && s.ospf && s.ospf.pid === cfg.pid) {
-        (o.intRoutes[s.id] || []).forEach(take);
+        // mọi route OSPF trong bảng (O, O IA, O E2 và cả default O*E2) — như IOS thật
+        (o.routes[s.id] || []).forEach(take);
         (o.en[s.id] || []).forEach((e) => take({ code: 'C', net: netOf(e.ip, e.prefix), prefix: e.prefix }));
       }
       if (src === 'bgp' && s.bgp && s.bgp.as === cfg.as) (bgpAll(ctx).routes[s.id] || []).forEach(take);
