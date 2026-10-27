@@ -13,6 +13,7 @@ import * as N from './net.js';
 import { createCli, runScript } from './ios.js';
 import { CCNA_LABS } from './labs-ccna.js';
 import { CAP_LABS } from './labs-capstone.js';
+import { ADV_LABS } from './labs-adv.js';
 
 const B = '../Quản trị Hạ tầng mạng (Infrastructure Administrator)/';
 const P = {
@@ -61,6 +62,7 @@ export const LAB_GROUPS = [
   { id: 'c1', title: '📗 CCNA trực quan — Ch.1 Khái niệm cốt lõi' },
   { id: 'c2', title: '📗 CCNA trực quan — Ch.2 Các bước cấu hình' },
   { id: 'c3', title: '📗 CCNA trực quan — Ch.3 Xử lý sự cố' },
+  { id: 'adv', title: '🔬 Chuyên đề nâng cao — VTP · PVLAN · IPsec · BGP · STP' },
 ];
 
 const INFRA_LABS = [
@@ -767,8 +769,29 @@ const INFRA_LABS = [
   },
 ];
 
-export const LABS = [...INFRA_LABS, ...CAP_LABS, ...CCNA_LABS];
+export const LABS = [...INFRA_LABS, ...CAP_LABS, ...CCNA_LABS, ...ADV_LABS];
 export function getLab(id) { return LABS.find((l) => l.id === id) || null; }
+
+/** Chế độ thi thử: thời gian làm bài (phút) theo độ khó / loại lab. */
+export function examMinutes(lab) {
+  if (lab.group === 'cap') return 60;
+  return { 1: 10, 2: 20, 3: 35 }[lab.level] ?? 20;
+}
+/** Chấm bài thi kiểu Cisco: thang 1000, đạt khi ≥ 800. `results` = mảng true/false của checkLab. */
+export function examResult(results) {
+  const ok = results.filter(Boolean).length;
+  const score = results.length ? Math.round((ok / results.length) * 1000) : 0;
+  return { ok, total: results.length, score, pass: score >= 800 };
+}
+/** Bỏ dấu tiếng Việt + chữ thường (để tìm "định tuyến" bằng "dinh tuyen"). */
+export function fold(str) { return String(str ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd').replace(/Đ/g, 'D').toLowerCase(); }
+/** Lab có khớp chuỗi tìm kiếm không: mọi từ khoá phải xuất hiện trong id/tiêu đề/bài/đề bài/gợi ý. */
+export function labMatch(lab, query) {
+  const words = fold(query).split(/\s+/).filter(Boolean);
+  if (!words.length) return true;
+  const hay = fold([lab.id, lab.title, lab.lesson, lab.story, ...(lab.hints || []), ...(lab.tasks || []).map((t) => t.text)].join(' '));
+  return words.every((w) => hay.includes(w));
+}
 
 /** Dựng mạng cho lab + chạy cấu hình khởi tạo (qua chính CLI). */
 export function buildLab(lab) {
@@ -829,6 +852,8 @@ export function makeApi(net) {
     ospfIf: (rid, ifn) => N.ospfIfaces(ctx(), rid).find((e) => e.ifn === ifn) || null,
     bundle: (s, p) => N.bundleOf(net, net.devices[s], p),
     stpRoot: (v) => N.stpRoot(net, v)?.id || null,
+    stpRole: (dev, port, v) => N.stpState(net, v).ports[`${dev}|${port}`] || null,
+    l2path: (src, ip) => (N.resolve(net, { dev: src, ifn: 'fa0' }, ip).hops || []).map((h) => h.to),
     hsrpActive: (dev, ifn, g, proto = 'hsrp') => N.hsrpView(net, dev, ifn).find((x) => x.group === g && x.proto === proto)?.ep.dev || null,
     dhcp: (pcId) => N.dhcpRequest(N.cloneNet(net), pcId, {}),
     hasIp: (id, nw, p) => !!net.devices[id].ip && N.inNet(net.devices[id].ip, nw, p),

@@ -1,5 +1,32 @@
 # Ghi chú làm tiếp — Packet Journey
 
+## ✅ ĐÃ XONG Lab CLI đợt 3 (session 2026-10-27/28) — 7 cải tiến
+- **Cách giải báo nhiệm vụ vừa đạt** (`withGain` trong `ui/lab.js`): sau "▶ Gõ bước này"/"Gõ lời giải" hiện bước đó làm
+  đạt nhiệm vụ nào; nhiệm vụ mới chuyển xanh nháy sáng (so với lần chấm trước, cả khi gõ tay).
+- **Tìm/lọc lab**: `labMatch`/`fold` (lab/labs.js, không dấu, AND nhiều từ khoá), lọc Tất cả/Chưa xong/Đã xong
+  (`pj_lab-filter`), tiến độ từng nhóm.
+- **⏱ Thi thử**: `examMinutes`/`examResult` (lab/labs.js); lab làm lại từ đầu, ẩn gợi ý/lời giải/cách giải/giải thích/
+  trạng thái nhiệm vụ (cả dấu ✓ ở danh sách), hết giờ tự nộp, kỷ lục `pj_labexam-best`.
+- **Sandbox**: `renameDevice`, `duplicateDevice`, `createHistory` (undo/redo — trong session là `s.undo`, KHÔNG nhầm với
+  `s.hist` = lịch sử lệnh ↑/↓; từng trùng tên gây lỗi console ở lab thường, đã sửa), `SANDBOX_TEMPLATES` (5 mạng mẫu).
+- **5 lab chuyên đề** `lab/labs-adv.js` (nhóm `adv`): D01 VTP, D02 PVLAN + DHCP, D03 IPsec từ đầu, D04 BGP, D05 STP.
+- **STP thật** (`stpState` trong lab/net.js): root/root port/designated/BLK theo VLAN, cost 1G=4/100M=19/EtherChannel;
+  `flood` bỏ frame vào/ra cổng BLK; `show spanning-tree` dùng chung; topology đánh dấu ✕. Đã kiểm X01/X04 vẫn đạt.
+- **IPv6** `lab/ip6.js` (địa chỉ, nén, EUI-64) + `lab/net6.js` (routeTable6 C/L/S/O/OI, OSPFv3 cần router-id hoặc IPv4,
+  ping6 2 chiều qua flood L2, SLAAC cần `ipv6 unicast-routing`); CLI: `ipv6 address [eui-64|link-local]`, `ipv6 enable`,
+  `ipv6 ospf P area A`, `ipv6 router ospf`, `ipv6 route`, `show ipv6 interface brief|route|ospf neighbor`, `ping <IPv6>`;
+  PC: `ipv6config <IPv6>/<p> [gw]`, `ipv6config autoconfig`. Lab **X05** dual-stack. Ping IPv6 chưa có "▶ Xem gói tin".
+- **Sửa engine**: BGP dùng `update-source`; gói router tự phát dùng ICMP id riêng (tránh PAT dịch nhầm gói trả lời);
+  redistribute ospf→eigrp mang cả O E2/O*E2 (từ đợt 2).
+- **Kiểm tra**: `node --test` **170/170 pass**; `node tools/ui-smoke.cjs` (Playwright) 13/13 PASS, 0 lỗi JS.
+- Tổng: **78 lab**.
+
+### Còn có thể làm tiếp (tuỳ chọn)
+- Ping/traceroute IPv6 có timeline byte-thật ("▶ Xem gói tin") — protocols ipv6/icmpv6 đã có sẵn ở `protocols/`.
+- IPv6 trên switch L3 (SVI), DHCPv6, ACL IPv6, OSPFv3 default-information originate.
+- STP: RSTP (hội tụ nhanh) / MST theo instance trong forwarding (hiện MST chỉ ảnh hưởng priority).
+
+
 ## ✅ ĐÃ XONG Lab CLI đợt 2 (session 2026-10-27 #2) — CCNA + capstone + UI mới
 - **41 lab CCNA** (`lab/labs-ccna.js`, A01–A26 · B01–B10 · C01–C05) đã chạy test lần đầu: tất cả đạt, tên field
   trong check khớp `lab/net.js`/`lab/ios.js` (cdpRun, ports[x].cdp, lines.vty.accessClass, stp.prio/bpduDefault,
@@ -23,11 +50,7 @@
   reload, sandbox (thêm/nối/kéo/ping/xuất/nhập/xoá/gỡ dây/reload), màn 390px không tràn ngang, 0 lỗi console.
 - Tổng: **72 lab**, `node --test` **153/153 pass**.
 
-### Còn có thể làm tiếp (tuỳ chọn)
-- Sandbox: chưa có undo; chưa đổi tên thiết bị bằng UI (dùng `hostname` trong CLI vẫn đổi tên hiển thị).
-- Capstone: có thể thêm X05 (IPv6/OSPFv3) khi engine hỗ trợ IPv6 trong Lab CLI.
-- Lab X01: STP blocking chưa mô phỏng trong forwarding (vòng L2 access–core không gây bão) — nếu thêm STP thật
-  cần xem lại X01/X04 vì cả hai có đường dự phòng L2.
+(Các mục "còn lại" của đợt 2 — undo/đổi tên sandbox, X05 IPv6, STP blocking — đã làm ở đợt 3, xem trên.)
 
 
 ## ✅ ĐÃ XONG (session 2026-10-xx)
@@ -44,7 +67,6 @@
 - **Giao diện giống site tham khảo** (hainguyenit.site course_id=8): trang đó CÓ PHÍ, chỉ xem được
   trang bán khoá (mô tả + review), KHÔNG xem được UI mô phỏng thật → không copy trực tiếp được.
   Nếu muốn giống, cần user mô tả/đưa ảnh UI bài học của họ, hoặc tự thiết kế đẹp hơn.
-- Các batch CCNA/CCNP còn lại + tính năng học chủ động (xem cuối file).
 
 ---
 
@@ -207,9 +229,9 @@ lấy bài từ giáo trình Infrastructure Administrator. Nút header **🧪 La
 - Thêm lab mới: thêm object vào `LABS` (build/init/tasks/hints/solution) — test tự kiểm lời giải.
 
 ## Các nhánh còn lại (rất tùy chọn)
-- Lab CLI: IPv6 (ipv6 address / OSPFv3), VPN, WLC/Wireless, ASA, AAA/TACACS, Ansible chưa mô phỏng (GreenMart
-  task 2, 12–20 phần lớn). Có thể thêm: port-security violation khi cắm máy lạ, STP blocking thật trong forwarding.
-1. DHCPv6 Prefix Delegation, QoS hierarchical (HQoS), EVPN control-plane cho VXLAN, SR-MPLS.
+1. Lab CLI: VPN nâng cao, WLC/Wireless, ASA, AAA/TACACS, Ansible chưa mô phỏng (GreenMart task 2, 12–20 phần lớn).
+   (Port-security vi phạm khi cắm máy lạ ĐÃ CÓ — lab B07; IPv6/OSPFv3 và STP blocking ĐÃ CÓ từ đợt 3.)
+2. DHCPv6 Prefix Delegation, QoS hierarchical (HQoS), EVPN control-plane cho VXLAN, SR-MPLS.
    → Nhưng về cơ bản app đã HOÀN TẤT: phủ trọn CCNA + CCNP + SP(MPLS) + DC(VXLAN) + IPv6.
 3. **Giao diện giống site tham khảo** (hainguyenit.site) — trang đó có phí, chỉ xem được trang bán khoá.
 

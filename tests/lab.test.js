@@ -32,7 +32,7 @@ test('id lab là duy nhất và đủ trường bắt buộc', () => {
     for (const k of ['group', 'title', 'story', 'build', 'tasks', 'hints']) assert.ok(l[k], `${l.id} thiếu ${k}`);
     assert.ok(l.solution || l.guide, `${l.id} thiếu solution/guide`);
   }
-  assert.ok(LABS.length >= 25);
+  assert.ok(LABS.length >= 76);
 });
 
 // ---------- CLI giống IOS ----------
@@ -126,13 +126,33 @@ test('ACL: thứ tự dòng + deny ngầm định', () => {
   assert.equal(N.aclEval(d, 'Y', { src: '10.0.1.1' }).action, 'deny'); // implicit deny
 });
 
-test('4 lab tổng hợp doanh nghiệp (X01–X04) có cách giải chi tiết đầy đủ', async () => {
+test('5 lab tổng hợp doanh nghiệp (X01–X05) có cách giải chi tiết đầy đủ', async () => {
   const { CAP_LABS } = await import('../lab/labs-capstone.js');
-  assert.deepEqual(CAP_LABS.map((l) => l.id), ['X01', 'X02', 'X03', 'X04']);
+  assert.deepEqual(CAP_LABS.map((l) => l.id), ['X01', 'X02', 'X03', 'X04', 'X05']);
   for (const l of CAP_LABS) {
     assert.equal(l.group, 'cap');
     assert.ok(Array.isArray(l.guide) && l.guide.length >= 5, `${l.id}: guide quá ngắn`);
     assert.ok(l.guide[0].title && l.guide[0].why, `${l.id}: bước đầu thiếu title/why`);
     for (const g of l.guide) assert.ok(g.dev && Array.isArray(g.cmds) && g.cmds.length, `${l.id}: bước "${g.title}" thiếu dev/cmds`);
   }
+});
+
+test('tìm lab không dấu, nhiều từ khoá', async () => {
+  const { labMatch, fold } = await import('../lab/labs.js');
+  assert.equal(fold('Định tuyến OSPF'), 'dinh tuyen ospf');
+  const x03 = LABS.find((l) => l.id === 'X03');
+  assert.ok(labMatch(x03, 'eigrp bgp'));
+  assert.ok(labMatch(x03, 'sap nhap'));
+  assert.ok(!labMatch(x03, 'eigrp vxlan'));
+  assert.ok(labMatch(x03, '  '));
+  assert.ok(LABS.filter((l) => labMatch(l, 'nat')).length >= 5);
+});
+
+test('thi thử: thời gian theo độ khó, chấm thang 1000 đạt từ 800', async () => {
+  const { examMinutes, examResult } = await import('../lab/labs.js');
+  assert.equal(examMinutes(LABS.find((l) => l.id === 'X01')), 60);
+  assert.equal(examMinutes({ group: 'c1', level: 1 }), 10);
+  assert.deepEqual(examResult([true, true, true, true, false]), { ok: 4, total: 5, score: 800, pass: true });
+  assert.equal(examResult([true, false, false]).pass, false);
+  assert.equal(examResult([]).score, 0);
 });

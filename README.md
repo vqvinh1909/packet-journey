@@ -5,9 +5,10 @@ sâu** một gói tin đi qua từng tầng OSI/TCP-IP và từng thiết bị �
 mô phỏng + giáo trình". Gói tin được dựng thành **byte thật**, checksum **tính thật**,
 và **xuất được `.pcap`** để mở bằng Wireshark đối chiếu.
 
-> Trạng thái: **Mốc M1** — nền tảng dựng gói (Ethernet/ARP/IPv4/ICMP) + 2 kịch bản
-> ping + giao diện học cốt lõi. Các mốc sau (UDP/TCP/DNS/DHCP, VLAN/NAT/ACL,
-> chế độ đoán/quiz, PWA offline, tự tạo kịch bản) xem phần [Lộ trình](#lộ-trình).
+> Trạng thái: **đã phủ CCNA + CCNP** — 30 kịch bản byte-thật (23 giao thức, quiz đủ 30 bài),
+> chế độ học chủ động (đoán bước, thử thách sửa lỗi, từ điển, lưu tiến độ, PWA offline),
+> Builder + Canvas vẽ mạng, và **🧪 Lab CLI Cisco IOS với 78 lab** (27 lab giáo trình, 41 lab
+> CCNA trực quan, 5 lab chuyên đề, 5 lab tổng hợp doanh nghiệp) + chế độ thi thử + chế độ tự dựng mạng. Chi tiết xem [Lộ trình](#lộ-trình).
 
 ## Chạy app
 
@@ -43,10 +44,17 @@ Test kiểm: checksum so với ví dụ đã biết, độ dài & offset header,
 gói ARP/ICMP mẫu, cấu trúc file `.pcap`, longest-prefix match, và tính bất biến của
 kịch bản (TTL giảm qua router, IP src/dst giữ nguyên).
 
-Với Lab CLI (`tests/lab.test.js`), MỖI lab trong 72 lab phải: trước khi giải có ít nhất 1 nhiệm vụ
+Với Lab CLI (`tests/lab.test.js`), MỖI lab trong 78 lab phải: trước khi giải có ít nhất 1 nhiệm vụ
 cấu hình chưa đạt; chạy lời giải (`applySolution` — `solution` hoặc `guide`, bước `'@link'` = cắm dây)
 không sinh lỗi CLI `% Invalid/Incomplete/Ambiguous/Unknown`; sau đó `checkLab(lab, net, quizAnswers(lab))`
-đạt toàn bộ. `tests/sandbox.test.js` kiểm chế độ tự dựng mạng (thêm/xoá/nối dây, xuất-nhập JSON, nhiệm vụ).
+đạt toàn bộ. `tests/sandbox.test.js` kiểm chế độ tự dựng mạng (thêm/xoá/nối dây, đổi tên, nhân bản, hoàn tác,
+mạng mẫu, xuất-nhập JSON, nhiệm vụ); `tests/ip6.test.js` + `tests/net6.test.js` kiểm IPv6 (địa chỉ, SLAAC, OSPFv3, ping).
+
+Kiểm tra giao diện trên trình duyệt thật (tuỳ chọn, cần Playwright: `npm i -D playwright && npx playwright install chromium`):
+
+```bash
+node tools/ui-smoke.cjs   # tự bật server tĩnh, in PASS/FAIL từng mục
+```
 
 ## Kiểm chứng bằng Wireshark (quan trọng nhất)
 
@@ -70,18 +78,23 @@ không sinh lỗi CLI `% Invalid/Incomplete/Ambiguous/Unknown`; sau đó `checkL
 - **📘 Từ điển**: ~25 thuật ngữ (có tìm kiếm) + bảng tra nhanh cổng phổ biến & OSI↔TCP/IP.
 - **💾 Tiến độ**: đánh dấu kịch bản đã xem + điểm quiz, và nút xuất/nhập tiến độ (.json).
 - **PWA offline**: có `manifest.webmanifest` + `sw.js` (service worker) → cài được như app và chạy offline sau lần mở online đầu (trên Chrome/Edge thật).
-- **🧪 Lab CLI (Cisco IOS)** — **72 lab** + chế độ tự dựng mạng: gõ lệnh như trên router/switch thật (viết tắt `sh ip int br`, `conf t`, Tab hoàn thành, `?` trợ giúp, lỗi `% Invalid input ... '^' marker`, mật khẩu enable, `| include/section`...). Mạng được **tính thật** từ cấu hình bạn gõ: VLAN/trunk/native/DTP/VTP/EtherChannel/STP root/PVLAN, bảng định tuyến connected + static (floating) + **OSPF đa vùng/EIGRP/BGP tự hội tụ** + redistribution, GRE, IPsec, PPP CHAP, ACL (thứ tự dòng, deny ngầm định), NAT/PAT/NAT tĩnh/NAT pool, HSRP (tracking)/VRRP, DHCP + relay, DHCP snooping, port-security, SSH/Telnet, NTP. Nhiệm vụ **tự chấm** sau mỗi lệnh bằng ping/telnet/`show` thật; ping/traceroute/DHCP có nút **▶ Xem gói tin** mở timeline byte-thật ở màn hình chính.
+- **🧪 Lab CLI (Cisco IOS)** — **78 lab** + chế độ thi thử + chế độ tự dựng mạng: gõ lệnh như trên router/switch thật (viết tắt `sh ip int br`, `conf t`, Tab hoàn thành, `?` trợ giúp, lỗi `% Invalid input ... '^' marker`, mật khẩu enable, `| include/section`...). Mạng được **tính thật** từ cấu hình bạn gõ: VLAN/trunk/native/DTP/VTP/EtherChannel/PVLAN, **STP 802.1D/PVST thật** (root/root port/designated, cổng BLOCKING bị chặn khi chuyển frame), bảng định tuyến connected + static (floating) + **OSPF đa vùng/EIGRP/BGP (iBGP qua loopback, eBGP) tự hội tụ** + redistribution, **IPv6 dual-stack** (địa chỉ/EUI-64/link-local, static, OSPFv3, SLAAC, ping IPv6), GRE, IPsec, PPP CHAP, ACL (thứ tự dòng, deny ngầm định), NAT/PAT/NAT tĩnh/NAT pool, HSRP (tracking)/VRRP, DHCP + relay, DHCP snooping, port-security, SSH/Telnet, NTP. Nhiệm vụ **tự chấm** sau mỗi lệnh bằng ping/telnet/`show` thật; ping/traceroute/DHCP có nút **▶ Xem gói tin** mở timeline byte-thật ở màn hình chính.
   - **27 lab theo giáo trình** *Infrastructure Administrator* (L01–L20 theo bài, 🎫 6 ticket T01–T06, 🏢 dự án GreenMart P01).
   - **41 lab "CCNA trực quan"** (`lab/labs-ccna.js`): Ch.1 khái niệm cốt lõi A01–A26, Ch.2 các bước cấu hình B01–B10, Ch.3 xử lý sự cố C01–C05.
-  - **🏆 4 lab tổng hợp doanh nghiệp CCNA + CCNP** (`lab/labs-capstone.js`, có cách giải chi tiết):
+  - **🔬 5 lab chuyên đề** (`lab/labs-adv.js`): D01 VTP gỡ "bom revision", D02 Private VLAN khách sạn + DHCP, D03 IPsec site-to-site dựng từ đầu + NAT exemption, D04 BGP iBGP/eBGP + next-hop-self, D05 STP đặt Root Bridge đúng chỗ.
+  - **🏆 5 lab tổng hợp doanh nghiệp CCNA + CCNP** (`lab/labs-capstone.js`, có cách giải chi tiết):
     X01 campus 3 lớp (EtherChannel, port-security, HSRP trên SVI, DHCP, OSPF, NAT PAT, ACL khách, SSH) ·
     X02 HQ + 2 chi nhánh (PPP CHAP, GRE qua Internet, OSPF đa vùng, DHCP relay, NAT tập trung) ·
     X03 sáp nhập công ty (redistribution OSPF↔EIGRP, dual-ISP eBGP + default-originate, HSRP tracking, NAT) ·
-    X04 troubleshooting marathon 9 lỗi (VLAN, allowed list, native, SVI, area OSPF, default-information, ACL NAT, thứ tự ACL, VIP HSRP).
+    X04 troubleshooting marathon 9 lỗi (VLAN, allowed list, native, SVI, area OSPF, default-information, ACL NAT, thứ tự ACL, VIP HSRP) ·
+    X05 dual-stack IPv6 (ipv6 unicast-routing, OSPFv3 area 0/1, default ::/0, PC tĩnh + SLAAC, IPv4 vẫn chạy).
   - Nhiệm vụ dạng **❓ trắc nghiệm** hiện thành nút chọn đáp án (lưu ở `pj_labans:<id>`), chấm cùng các nhiệm vụ cấu hình.
-  - **🧭 Cách giải chi tiết** cho lab có `guide`: từng bước có tiêu đề, lý do và khối lệnh, nút "▶ Gõ bước này vào console".
+  - **🧭 Cách giải chi tiết** cho lab có `guide`: từng bước có tiêu đề, lý do và khối lệnh, nút "▶ Gõ bước này vào console" — sau mỗi bước báo bước đó vừa làm đạt nhiệm vụ nào (nhiệm vụ mới đạt nháy sáng).
+  - **⏱ Thi thử**: làm lại lab từ đầu có đếm giờ (theo độ khó), ẩn gợi ý / lời giải / kết quả từng nhiệm vụ; nộp bài (hoặc hết giờ) → chấm thang 1000, đạt từ 800, lưu kỷ lục.
+  - **🔎 Tìm lab** không dấu nhiều từ khoá (ví dụ "ospf nat"), lọc Chưa xong / Đã xong, mỗi nhóm hiện đã xong/tổng.
+  - Topology đánh dấu cổng đang **STP BLOCKING** (✕, rê chuột xem VLAN).
   - **🔗 Nối dây** cho lab kéo-thả (A04): chọn 2 thiết bị rồi chọn cổng; ✂ gỡ dây bằng cách bấm vào dây.
-  - **🧱 Tự dựng mạng riêng (sandbox)**: thêm PC / Server / Switch 2960 / Switch L3 3560 / Router, nối dây, xoá, kéo thả, cấu hình bằng CLI; tự lưu trong trình duyệt (`pj_sandbox-net`), ⬇ xuất / ⬆ nhập JSON; kèm 6 nhiệm vụ gợi ý lộ trình (LAN → VLAN → định tuyến → DHCP → OSPF/EIGRP).
+  - **🧱 Tự dựng mạng riêng (sandbox)**: thêm PC / Server / Switch 2960 / Switch L3 3560 / Router, nối dây, xoá, kéo thả, ✏ đổi tên, ⧉ nhân bản, ↶ hoàn tác / ↷ làm lại (Ctrl+Z/Ctrl+Y ngoài console), 📐 5 mạng mẫu, cấu hình bằng CLI; tự lưu trong trình duyệt (`pj_sandbox-net`), ⬇ xuất / ⬆ nhập JSON; kèm 6 nhiệm vụ gợi ý lộ trình (LAN → VLAN → định tuyến → DHCP → OSPF/EIGRP).
   - Tiến độ + cấu hình đã gõ được lưu, mở lại vẫn còn; có gợi ý từng bước và lời giải mẫu (nút "▶ Gõ lời giải" chạy `applySolution` ngay trong console).
 - **🛠️ Tự tạo (Builder)**: nhập IP/mask/gateway cho PC1–PC2 (± router) → app tự dựng & chạy mô phỏng ping, đúng cho 3 trường hợp: cùng mạng, khác mạng (gateway đúng), và sai gateway (ping hỏng).
 - **✏️ Vẽ mạng (Canvas)**: kéo-thả thêm PC/Switch/Router, nối dây, cấu hình IP/gateway từng thiết bị, rồi chọn 2 PC bấm "Chạy ping" → app tìm đường (BFS) và mô phỏng gói tin trên topology BẤT KỲ bạn vẽ (ARP, định tuyến qua router, TTL−1), báo lỗi rõ nếu sai gateway/không nối dây/khác subnet.
@@ -117,8 +130,10 @@ packet/     addr, bytes (BitWriter), checksum (RFC 1071), serialize, pcap
 protocols/  ethernet, dot1q, arp, ipv4, icmp, llc, stp, ospf, eigrp, udp, dhcp, dns,
             tcp, hsrp, bgp, raw, ipv6, icmpv6, ospfv3, mstp, dhcpv6, mpls, vxlan   (23 giao thức)
 engine/     tables (ARP/MAC/routing + longest-prefix), devices, simulate (recorder)
-lab/        net (máy mô phỏng mạng tính từ cấu hình), ios (CLI Cisco IOS + PC), labs (27 lab + chấm điểm),
-            labs-ccna (41 lab), labs-capstone (4 lab tổng hợp), kit (helper soạn lab), sandbox (tự dựng mạng)
+lab/        net (máy mô phỏng mạng tính từ cấu hình), net6 + ip6 (IPv6), ios (CLI Cisco IOS + PC),
+            labs (27 lab + chấm điểm), labs-ccna (41 lab), labs-adv (5 lab chuyên đề), labs-capstone (5 lab tổng hợp),
+            kit (helper soạn lab), sandbox (tự dựng mạng)
+tools/      ui-smoke.cjs (kiểm tra giao diện bằng Playwright, tuỳ chọn)
 scenarios/  s01..s08 (xem danh sách dưới)
 ui/         topology, controls, layerstack, fieldtree, hexview, explain, i18n, store, app
 i18n/       vi, en  (chuỗi giao diện)
