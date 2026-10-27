@@ -137,6 +137,18 @@ server.listen(8799, '127.0.0.1', async () => {
   await p.fill('#gf-on', 'X'); await p.fill('#gf-oa', 'abc'); await p.click('#gf-oadd');
   ok((await p.textContent('#lab-gui')).includes('ERROR'), 'Sophos: thao tác sai hiện ERROR');
   await p.screenshot({ path: process.env.SHOT || '/dev/null' }).catch(() => {});
+  // 9) Bảo mật L2 + thiết bị
+  await p.click('.lab-item[data-id="S01"]');
+  await p.click('.lab-guide summary');
+  for (let g = 0; g < 4; g++) await p.click(`.lab-grun[data-g="${g}"]`);
+  await p.waitForTimeout(100);
+  ok((await p.textContent('.lab-score')) === '4/5', 'S01: 4 bước guide (snooping + trust + renew) → 4/5 (còn câu quiz)');
+  await p.click('.lab-item[data-id="S04"]');
+  await p.click('.lab-tab[data-id="hacker"]');
+  await type('ssh -l admin 10.1.1.1');
+  ok((await p.getAttribute('#lab-in', 'type')) === 'password' && (await p.textContent('#lab-prompt')).includes('Password'), 'SSH từ PC hỏi mật khẩu (ô nhập ẩn)');
+  await type('sai');
+  ok((await p.$$eval('.lab-ln', (x) => x.map((e) => e.textContent))).some((l) => l.includes('Authentication failed')), 'SSH sai mật khẩu → Authentication failed');
   ok(errs.length === 0, 'không có lỗi JS: ' + JSON.stringify(errs).slice(0, 300));
   await b.close();
   server.close();

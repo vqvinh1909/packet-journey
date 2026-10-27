@@ -9,9 +9,18 @@
    'policy'. Sophos / Check Point / pfSense dạng GUI web: logic `lab/guifw.js` (d.os sophos|checkpoint|pfsense, "lệnh
    thao tác" `if/gw/obj/svc/rule/nat/outbound/install/apply/show`, cand/live cho CP + pfSense), trang web `ui/guifw.js`
    (ui/lab.js ẩn console, hiện #lab-gui) + lab SP01–02, CP01–02, PF01–02. Token `key="a b"` giữ 1 từ (pfSense "LAN net").
-5. ⏳ Gói bảo mật L2 + thiết bị: DAI thật (hiện chỉ parse), IP Source Guard, DHCP giả, AAA/login block-for/hardening.
+5. ✅ Bảo mật L2 + thiết bị (`lab/labs-l2sec.js`, nhóm `l2s`, S01–S06; tests/l2sec.test.js):
+   - DHCP: mọi server trong miền quảng bá là ứng viên, máy trạm lấy OFFER đầu tiên (thứ tự flood) → DHCP giả "thắng";
+     snooping loại OFFER vào cổng untrusted; ACK ghi `sw.snoop.bindings` {mac, ip, vlan, port}; /release xoá binding.
+   - `ip source binding` → `sw.snoop.statics`; `snoopBindings(sw)` = cả hai, dùng cho DAI + IPSG.
+   - DAI trong `deliverL2` (net.js): ARP Request (bên hỏi) + Reply (bên trả lời) vào cổng untrusted của VLAN có DAI
+     phải khớp binding; `daiTrust` per-port; `daiStats` + `secLog` (show logging). IPSG (`ports.ipsg`): gói IP vào cổng
+     phải có IP nguồn = binding của chính cổng đó.
+   - SSH hỏi mật khẩu thật (`s.pw = 'ssh'`, cả PC lẫn IOS); `login block-for` (`d.loginSec`, đồng hồ `N.clock` thay được
+     trong test), quiet-mode access-class; `aaa new-model` thay "login local"; `security passwords min-length`;
+     `ip http server` mở cổng 80; `exec-timeout`, `ip ssh version` lưu và hiện trong running-config.
 6. ⏳ Kịch bản tấn công byte-thật (ARP spoofing, DHCP giả/starvation, VLAN hopping) trong scenarios/.
-- Tổng hiện tại: 95 lab, `node --test` 195/195, `node tools/ui-smoke.cjs` 30/30; sandbox thêm được 6 loại firewall.
+- Tổng hiện tại: 101 lab, `node --test` 206/206, `node tools/ui-smoke.cjs` 33/33; sandbox thêm được 6 loại firewall.
 
 
 ## ✅ ĐÃ XONG Lab CLI đợt 3 (session 2026-10-27/28) — 7 cải tiến
