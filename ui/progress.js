@@ -35,7 +35,13 @@ export function openProgress() {
       return `<div class="pg-row"><span class="pg-chk">${isDone ? '✓' : '○'}</span>` +
         `<span class="pg-name">${esc(s.meta.titleVi)}</span><span class="pg-quiz">${quizTxt}</span></div>`;
     }).join('');
-    body.innerHTML = rows;
+    // Lab CLI + 🎲 Phá mạng ngẫu nhiên (lịch sử lưu ở "break-history", cũng nằm trong file xuất tiến độ)
+    const labsDone = Object.keys(load('labs-done', {})).length;
+    const brk = load('break-history', []);
+    const brkOk = brk.filter((h) => !h.revealed);
+    const extra = `<div class="pg-row"><span class="pg-chk">🧪</span><span class="pg-name">Lab CLI đã xong</span><span class="pg-quiz">${labsDone} lab</span></div>` +
+      `<div class="pg-row"><span class="pg-chk">🎲</span><span class="pg-name">Phá mạng ngẫu nhiên: ${brk.length} lượt (tự sửa không xem đáp án ${brkOk.length})</span><span class="pg-quiz">${brk[0] ? 'gần nhất ' + esc(brk[0].src) : '—'}</span></div>`;
+    body.innerHTML = extra + rows;
     modal.querySelector('#pg-sum').textContent = `Đã xem ${nDone}/${SCENARIOS.length} kịch bản`;
   }
   render();

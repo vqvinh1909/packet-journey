@@ -53,6 +53,7 @@ cấu hình chưa đạt; chạy lời giải (`applySolution` — `solution` ho
 không sinh lỗi CLI `% Invalid/Incomplete/Ambiguous/Unknown`; sau đó `checkLab(lab, net, quizAnswers(lab))`
 đạt toàn bộ. `tests/sandbox.test.js` kiểm chế độ tự dựng mạng (thêm/xoá/nối dây, đổi tên, nhân bản, hoàn tác,
 mạng mẫu, xuất-nhập JSON kể cả file cũ, nhiệm vụ, mẫu theo hãng + Add node, Start/Stop/Wipe + link down);
+`tests/breaker.test.js` kiểm phá mạng ngẫu nhiên (mọi lab có lời giải: gài lỗi → có nhiệm vụ trượt, áp lệnh sửa → đạt hết; tất định theo seed);
 `tests/capture.test.js` kiểm capture trên dây (gói đúng dây, ping lặp, ARP lần đầu, tag 802.1Q, gói định kỳ, bộ lọc, .pcap); `tests/ip6.test.js` + `tests/net6.test.js` kiểm IPv6 (địa chỉ, SLAAC, OSPFv3, ping);
 `tests/fw.test.js` + `tests/guifw.test.js` kiểm firewall; `tests/l2sec.test.js` kiểm DHCP snooping/DHCP giả, DAI,
 IP Source Guard, login block-for, AAA.
@@ -103,6 +104,7 @@ node tools/ui-smoke.cjs   # tự bật server tĩnh, in PASS/FAIL từng mục
     X05 dual-stack IPv6 (ipv6 unicast-routing, OSPFv3 area 0/1, default ::/0, PC tĩnh + SLAAC, IPv4 vẫn chạy).
   - Nhiệm vụ dạng **❓ trắc nghiệm** hiện thành nút chọn đáp án (lưu ở `pj_labans:<id>`), chấm cùng các nhiệm vụ cấu hình.
   - **🧭 Cách giải chi tiết** cho lab có `guide`: từng bước có tiêu đề, lý do và khối lệnh, nút "▶ Gõ bước này vào console" — sau mỗi bước báo bước đó vừa làm đạt nhiệm vụ nào (nhiệm vụ mới đạt nháy sáng).
+  - **🎲 Phá mạng ngẫu nhiên** (lab xử lý sự cố vô hạn, `lab/breaker.js`): chọn lab (mặc định ngẫu nhiên, ưu tiên lab đã xong), 1/2/3 lỗi và seed (cùng seed → cùng đề). App chạy lời giải để có mạng chạy tốt rồi gài lỗi ngẫu nhiên từ thư viện: cổng shutdown, sai VLAN access, trunk thiếu VLAN trong allowed list, lệch native VLAN, PC sai IP/mask/gateway, OSPF thiếu network/sai area, mất route tĩnh, ACL chặn nhầm (deny chèn lên đầu), thiếu `ip nat inside/outside`, sai IP ảo HSRP, port-security err-disabled, sai `encapsulation dot1Q`. Chỉ gài lỗi hợp với thiết bị/tính năng trong lab và mỗi lỗi phải làm hỏng ít nhất 1 nhiệm vụ (kiểm bằng `checkLab`). Nhiệm vụ = các nhiệm vụ gốc của lab; 💡 Gợi ý mở dần (lớp nào → thiết bị nào → cổng/lệnh nào), 🔑 Xem đáp án liệt kê lỗi kèm lệnh sửa. Chấm theo thời gian và số gợi ý, lưu lịch sử (có trong xuất/nhập tiến độ).
   - **⏱ Thi thử**: làm lại lab từ đầu có đếm giờ (theo độ khó), ẩn gợi ý / lời giải / kết quả từng nhiệm vụ; nộp bài (hoặc hết giờ) → chấm thang 1000, đạt từ 800, lưu kỷ lục.
   - **🔎 Tìm lab** không dấu nhiều từ khoá (ví dụ "ospf nat"), lọc Chưa xong / Đã xong, mỗi nhóm hiện đã xong/tổng.
   - Topology đánh dấu cổng đang **STP BLOCKING** (✕, rê chuột xem VLAN).
@@ -155,7 +157,8 @@ lab/        net (máy mô phỏng mạng tính từ cấu hình), net6 + ip6 (IP
             ios (CLI Cisco IOS + PC + Zone-Based Firewall), asa (CLI Cisco ASA), fortios, panos,
             guifw (Sophos/Check Point/pfSense — ui/guifw.js vẽ trang web), labs-sec (lab firewall), labs-l2sec (lab bảo mật L2),
             labs (27 lab + chấm điểm), labs-ccna (41 lab), labs-adv (5 lab chuyên đề), labs-capstone (5 lab tổng hợp),
-            kit (helper soạn lab), sandbox (tự dựng mạng), capture (bắt gói trên dây, lọc, .pcap)
+            kit (helper soạn lab), sandbox (tự dựng mạng), capture (bắt gói trên dây, lọc, .pcap),
+            breaker (phá mạng ngẫu nhiên: thư viện lỗi, seed, gợi ý, đáp án)
 tools/      ui-smoke.cjs (kiểm tra giao diện bằng Playwright, tuỳ chọn)
 scenarios/  s01..s08 (xem danh sách dưới)
 ui/         topology, controls, layerstack, fieldtree, hexview, explain, i18n, store, app,

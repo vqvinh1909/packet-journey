@@ -1,5 +1,16 @@
 # Ghi chú làm tiếp — Packet Journey
 
+## 🎲 Phá mạng ngẫu nhiên (2026-10-27, chức năng 1/3 cho người tự học — phiên "SAP PROMPT App Hoc Mang")
+- `lab/breaker.js`: `solvedNet(lab)` (build + applySolution, mọi nhiệm vụ cấu hình đạt) → `faultCandidates(net)` (thư viện
+  lỗi: mỗi lỗi có `brk`/`fix` là lệnh CLI, `layer`/`detail` cho gợi ý) → `makeBreak(lab, n, seed)`: xáo theo `rng(seed)`
+  (mulberry32), nhận lỗi nếu tự nó làm trượt ≥ 1 nhiệm vụ, không trùng chỗ, và áp mọi `fix` thì đạt hết. Lệnh chạy qua
+  CLI thật nhưng vào thẳng configure terminal (bỏ qua mật khẩu enable). Thiết bị hãng khác (d.os) không bị gài.
+- Lab giả id `RB:<lab>:<số lỗi>:<seed>` (`breakLab`, cache): kind 'ticket', tasks = nhiệm vụ gốc bỏ quiz, hints 3 mức,
+  solution = lệnh sửa, `breakInfo`. ui/lab.js nhận id này ở mọi chỗ (`anyLab`), không đánh dấu labs-done.
+- ui/breakui.js: hộp thoại chọn lab/độ khó/seed + lịch sử. Trạng thái đề hiện tại `break-cur` {id, t0, hints, revealed,
+  done}; lịch sử `break-history` (100 lượt). Điểm `breakScore`: xem đáp án = 0. A07/A12 không gài được (chỉ chấm cấu hình).
+- Thêm lệnh IOS `switchport port-security mac-address <mac>` (MAC tĩnh) cho lỗi port-security.
+
 ## ☁️ Thiết bị Internet vẽ thành đám mây (2026-10-27, yêu cầu từ phiên "SAP PROMPT App Hoc Mang")
 - `N.server(..., { cloud })`: cờ `cloud` (mặc định bật nếu tên chứa "INTERNET"); `N.isCloud(d)` dùng cờ, JSON cũ
   không có cờ → nhận theo tên. Chỉ đổi hình vẽ — mô phỏng vẫn là server (ping/telnet như cũ).
@@ -53,7 +64,7 @@
      trong test), quiet-mode access-class; `aaa new-model` thay "login local"; `security passwords min-length`;
      `ip http server` mở cổng 80; `exec-timeout`, `ip ssh version` lưu và hiện trong running-config.
 6. ⏳ Kịch bản tấn công byte-thật (ARP spoofing, DHCP giả/starvation, VLAN hopping) trong scenarios/.
-- Tổng hiện tại: 101 lab, `node --test` 219/219, `node tools/ui-smoke.cjs` 54/54; workspace tự dựng mạng kiểu EVE-NG + capture.
+- Tổng hiện tại: 101 lab, `node --test` 223/223, `node tools/ui-smoke.cjs` 60/60; workspace tự dựng mạng kiểu EVE-NG + capture; phá mạng ngẫu nhiên.
 
 
 ## ✅ ĐÃ XONG Lab CLI đợt 3 (session 2026-10-27/28) — 7 cải tiến
