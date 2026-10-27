@@ -1,10 +1,12 @@
-// lab/labs-capstone.js — 4 lab tổng hợp doanh nghiệp CCNA + CCNP (X01–X04), mỗi lab có
+// lab/labs-capstone.js — 5 lab tổng hợp doanh nghiệp CCNA + CCNP (X01–X05), mỗi lab có
 // "🧭 Cách giải chi tiết" (guide: từng bước { dev, title, why, cmds, raw? }) — guide đồng thời là
 // lời giải chạy được (labs.js → solutionOf/applySolution), nên test tự động chấm luôn cả guide.
 // Topology, địa chỉ, tình huống và lỗi cài sẵn đều tự thiết kế theo kiến thức CCNA/CCNP chuẩn.
 
 import * as N from './net.js';
 import { cfg, fa, same, allowedOk, aclOn, quiz, hostIn, ml3 } from './kit.js';
+import * as V6 from './net6.js';
+import * as A6 from './ip6.js';
 
 const { pc, server, sw, router, makeNet } = N;
 
@@ -256,5 +258,44 @@ export const CAP_LABS = [
       { text: 'Ràng buộc: IP của PC không đổi', verify: 'ipconfig', check: (a) => a.d('sales').ip === '192.168.10.10' && a.d('hr').ip === '192.168.20.10' && a.d('it').ip === '192.168.30.10' },
     ],
     hints: ['Làm từ dưới lên theo mô hình OSI: VLAN → trunk (allowed/native) → SVI/HSRP → OSPF → default route → NAT → ACL.', 'Lệnh "thám tử": show vlan brief · show interfaces trunk · show ip interface brief · show standby brief · show ip ospf neighbor · show ip route · show access-lists · show ip nat translations.', 'Có tất cả 9 lỗi. Mở "🧭 Cách giải chi tiết" nếu bí.'],
+  },
+  // =====================================================================
+  // X05 — Dual-stack IPv4/IPv6: OSPFv3 đa vùng, SLAAC, default IPv6 ra ISP
+  // =====================================================================
+  {
+    id: 'X05', group: 'cap', lesson: 'Capstone 5 — Dual-stack IPv6', level: 3, kind: 'project',
+    title: 'Triển khai IPv6 song song IPv4 (dual-stack): OSPFv3 đa vùng, SLAAC, default ra ISP',
+    story: 'Công ty Lam Sơn chạy IPv4 ổn định (OSPFv2 giữa R-HQ và R-BR). ISP vừa cấp khối 2001:DB8::/32 và đã có route về R-HQ. Kế hoạch địa chỉ: LAN HQ 2001:DB8:10::/64 (R-HQ ::1, PC-HQ ::10 đặt tĩnh), LAN chi nhánh 2001:DB8:20::/64 (R-BR ::1, PC-BR tự cấu hình bằng SLAAC), link R-HQ–R-BR 2001:DB8:FF::/64 (::1/::2), link R-HQ–ISP 2001:DB8:F0::/64 (ISP ::1, R-HQ ::2). Routing: OSPFv3 process 1 (router-id 1.1.1.1 / 2.2.2.2), area 0 = link + LAN HQ, area 1 = LAN chi nhánh; R-HQ default IPv6 ra ISP, R-BR default IPv6 về R-HQ. Mục tiêu: 2 site nói chuyện bằng IPv6, ra được máy chủ IPv6 2001:4860:4860::8888 — và IPv4 KHÔNG được hỏng.',
+    build: () => makeNet([
+      server('inet6', 'INTERNET IPv6', 900, 70, { ip6: '2001:4860:4860::8888', gw6: '2001:4860:4860::1' }),
+      router('isp', 'ISP', 700, 70, ['g0/0', 'g0/1']),
+      router('hq', 'R-HQ', 420, 140, ['g0/0', 'g0/1', 'g0/2']),
+      router('br', 'R-BR', 420, 320, ['g0/0', 'g0/1']),
+      pc('phq', 'PC-HQ', 160, 140, { ip: '192.168.10.10', gw: '192.168.10.1' }),
+      pc('pbr', 'PC-BR', 160, 380, { ip: '192.168.20.10', gw: '192.168.20.1' }),
+    ], [['isp', 'g0/1', 'inet6', 'fa0'], ['hq', 'g0/2', 'isp', 'g0/0'], ['hq', 'g0/1', 'br', 'g0/1'], ['hq', 'g0/0', 'phq', 'fa0'], ['br', 'g0/0', 'pbr', 'fa0']]),
+    init: [
+      ['isp', cfg('hostname ISP', 'ipv6 unicast-routing', 'interface g0/0', 'ipv6 address 2001:db8:f0::1/64', 'no shutdown', 'interface g0/1', 'ipv6 address 2001:4860:4860::1/64', 'no shutdown', 'exit', 'ipv6 route 2001:db8::/32 2001:db8:f0::2')],
+      ['hq', cfg('hostname R-HQ', 'interface g0/0', 'ip address 192.168.10.1 255.255.255.0', 'no shutdown', 'interface g0/1', 'ip address 10.0.12.1 255.255.255.252', 'no shutdown', 'interface g0/2', 'no shutdown', 'exit', 'router ospf 1', 'network 192.168.10.0 0.0.0.255 area 0', 'network 10.0.12.0 0.0.0.3 area 0')],
+      ['br', cfg('hostname R-BR', 'interface g0/0', 'ip address 192.168.20.1 255.255.255.0', 'no shutdown', 'interface g0/1', 'ip address 10.0.12.2 255.255.255.252', 'no shutdown', 'exit', 'router ospf 1', 'network 192.168.20.0 0.0.0.255 area 0', 'network 10.0.12.0 0.0.0.3 area 0')],
+    ],
+    guide: [
+      { dev: 'hq', title: '1. R-HQ: bật định tuyến IPv6 + đặt địa chỉ 3 cổng', why: 'Mặc định router Cisco KHÔNG chuyển tiếp IPv6 và không gửi Router Advertisement — phải "ipv6 unicast-routing". Mỗi cổng có địa chỉ global mới thì tự sinh thêm link-local FE80::/64 (EUI-64 từ MAC). IPv4 trên cổng vẫn giữ nguyên → dual-stack.', cmds: ['ipv6 unicast-routing', 'interface g0/0', 'ipv6 address 2001:db8:10::1/64', 'interface g0/1', 'ipv6 address 2001:db8:ff::1/64', 'interface g0/2', 'ipv6 address 2001:db8:f0::2/64'] },
+      { dev: 'hq', title: '2. R-HQ: OSPFv3 area 0 + default route IPv6 ra ISP', why: 'OSPFv3 bật THEO CỔNG ("ipv6 ospf 1 area 0"), không dùng lệnh network như OSPFv2. Router-id vẫn là số 32-bit dạng IPv4. Không đưa link ISP vào OSPFv3; dùng ::/0 trỏ về ISP.', cmds: ['ipv6 router ospf 1', 'router-id 1.1.1.1', 'exit', 'interface g0/0', 'ipv6 ospf 1 area 0', 'interface g0/1', 'ipv6 ospf 1 area 0', 'exit', 'ipv6 route ::/0 2001:db8:f0::1'] },
+      { dev: 'br', title: '3. R-BR: IPv6 + OSPFv3 (LAN ở area 1) + default về HQ', why: 'LAN chi nhánh ở area 1 → R-BR là ABR, R-HQ thấy prefix 2001:DB8:20::/64 dạng "OI". R-BR cần default ::/0 về R-HQ để ra Internet IPv6. Cổng LAN có prefix /64 + unicast-routing → router gửi RA cho SLAAC.', cmds: ['ipv6 unicast-routing', 'ipv6 router ospf 1', 'router-id 2.2.2.2', 'exit', 'interface g0/0', 'ipv6 address 2001:db8:20::1/64', 'ipv6 ospf 1 area 1', 'interface g0/1', 'ipv6 address 2001:db8:ff::2/64', 'ipv6 ospf 1 area 0', 'exit', 'ipv6 route ::/0 2001:db8:ff::1'] },
+      { dev: 'phq', raw: true, title: '4. PC: IPv6 tĩnh ở HQ, SLAAC ở chi nhánh', why: 'PC-HQ đặt tay theo kế hoạch. PC-BR tự lấy prefix từ RA + ghép EUI-64 từ MAC; gateway là link-local của R-BR.', cmds: ['ipv6config 2001:db8:10::10/64 2001:db8:10::1'] },
+      { dev: 'pbr', raw: true, title: '', why: '', cmds: ['ipv6config autoconfig', 'ping 2001:db8:10::10', 'ping 2001:4860:4860::8888'] },
+    ],
+    tasks: [
+      { text: 'R-HQ và R-BR đã "ipv6 unicast-routing"; các cổng có đúng địa chỉ IPv6 theo kế hoạch', verify: 'show ipv6 interface brief', check: (a) => { const has = (r, n, ip) => (a.d(r).ifaces[n].ipv6 || []).some((x) => x.ip === ip && x.prefix === 64); return a.d('hq').ipv6Routing && a.d('br').ipv6Routing && has('hq', 'g0/0', '2001:DB8:10::1') && has('hq', 'g0/1', '2001:DB8:FF::1') && has('hq', 'g0/2', '2001:DB8:F0::2') && has('br', 'g0/0', '2001:DB8:20::1') && has('br', 'g0/1', '2001:DB8:FF::2'); } },
+      { text: 'OSPFv3: R-HQ ↔ R-BR là láng giềng (router-id 1.1.1.1 / 2.2.2.2); R-HQ thấy 2001:DB8:20::/64 dạng OI', verify: 'show ipv6 ospf neighbor ; show ipv6 route ospf', check: (a) => { const o = V6.ospf6All(a.net); return o.rid.hq === '1.1.1.1' && o.rid.br === '2.2.2.2' && (o.adj.hq || []).some((x) => x.to === 'br') && V6.routeTable6(a.net, 'hq').some((r) => r.net === '2001:DB8:20::' && r.code === 'OI'); } },
+      { text: 'Default IPv6: R-HQ ::/0 → ISP, R-BR ::/0 → R-HQ (không đưa link ISP vào OSPFv3)', verify: 'show ipv6 route static', check: (a) => { const d0 = (r) => V6.routeTable6(a.net, r).find((x) => x.prefix === 0); return d0('hq')?.nextHop === '2001:DB8:F0::1' && d0('br')?.nextHop === '2001:DB8:FF::1' && !a.d('hq').ifaces['g0/2'].ospf6; } },
+      { text: 'PC-HQ: 2001:DB8:10::10/64 tĩnh; PC-BR nhận địa chỉ SLAAC trong 2001:DB8:20::/64 (gateway link-local)', verify: 'ipconfig', check: (a) => { const h = a.d('phq'), b = a.d('pbr'); return h.ip6 === '2001:DB8:10::10' && b.slaac && !!b.ip6 && A6.in6(b.ip6, '2001:DB8:20::', 64) && A6.isLinkLocal(b.gw6); } },
+      { text: 'PC-HQ ↔ PC-BR ping được bằng IPv6', verify: 'ping <IPv6>', check: (a) => !!a.d('pbr').ip6 && V6.ping6(a.net, 'phq', a.d('pbr').ip6).ok && V6.ping6(a.net, 'pbr', '2001:DB8:10::10').ok },
+      { text: 'Cả 2 PC ping được máy chủ IPv6 2001:4860:4860::8888', verify: 'ping 2001:4860:4860::8888', check: (a) => ['phq', 'pbr'].every((p) => V6.ping6(a.net, p, '2001:4860:4860::8888').ok) },
+      { text: 'Dual-stack: IPv4 vẫn chạy (PC-HQ ping 192.168.20.10)', verify: 'ping 192.168.20.10', check: (a) => a.ping('phq', '192.168.20.10') },
+      quiz('Địa chỉ SLAAC của PC-BR được ghép từ đâu?', ['64 bit prefix trong Router Advertisement + 64 bit interface ID sinh từ MAC (EUI-64)', 'Do DHCPv6 server cấp', 'Ngẫu nhiên hoàn toàn', 'Copy từ địa chỉ IPv4'], 0, 'EUI-64: chèn FFFE vào giữa MAC và đảo bit thứ 7 (U/L). Windows hiện đại thường dùng interface ID ngẫu nhiên cho riêng tư.'),
+    ],
+    hints: ['Xem "🧭 Cách giải chi tiết".', 'Router không chuyển tiếp IPv6 nếu chưa "ipv6 unicast-routing" — và cũng không gửi RA nên SLAAC thất bại.', 'OSPFv3 cấu hình trên cổng: interface g0/1 → ipv6 ospf 1 area 0. Kiểm tra: show ipv6 ospf neighbor ; show ipv6 route.', 'PC: ipv6config 2001:db8:10::10/64 2001:db8:10::1 ; ipv6config autoconfig'],
   },
 ];

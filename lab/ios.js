@@ -1749,7 +1749,7 @@ export function createCli(net) {
     const ll = V6.llOf(net, d.id, 'fa0');
     if (ll) L.push(`   Link-local IPv6 Address.........: ${ll}`);
     if (d.ip6) L.push(`   IPv6 Address....................: ${d.ip6}/${d.prefix6 ?? 64}`);
-    L.push(`   IPv4 Address....................: ${d.ip || '0.0.0.0'}`, `   Subnet Mask.....................: ${d.ip ? prefixToMask(d.prefix) : '0.0.0.0'}`, `   Default Gateway.................: ${d.gw6 ? d.gw6 + '\n                                     ' : ''}${d.gateway || '0.0.0.0'}`);
+    L.push(`   IPv4 Address....................: ${d.ip || '0.0.0.0'}`, `   Subnet Mask.....................: ${d.ip ? prefixToMask(d.prefix) : '0.0.0.0'}`, ...(d.gw6 ? [`   Default Gateway.................: ${d.gw6}`, `                                     ${d.gateway || '0.0.0.0'}`] : [`   Default Gateway.................: ${d.gateway || '0.0.0.0'}`]));
     if (all) L.push(`   DNS Servers.....................: ${d.dns || '0.0.0.0'}`);
     L.push('');
     return L;

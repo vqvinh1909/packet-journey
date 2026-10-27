@@ -126,9 +126,9 @@ test('ACL: thứ tự dòng + deny ngầm định', () => {
   assert.equal(N.aclEval(d, 'Y', { src: '10.0.1.1' }).action, 'deny'); // implicit deny
 });
 
-test('4 lab tổng hợp doanh nghiệp (X01–X04) có cách giải chi tiết đầy đủ', async () => {
+test('5 lab tổng hợp doanh nghiệp (X01–X05) có cách giải chi tiết đầy đủ', async () => {
   const { CAP_LABS } = await import('../lab/labs-capstone.js');
-  assert.deepEqual(CAP_LABS.map((l) => l.id), ['X01', 'X02', 'X03', 'X04']);
+  assert.deepEqual(CAP_LABS.map((l) => l.id), ['X01', 'X02', 'X03', 'X04', 'X05']);
   for (const l of CAP_LABS) {
     assert.equal(l.group, 'cap');
     assert.ok(Array.isArray(l.guide) && l.guide.length >= 5, `${l.id}: guide quá ngắn`);

@@ -110,7 +110,7 @@ export function openLab(onRun) {
     else net = buildLab(l);
     const cli = createCli(net);
     const first = solutionOf(l).find(([d]) => net.devices[d]);
-    x = { lab: l, net, cli, dev: first?.[0] || Object.keys(net.devices)[0] || null, term: {}, hist: {}, hpos: -1, log: [], hintN: 0, showSol: false, guideOpen: false, results: [], password: false, answers: load('labans:' + l.id, {}), tool: null, pick: [], drag: null, stepGain: {}, gainMsg: null, exam: null, examRes: null, hist: sbx ? createHistory() : null };
+    x = { lab: l, net, cli, dev: first?.[0] || Object.keys(net.devices)[0] || null, term: {}, hist: {}, hpos: -1, log: [], hintN: 0, showSol: false, guideOpen: false, results: [], password: false, answers: load('labans:' + l.id, {}), tool: null, pick: [], drag: null, stepGain: {}, gainMsg: null, exam: null, examRes: null, undo: sbx ? createHistory() : null }; // hist = lịch sử lệnh ↑/↓, undo = hoàn tác sandbox
     const old = sbx ? null : load('lablog:' + l.id, null);
     if (Array.isArray(old) && old.length) {
       for (const [dev, cmd] of old) {
@@ -141,9 +141,9 @@ export function openLab(onRun) {
     save('lablog:' + lab.id, s.log);
   }
   /** Thay đổi mạng sandbox có ghi lịch sử hoàn tác (lab thường thì chạy thẳng). */
-  function mut(fn) { return s.hist ? s.hist.track(s.net, fn) : fn(); }
+  function mut(fn) { return s.undo ? s.undo.track(s.net, fn) : fn(); }
   function undoRedo(redo) {
-    if (!s.hist || !(redo ? s.hist.redo(s.net) : s.hist.undo(s.net))) return;
+    if (!s.undo || !(redo ? s.undo.redo(s.net) : s.undo.undo(s.net))) return;
     if (s.dev && !s.net.devices[s.dev]) s.dev = Object.keys(s.net.devices)[0] || null;
     s.pick = [];
     $('lab-wire').hidden = true;
@@ -177,7 +177,7 @@ export function openLab(onRun) {
     html += b('lab-t-wire', '🔗 Nối dây', 'Chọn thiết bị 1 rồi thiết bị 2, sau đó chọn cổng', s.tool === 'wire') + b('lab-t-cut', '✂ Gỡ dây', 'Bấm vào sợi dây cần gỡ', s.tool === 'cut');
     if (sandbox()) {
       html += b('lab-t-del', '🗑 Xoá thiết bị', 'Xoá thiết bị đang chọn (cùng dây của nó)') + b('lab-t-ren', '✏ Đổi tên', 'Đổi tên thiết bị đang chọn') + b('lab-t-dup', '⧉ Nhân bản', 'Sao thiết bị đang chọn (giữ cấu hình, bỏ IP và dây)') +
-        `<button id="lab-t-undo" title="Hoàn tác (Ctrl+Z khi không gõ console)"${s.hist.canUndo ? '' : ' disabled'}>↶ Hoàn tác</button><button id="lab-t-redo" title="Làm lại (Ctrl+Y)"${s.hist.canRedo ? '' : ' disabled'}>↷ Làm lại</button>` +
+        `<button id="lab-t-undo" title="Hoàn tác (Ctrl+Z khi không gõ console)"${s.undo.canUndo ? '' : ' disabled'}>↶ Hoàn tác</button><button id="lab-t-redo" title="Làm lại (Ctrl+Y)"${s.undo.canRedo ? '' : ' disabled'}>↷ Làm lại</button>` +
         `<select id="lab-t-tpl" title="Nạp mạng mẫu (chỉ thiết bị + dây, bạn tự cấu hình)"><option value="">📐 Mạng mẫu…</option>${SANDBOX_TEMPLATES.map((t) => `<option value="${t.id}" title="${esc(t.desc)}">${esc(t.title)}</option>`).join('')}</select>` + '<span class="lab-tsep"></span>' +
         b('lab-t-exp', '⬇ Xuất JSON', 'Tải mạng về máy') + b('lab-t-imp', '⬆ Nhập JSON', 'Mở file mạng đã xuất') + b('lab-t-clr', '🧹 Xoá hết', 'Bắt đầu lại từ mạng trống');
     }
@@ -374,7 +374,7 @@ export function openLab(onRun) {
     const svg = $('lab-topo');
     const toSvg = (ev) => { const p = svg.createSVGPoint(); p.x = ev.clientX; p.y = ev.clientY; return p.matrixTransform(svg.getScreenCTM().inverse()); };
     const d = s.net.devices[id], p0 = toSvg(e);
-    s.drag = { id, dx: d.x - p0.x, dy: d.y - p0.y, moved: false, sx: e.clientX, sy: e.clientY, before: s.hist.snapshot(s.net) };
+    s.drag = { id, dx: d.x - p0.x, dy: d.y - p0.y, moved: false, sx: e.clientX, sy: e.clientY, before: s.undo.snapshot(s.net) };
     const move = (ev) => {
       const g = s.drag;
       if (!g) return;
@@ -387,7 +387,7 @@ export function openLab(onRun) {
     const up = () => {
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
-      if (s.drag?.moved) { s.hist.commit(s.net, s.drag.before); saveSandbox(); renderTools(); drawTopo(); }
+      if (s.drag?.moved) { s.undo.commit(s.net, s.drag.before); saveSandbox(); renderTools(); drawTopo(); }
       setTimeout(() => { s.drag = null; }, 0); // để onclick ngay sau khi thả biết là vừa kéo
     };
     window.addEventListener('pointermove', move);
