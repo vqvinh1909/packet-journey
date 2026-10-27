@@ -14,6 +14,10 @@
 import * as N from './net.js';
 import * as A6 from './ip6.js';
 import * as V6 from './net6.js';
+import { makeAsa } from './asa.js';
+import { makeForti } from './fortios.js';
+import { makePan } from './panos.js';
+import { makeGuiFw } from './guifw.js';
 
 const { longIf, shortIf, normIf, isIp, maskToPrefix, prefixToMask, netOf, ifSort } = N;
 
@@ -215,6 +219,8 @@ export function createCli(net) {
 
   // ================== Bảng lệnh: SHOW ==================
   const SHOW_COMMON = [
+    c('show login', (x) => R(showLogin(x.d))),
+    c('show logging', (x) => R(['Syslog logging: enabled (0 messages dropped, 0 flushes, 0 overruns)', `    Trap logging: level informational${x.d.logging.length ? ', ' + x.d.logging.map((h) => `logging to ${h}`).join(', ') : ''}`, '', 'Log Buffer (4096 bytes):', ...(x.d.secLog || [])])),
     c('show running-config', (x) => R(runningConfig(x.d))),
     c('show running-config interface <if>', (x) => R(runIfBlock(x.d, x.a[0]))),
     c('show startup-config', (x) => R(showStartup(x.d))),
@@ -259,6 +265,10 @@ export function createCli(net) {
     c('show ipv6 route', (x) => R(showIpv6Route(x.d, null))),
     c('show ipv6 route {ospf|static|connected|local}', (x) => R(showIpv6Route(x.d, x.a[0]))),
     c('show ipv6 ospf neighbor', (x) => R(showOspf6Nei(x.d))),
+    c('show zone security', (x) => R(showZones(x.d))),
+    c('show zone-pair security', (x) => R(showZonePairs(x.d))),
+    c('show class-map type inspect', (x) => R(showCmapI(x.d))),
+    c('show policy-map type inspect zone-pair sessions', (x) => R(showZbfSessions(x.d))),
     ...SHOW_ROUTING,
     c('show ip nat translations', (x) => R(showNatTr(x.d))),
     c('show ip nat statistics', (x) => R(showNatStat(x.d))),
@@ -298,6 +308,15 @@ export function createCli(net) {
     c('show port-security interface <if>', (x) => R(showPsIf(x.d, x.a[0]))),
     c('show vtp status', (x) => R(showVtp(x.d))),
     c('show ip dhcp snooping', (x) => R(showSnoop(x.d))),
+    c('show ip dhcp snooping binding', (x) => R(showSnoopBind(x.d))),
+    c('show ip source binding', (x) => R(showSnoopBind(x.d, true))),
+    c('show ip arp inspection', (x) => R(showDai(x.d, x.d.dai))),
+    c('show ip arp inspection vlan <vlist>', (x) => R(showDai(x.d, x.a[0]))),
+    c('show ip arp inspection statistics', (x) => R(showDaiStats(x.d))),
+    c('show ip arp inspection interfaces', (x) => R(showDaiIfs(x.d))),
+    c('show ip verify source', (x) => R(showIpsg(x.d))),
+    c('clear ip dhcp snooping binding', (x) => { x.d.snoop.bindings = []; return R([]); }),
+    c('clear ip arp inspection statistics', (x) => { x.d.daiStats = {}; return R([]); }),
   ];
 
   // ================== EXEC ==================
@@ -308,7 +327,7 @@ export function createCli(net) {
     c('traceroute <ip>', (x) => iosTrace(x.d, x.a[0])),
     c('telnet <ip>', (x) => tcpConnect(x.d, x.a[0], 23, 'ios')),
     c('telnet <ip> <num>', (x) => tcpConnect(x.d, x.a[0], x.a[1], 'ios')),
-    c('ssh -l <word> <ip>', (x) => sshConnect(x.d, x.a[1], x.a[0])),
+    c('ssh -l <word> <ip>', (x) => sshConnect(x.d, x.a[1], x.a[0], x.s)),
     c('exit', (x) => logout(x)),
     c('logout', (x) => logout(x)),
   ];
@@ -344,9 +363,9 @@ export function createCli(net) {
   // ================== CẤU HÌNH GLOBAL ==================
   const CFG_COMMON = [
     c('hostname <word>', (x) => { x.d.name = x.a[0]; return R([]); }),
-    c('enable secret <word>', (x) => { x.d.enableSecret = x.a[0]; return R([]); }),
+    c('enable secret <word>', (x) => pwShort(x, x.a[0]) || ((x.d.enableSecret = x.a[0]), R([]))),
     c('enable secret 5 <word>', (x) => { x.d.enableSecret = unhash(x.a[0], x.d.enableSecret); return R([]); }),
-    c('enable password <word>', (x) => { x.d.enablePassword = x.a[0]; return R([]); }),
+    c('enable password <word>', (x) => pwShort(x, x.a[0]) || ((x.d.enablePassword = x.a[0]), R([]))),
     c('enable password 7 <word>', (x) => { x.d.enablePassword = untype7(x.a[0]); return R([]); }),
     c('no enable secret', (x) => { x.d.enableSecret = null; return R([]); }),
     c('no enable password', (x) => { x.d.enablePassword = null; return R([]); }),
@@ -371,7 +390,27 @@ export function createCli(net) {
     c('crypto key generate rsa', (x) => rsaGen(x, 512)),
     c('crypto key generate rsa modulus <num>', (x) => rsaGen(x, x.a[0])),
     c('crypto key generate rsa general-keys modulus <num>', (x) => rsaGen(x, x.a[0])),
-    c('ip ssh version {1|2}', () => R([])),
+    c('ip ssh version {1|2}', (x) => { x.d.sshVer = +x.a[0]; return R([]); }),
+    c('ip ssh time-out <num>', (x) => { x.d.sshTimeout = x.a[0]; return R([]); }),
+    c('ip ssh authentication-retries <num>', (x) => { x.d.sshRetries = x.a[0]; return R([]); }),
+    c('login block-for <num> attempts <num> within <num>', (x) => loginBlock(x)),
+    c('no login block-for', (x) => { if (x.d.loginSec) Object.assign(x.d.loginSec, { blockFor: 0, quietUntil: 0, fails: [] }); return R([]); }),
+    c('login quiet-mode access-class <word>', (x) => { (x.d.loginSec ||= {}).quietAcl = x.a[0]; return R([]); }),
+    c('no login quiet-mode access-class', (x) => { if (x.d.loginSec) x.d.loginSec.quietAcl = null; return R([]); }),
+    c('login on-failure log', (x) => { (x.d.loginSec ||= {}).logFail = true; return R([]); }),
+    c('login on-success log', (x) => { (x.d.loginSec ||= {}).logOk = true; return R([]); }),
+    c('login delay <num>', (x) => { (x.d.loginSec ||= {}).delay = x.a[0]; return R([]); }),
+    c('security passwords min-length <num>', (x) => { if (x.a[0] < 1 || x.a[0] > 16) return R(['% Invalid input: 1-16']); x.d.pwMin = x.a[0]; return R([]); }),
+    c('no security passwords min-length', (x) => { x.d.pwMin = 0; return R([]); }),
+    c('aaa new-model', (x) => { (x.d.aaa ||= { lists: {} }).newModel = true; return R([]); }),
+    c('no aaa new-model', (x) => { if (x.d.aaa) x.d.aaa.newModel = false; return R([]); }),
+    c('aaa authentication login <word> <rest>', (x) => aaaList(x)),
+    c('no aaa authentication login <word>', (x) => { if (x.d.aaa) delete x.d.aaa.lists[x.a[0]]; return R([]); }),
+    c('aaa authentication enable default <rest>', (x) => { if (!x.d.aaa?.newModel) return R(['% AAA chưa bật — gõ "aaa new-model" trước']); x.d.aaa.enable = x.a[0]; return R([]); }),
+    c('ip http server', (x) => { x.d.httpServer = true; return R([]); }),
+    c('no ip http server', (x) => { x.d.httpServer = false; return R([]); }),
+    c('ip http secure-server', (x) => { x.d.httpsServer = true; return R([]); }),
+    c('no ip http secure-server', (x) => { x.d.httpsServer = false; return R([]); }),
     c('username <word> secret <word>', (x) => userSet(x, x.a[0], x.a[1], 1, 'secret')),
     c('username <word> password <word>', (x) => userSet(x, x.a[0], x.a[1], 1, 'password')),
     c('username <word> privilege <num> secret <word>', (x) => userSet(x, x.a[0], x.a[2], x.a[1], 'secret')),
@@ -440,6 +479,15 @@ export function createCli(net) {
     c('no ipv6 route <ip6p>', (x) => route6(x, x.a[0], null)),
     c('no ipv6 route <ip6p> <ip6>', (x) => route6(x, x.a[0], null)),
     c('ipv6 router ospf <num>', (x) => routerOspf6(x)),
+    // ---- Zone-Based Firewall ----
+    c('zone security <word>', (x) => { zbf(x.d).zones[x.a[0]] ||= { desc: '' }; x.s.mode = 'zone'; x.s.zone = x.a[0]; return R([]); }),
+    c('no zone security <word>', (x) => { const z = zbf(x.d); delete z.zones[x.a[0]]; for (const f of Object.values(x.d.ifaces)) if (f.zone === x.a[0]) f.zone = null; z.pairs = z.pairs.filter((p) => p.src !== x.a[0] && p.dst !== x.a[0]); return R([]); }),
+    c('class-map type inspect match-any <word>', (x) => cmapI(x, x.a[0], false)),
+    c('class-map type inspect match-all <word>', (x) => cmapI(x, x.a[0], true)),
+    c('class-map type inspect <word>', (x) => cmapI(x, x.a[0], true)),
+    c('policy-map type inspect <word>', (x) => { const z = zbf(x.d); z.policyMaps[x.a[0]] ||= [{ cls: 'class-default', action: 'drop' }]; x.s.mode = 'pmapi'; x.s.pm = x.a[0]; return R([]); }),
+    c('zone-pair security <word> source <word> destination <word>', (x) => zpair(x)),
+    c('no zone-pair security <word>', (x) => { const z = zbf(x.d); z.pairs = z.pairs.filter((p) => p.name !== x.a[0]); return R([]); }),
     c('no ipv6 router ospf <num>', (x) => { if (x.d.ospf6?.pid === x.a[0]) x.d.ospf6 = null; return R([]); }),
   ];
   const CFG_ROUTER = [
@@ -501,6 +549,14 @@ export function createCli(net) {
     c('no ip dhcp snooping', (x) => { x.d.snoop.enabled = false; return R([]); }),
     c('ip dhcp snooping vlan <vlist>', (x) => { for (const v of x.a[0]) if (!x.d.snoop.vlans.includes(v)) x.d.snoop.vlans.push(v); return R([]); }),
     c('ip arp inspection vlan <vlist>', (x) => { for (const v of x.a[0]) if (!x.d.dai.includes(v)) x.d.dai.push(v); return R([]); }),
+    c('no ip dhcp snooping vlan <vlist>', (x) => { x.d.snoop.vlans = x.d.snoop.vlans.filter((v) => !x.a[0].includes(v)); return R([]); }),
+    c('no ip arp inspection vlan <vlist>', (x) => { x.d.dai = x.d.dai.filter((v) => !x.a[0].includes(v)); return R([]); }),
+    c('ip arp inspection validate <rest>', (x) => { x.d.daiValidate = x.a[0]; return R([]); }),
+    c('no ip arp inspection validate <rest>', (x) => { x.d.daiValidate = null; return R([]); }),
+    c('ip dhcp snooping information option', (x) => { x.d.snoop.noOpt82 = false; return R([]); }),
+    c('no ip dhcp snooping information option', (x) => { x.d.snoop.noOpt82 = true; return R([]); }),
+    c('ip source binding <word> vlan <num> <ip> interface <if>', (x) => srcBinding(x, true)),
+    c('no ip source binding <word> vlan <num> <ip> interface <if>', (x) => srcBinding(x, false)),
   ];
 
   // ================== CHẾ ĐỘ INTERFACE ==================
@@ -558,6 +614,8 @@ export function createCli(net) {
     c('no ipv6 address', (x) => ifAll(x, (f) => { f.ipv6 = []; f.ll = null; })),
     c('no ipv6 address <ip6p>', (x) => ifAll(x, (f) => { f.ipv6 = (f.ipv6 || []).filter((a) => !(a.ip === x.a[0].ip && a.prefix === x.a[0].prefix)); })),
     c('ipv6 enable', (x) => ifAll(x, (f) => { f.ipv6Enable = true; })),
+    c('zone-member security <word>', (x) => { if (!x.d.zbf?.zones[x.a[0]]) return R([`% Zone ${x.a[0]} chưa tồn tại — tạo bằng "zone security ${x.a[0]}" trước`]); return ifAll(x, (f) => { f.zone = x.a[0]; }); }),
+    c('no zone-member security <word>', (x) => ifAll(x, (f) => { if (f.zone === x.a[0]) f.zone = null; })),
     c('no ipv6 enable', (x) => ifAll(x, (f) => { f.ipv6Enable = false; })),
     c('ipv6 ospf <num> area <num>', (x) => ospf6If(x, x.a[0], x.a[1])),
     c('no ipv6 ospf <num> area <num>', (x) => ifAll(x, (f) => { f.ospf6 = null; })),
@@ -615,7 +673,14 @@ export function createCli(net) {
     c('no channel-group', (x) => ports(x, (p) => { p.group = null; p.chMode = null; })),
     c('ip dhcp snooping trust', (x) => ports(x, (p) => { p.trust = true; })),
     c('no ip dhcp snooping trust', (x) => ports(x, (p) => { p.trust = false; })),
-    c('ip arp inspection trust', () => R([])),
+    c('ip arp inspection trust', (x) => ports(x, (p) => { p.daiTrust = true; })),
+    c('no ip arp inspection trust', (x) => ports(x, (p) => { p.daiTrust = false; })),
+    c('ip arp inspection limit rate <num>', (x) => ports(x, (p) => { p.daiRate = x.a[0]; })),
+    c('ip dhcp snooping limit rate <num>', (x) => ports(x, (p) => { p.dhcpRate = x.a[0]; })),
+    c('no ip dhcp snooping limit rate', (x) => ports(x, (p) => { p.dhcpRate = null; })),
+    c('ip verify source', (x) => ports(x, (p) => { p.ipsg = true; })),
+    c('ip verify source port-security', (x) => ports(x, (p) => { p.ipsg = true; })),
+    c('no ip verify source', (x) => ports(x, (p) => { p.ipsg = false; })),
     c('cdp enable', (x) => ports(x, (p) => { p.cdp = true; })),
     c('no cdp enable', (x) => ports(x, (p) => { p.cdp = false; })),
     c('shutdown', (x) => ports(x, (p) => { p.shutdown = true; }, null, (n) => [`%LINK-5-CHANGED: Interface ${longIf(n)}, changed state to administratively down`])),
@@ -635,6 +700,27 @@ export function createCli(net) {
     c('exit', (x) => { x.s.mode = 'config'; return R([]); }),
     c('end', (x) => toPriv(x)),
     c('do <rest>', (x) => doExec(x)),
+  ];
+  const ZONE_MODE = [c('description <rest>', (x) => { x.d.zbf.zones[x.s.zone].desc = x.a[0]; return R([]); }), c('exit', (x) => { x.s.mode = 'config'; return R([]); })];
+  const CMAPI_MODE = [
+    c('match protocol <word>', (x) => { const m = x.d.zbf.classMaps[x.s.cm].matches; if (!m.some((e) => e.protocol === x.a[0].toLowerCase())) m.push({ protocol: x.a[0].toLowerCase() }); return R([]); }),
+    c('no match protocol <word>', (x) => { const cm = x.d.zbf.classMaps[x.s.cm]; cm.matches = cm.matches.filter((e) => e.protocol !== x.a[0].toLowerCase()); return R([]); }),
+    c('match access-group name <word>', (x) => { x.d.zbf.classMaps[x.s.cm].matches.push({ acl: x.a[0] }); return R([]); }),
+    c('match access-group <num>', (x) => { x.d.zbf.classMaps[x.s.cm].matches.push({ acl: String(x.a[0]) }); return R([]); }),
+    c('exit', (x) => { x.s.mode = 'config'; return R([]); }),
+  ];
+  const PMAPI_MODE = [
+    c('class type inspect <word>', (x) => { if (!x.d.zbf.classMaps[x.a[0]]) return R([`% class-map ${x.a[0]} chưa tồn tại`]); pmClass(x, x.a[0]); return R([]); }),
+    c('class class-default', (x) => { pmClass(x, 'class-default'); return R([]); }),
+    c('no class type inspect <word>', (x) => { const z = x.d.zbf; z.policyMaps[x.s.pm] = z.policyMaps[x.s.pm].filter((e) => e.cls !== x.a[0]); return R([]); }),
+    c('exit', (x) => { x.s.mode = 'config'; return R([]); }),
+  ];
+  const pmAct = (a) => (x) => { x.d.zbf.policyMaps[x.s.pm].find((e) => e.cls === x.s.pmc).action = a; return R([]); };
+  const PMAPIC_MODE = [c('inspect', pmAct('inspect')), c('pass', pmAct('pass')), c('drop', pmAct('drop')), c('drop log', pmAct('drop')), c('exit', (x) => { x.s.mode = 'pmapi'; return R([]); })];
+  const ZPAIR_MODE = [
+    c('service-policy type inspect <word>', (x) => { if (!x.d.zbf.policyMaps[x.a[0]]) return R([`% policy-map ${x.a[0]} chưa tồn tại`]); x.d.zbf.pairs.find((p) => p.name === x.s.zp).policy = x.a[0]; return R([]); }),
+    c('no service-policy type inspect <word>', (x) => { x.d.zbf.pairs.find((p) => p.name === x.s.zp).policy = null; return R([]); }),
+    c('exit', (x) => { x.s.mode = 'config'; return R([]); }),
   ];
   const OSPF6_MODE = [
     c('router-id <ip>', (x) => { x.d.ospf6.rid = x.a[0]; return R([]); }),
@@ -730,8 +816,11 @@ export function createCli(net) {
     c('transport input ssh telnet', (x) => { line(x).transport = 'telnet ssh'; return R([]); }),
     c('access-class <word> in', (x) => { line(x).accessClass = x.a[0]; return R([]); }),
     c('no access-class <word> in', (x) => { line(x).accessClass = null; return R([]); }),
-    c('exec-timeout <num> <num>', () => R([])),
-    c('exec-timeout <num>', () => R([])),
+    c('exec-timeout <num> <num>', (x) => { line(x).execTimeout = [x.a[0], x.a[1]]; return R([]); }),
+    c('exec-timeout <num>', (x) => { line(x).execTimeout = [x.a[0], 0]; return R([]); }),
+    c('no exec-timeout', (x) => { line(x).execTimeout = null; return R([]); }),
+    c('login authentication <word>', (x) => { if (!x.d.aaa?.newModel) return R(['% AAA chưa bật — gõ "aaa new-model" trước']); line(x).authList = x.a[0]; return R([]); }),
+    c('no login authentication', (x) => { line(x).authList = null; return R([]); }),
     c('logging synchronous', () => R([])),
     c('exit', (x) => { x.s.mode = 'config'; return R([]); }),
     c('end', (x) => toPriv(x)),
@@ -803,7 +892,16 @@ export function createCli(net) {
 
   const showsFor = (d) => [...(isRouter(d) ? SHOW_ROUTER : SHOW_SWITCH), ...SHOW_COMMON];
   const userShows = (d) => showsFor(d).filter((e) => !['running-config', 'startup-config'].includes(e.toks[1]));
+  // Cisco ASA: bộ lệnh riêng (lab/asa.js), dùng chung parser / ping / lưu cấu hình
+  const ASA = makeAsa({
+    c, R, net, iosPing: (d, ip) => iosPing(d, ip), iosTrace: (d, ip) => iosTrace(d, ip), toPriv: (x) => toPriv(x), saveCfg: (x) => saveCfg(x),
+    doIn: (x, table) => { const words = x.a[0].split(/\s+/); const p = parse(table, words); return p.hit ? p.hit.fn({ ...x, a: p.args, words }) : errOut(p, { mode: 'config' }, x.a[0], words, 'do '); },
+  });
+  // Firewall các hãng có cú pháp riêng (không dùng bảng lệnh IOS): xử lý cả dòng lệnh
+  const GUIFW = makeGuiFw({ R });
+  const VENDOR = { fortios: makeForti({ net, R }), panos: makePan({ net, R }), sophos: GUIFW, checkpoint: GUIFW, pfsense: GUIFW };
   function tableFor(d, s) {
+    if (d.os === 'asa') return ASA.tableFor(d, s);
     switch (s.mode) {
       case 'user': return [...EXEC_USER, ...userShows(d)];
       case 'priv': return [...EXEC_PRIV, ...showsFor(d)];
@@ -822,24 +920,31 @@ export function createCli(net) {
       case 'vamap': return VAMAP_MODE;
       case 'bgp': return BGP_MODE;
       case 'ospf6': return OSPF6_MODE;
+      case 'zone': return ZONE_MODE;
+      case 'cmapi': return CMAPI_MODE;
+      case 'pmapi': return PMAPI_MODE;
+      case 'pmapic': return PMAPIC_MODE;
+      case 'zpair': return ZPAIR_MODE;
       case 'mstcfg': return MST_MODE;
       default: return [];
     }
   }
-  const cfgTable = (d) => (isRouter(d) ? CFG_ROUTER : CFG_SWITCH);
-  const SUB = new Set(['if', 'subif', 'range', 'vlan', 'router', 'pool', 'acl-std', 'acl-ext', 'line', 'isakmp', 'tset', 'cmap', 'vamap', 'bgp', 'mstcfg', 'ospf6']);
+  const cfgTable = (d) => (d.os === 'asa' ? ASA.cfgTable() : isRouter(d) ? CFG_ROUTER : CFG_SWITCH);
+  const SUB = new Set(['if', 'subif', 'range', 'vlan', 'router', 'pool', 'acl-std', 'acl-ext', 'line', 'isakmp', 'tset', 'cmap', 'vamap', 'bgp', 'mstcfg', 'ospf6', 'asaobj', 'pmap', 'pmapc', 'zone', 'cmapi', 'pmapi', 'pmapic', 'zpair']);
 
   // ================== Thực thi ==================
   function prompt(id) {
     const d = net.devices[id];
     const s = sess(id);
-    if (d.type === 'pc' || d.type === 'server') return 'C:\\>';
+    if (d.type === 'pc' || d.type === 'server') return s.pw === 'ssh' ? 'Password: ' : 'C:\\>';
     if (d.rommon) return 'rommon 1 > ';
     if (s.ask) { const st = s.ask.steps[s.ask.i]; return typeof st.p === 'function' ? st.p(s.ask.data) : st.p; }
     if (s.pw) return s.pwPrompt || 'Password: ';
     if (s.loggedOut) return '';
+    if (d.os === 'asa') return ASA.prompt(d, s);
+    if (VENDOR[d.os]) return VENDOR[d.os].prompt(d, s);
     const h = d.name;
-    return ({ user: `${h}>`, priv: `${h}#`, config: `${h}(config)#`, if: `${h}(config-if)#`, subif: `${h}(config-subif)#`, range: `${h}(config-if-range)#`, vlan: `${h}(config-vlan)#`, router: `${h}(config-router)#`, pool: `${h}(dhcp-config)#`, 'acl-std': `${h}(config-std-nacl)#`, 'acl-ext': `${h}(config-ext-nacl)#`, line: `${h}(config-line)#`, isakmp: `${h}(config-isakmp)#`, tset: `${h}(cfg-crypto-trans)#`, cmap: `${h}(config-crypto-map)#`, vamap: `${h}(config-access-map)#`, bgp: `${h}(config-router)#`, mstcfg: `${h}(config-mst)#`, ospf6: `${h}(config-rtr)#` })[s.mode] || `${h}#`;
+    return ({ user: `${h}>`, priv: `${h}#`, config: `${h}(config)#`, if: `${h}(config-if)#`, subif: `${h}(config-subif)#`, range: `${h}(config-if-range)#`, vlan: `${h}(config-vlan)#`, router: `${h}(config-router)#`, pool: `${h}(dhcp-config)#`, 'acl-std': `${h}(config-std-nacl)#`, 'acl-ext': `${h}(config-ext-nacl)#`, line: `${h}(config-line)#`, isakmp: `${h}(config-isakmp)#`, tset: `${h}(cfg-crypto-trans)#`, cmap: `${h}(config-crypto-map)#`, vamap: `${h}(config-access-map)#`, bgp: `${h}(config-router)#`, mstcfg: `${h}(config-mst)#`, ospf6: `${h}(config-rtr)#`, zone: `${h}(config-sec-zone)#`, cmapi: `${h}(config-cmap)#`, pmapi: `${h}(config-pmap)#`, pmapic: `${h}(config-pmap-c)#`, zpair: `${h}(config-sec-zone-pair)#` })[s.mode] || `${h}#`;
   }
 
   function exec(id, raw) {
@@ -847,7 +952,8 @@ export function createCli(net) {
     const s = sess(id);
     const line = String(raw ?? '');
     let res;
-    if (d.type === 'pc' || d.type === 'server') res = pcExec(d, line.trim());
+    if (d.type === 'pc' || d.type === 'server') res = s.pw === 'ssh' ? sshPw(d, s, line) : pcExec(d, line.trim());
+    else if (VENDOR[d.os]) res = VENDOR[d.os].exec(d, s, line.trim());
     else if (d.rommon) res = R(['(Lab: thiết bị đang ở ROMMON vì không có file IOS khởi động được — bấm "↺ Làm lại" để khôi phục lab.)']);
     else if (s.ask) {
       const a = s.ask;
@@ -967,6 +1073,7 @@ export function createCli(net) {
     return R([]);
   }
   function pwInput(d, s, line) {
+    if (s.pw === 'ssh') return sshPw(d, s, line);
     const pw = line.trim();
     if (s.pw === 'enable') {
       const good = d.enableSecret ? pw === d.enableSecret : pw === d.enablePassword;
@@ -1026,7 +1133,32 @@ export function createCli(net) {
     if (bits < 768) out.push('% Lab: khoá dưới 768 bit KHÔNG đủ cho SSH version 2.');
     return R(out);
   }
-  function userSet(x, u, p, priv, kind) { x.d.users[u] = { pw: p, priv, kind }; return R([]); }
+  function userSet(x, u, p, priv, kind) { const e = pwShort(x, p); if (e) return e; x.d.users[u] = { pw: p, priv, kind }; return R([]); }
+  /** "security passwords min-length N": từ chối mật khẩu mới ngắn hơn N ký tự. */
+  function pwShort(x, p) { return x.d.pwMin && String(p).length < x.d.pwMin ? R([`% Password too short - must be at least ${x.d.pwMin} characters. Password configuration failed`]) : null; }
+  function loginBlock(x) {
+    const [blockFor, attempts, within] = x.a;
+    if (!blockFor || !attempts || !within) return R(['% Invalid input: giá trị phải > 0']);
+    x.d.loginSec = { ...(x.d.loginSec || {}), blockFor, attempts, within, fails: [], quietUntil: 0 };
+    return R([]);
+  }
+  function aaaList(x) {
+    if (!x.d.aaa?.newModel) return R(['% AAA chưa bật — gõ "aaa new-model" trước']);
+    const m = x.a[1].trim().split(/\s+/);
+    if (!m.every((w, i) => ['local', 'local-case', 'enable', 'line', 'none'].includes(w) || (w === 'group' && /^(tacacs\+|radius|\S+)$/.test(m[i + 1] || '')) || m[i - 1] === 'group')) return R(['% Invalid input detected (method: local | group tacacs+ | group radius | enable | line | none)']);
+    x.d.aaa.lists[x.a[0]] = m;
+    return R([]);
+  }
+  function srcBinding(x, add) {
+    const mac = N.parseCiscoMac(x.a[0]);
+    if (!mac) return R(['% Invalid MAC address (dạng aaaa.bbbb.cccc)']);
+    if (!x.d.ports[x.a[3]]) return R([`% Invalid interface ${x.a[3]}`]);
+    const S = (x.d.snoop.statics ||= []);
+    const i = S.findIndex((b) => b.mac === mac && b.vlan === x.a[1]);
+    if (i >= 0) S.splice(i, 1);
+    if (add) S.push({ mac, vlan: x.a[1], ip: x.a[2], port: x.a[3], static: true });
+    return R([]);
+  }
   function line(x) { return x.d.lines[x.s.line]; }
   // ---------- IPv6 ----------
   function route6(x, p, o) {
@@ -1045,6 +1177,65 @@ export function createCli(net) {
       f.ipv6 = (f.ipv6 || []).filter((a) => a.ip !== ip);
       f.ipv6.push({ ip, prefix: p.prefix, ...(eui ? { eui: true } : {}) });
     });
+  }
+  // ---------- Zone-Based Firewall ----------
+  function zbf(d) {
+    d.zbf ||= { zones: {}, classMaps: {}, policyMaps: {}, pairs: [] };
+    d.fw ||= { kind: 'zbf', conns: [] };
+    return d.zbf;
+  }
+  function cmapI(x, name, all) {
+    const z = zbf(x.d);
+    z.classMaps[name] ||= { all, matches: [] };
+    z.classMaps[name].all = all;
+    x.s.mode = 'cmapi'; x.s.cm = name;
+    return R([]);
+  }
+  function pmClass(x, cls) {
+    const pm = x.d.zbf.policyMaps[x.s.pm];
+    if (!pm.some((e) => e.cls === cls)) pm.splice(pm.findIndex((e) => e.cls === 'class-default'), 0, { cls, action: null }); // class-default luôn đứng cuối
+    x.s.mode = 'pmapic'; x.s.pmc = cls;
+  }
+  function zpair(x) {
+    const z = zbf(x.d);
+    const [name, src, dst] = x.a;
+    for (const zn of [src, dst]) if (zn !== 'self' && !z.zones[zn]) return R([`% Zone ${zn} chưa tồn tại`]);
+    z.pairs = z.pairs.filter((p) => p.name !== name);
+    z.pairs.push({ name, src, dst, policy: null });
+    x.s.mode = 'zpair'; x.s.zp = name;
+    return R([]);
+  }
+  function showZones(d) {
+    const z = d.zbf;
+    const L = ['zone self', '  Description: System Defined Zone', ''];
+    for (const [n, o] of Object.entries(z?.zones || {})) {
+      L.push(`zone ${n}`, ...(o.desc ? [`  Description: ${o.desc}`] : []));
+      const mem = Object.keys(d.ifaces).filter((i) => d.ifaces[i].zone === n);
+      L.push(mem.length ? '  Member Interfaces:' : '  (Lab: chưa có cổng nào — interface ... → zone-member security ' + n + ')', ...mem.map((i) => `    ${longIf(i)}`), '');
+    }
+    return L;
+  }
+  function showZonePairs(d) {
+    const L = [];
+    for (const p of d.zbf?.pairs || []) L.push(`Zone-pair name ${p.name}`, `    Source-Zone ${p.src}  Destination-Zone ${p.dst}`, `    service-policy ${p.policy || '(chưa có — mọi gói bị DROP)'}`);
+    return L.length ? L : ['(Lab: chưa có zone-pair nào)'];
+  }
+  function showCmapI(d) {
+    const L = [];
+    for (const [n, c0] of Object.entries(d.zbf?.classMaps || {})) L.push(` Class Map type inspect ${c0.all ? 'match-all' : 'match-any'} ${n} (id 1)`, ...c0.matches.map((m) => (m.protocol ? `   Match protocol ${m.protocol}` : `   Match access-group name ${m.acl}`)), '');
+    return L;
+  }
+  function showZbfSessions(d) {
+    const L = ['', 'policy exists on zp'];
+    const zp = (c0) => (d.zbf?.pairs || []).find((p) => p.src === d.ifaces[c0.inIf]?.zone && p.dst === d.ifaces[c0.outIf]?.zone);
+    for (const p of d.zbf?.pairs || []) {
+      const ss = (d.fw?.conns || []).filter((c0) => zp(c0) === p);
+      L.push(`  Zone-pair: ${p.name}`, '', `  Service-policy inspect : ${p.policy || '-'}`, '', '    Inspect', '', '      Established Sessions');
+      ss.forEach((c0, i) => L.push(`       Session ${i + 1} (${c0.src}:${c0.sport ?? 8})=>(${c0.dst}:${c0.dport ?? 0}) ${c0.proto}:${c0.proto} SIS_OPEN`, '        Created 00:00:0' + (i % 9 + 1) + ', Last heard 00:00:00'));
+      if (!ss.length) L.push('       (không có)');
+      L.push('');
+    }
+    return L;
   }
   function routerOspf6(x) {
     if (!x.d.ipv6Routing) return R(['% IPv6 routing not enabled']);
@@ -1605,17 +1796,33 @@ export function createCli(net) {
     else out.push('% Connection timed out; remote host not responding');
     return R(out, { sim: r.sim, simLabel: `TCP ${ip}:${port}`, why: r.ok || r.kind === 'refused' ? null : r.fail?.why, ok: r.ok });
   }
-  function sshConnect(d, ip, user) {
+  /** SSH: kết nối TCP 22 thật, rồi hỏi "Password:" (dòng gõ tiếp theo) — xem sshPw. */
+  function sshConnect(d, ip, user, s) {
     const r = N.sendPacket(net, { src: d.id, dst: ip, proto: 'tcp', dport: 22, record: true, anim: true });
     const target = r.at ? net.devices[r.at.dev] : null;
-    let out;
     if (r.ok) {
-      if (target.users[user]) out = ['Password: ', '', target.banner || '', `[Lab] SSH v2 tới ${target.name} thành công với tài khoản "${user}" — phiên được MÃ HOÁ.`, `[Connection to ${ip} closed by foreign host]`];
-      else out = ['Password: ', '% Authentication failed.', '', `[Connection to ${ip} closed by foreign host]`];
-    } else if (r.kind === 'refused') out = ['% Connection refused by remote host'];
-    else out = ['% Connection timed out; remote host not responding'];
-    return R(out, { sim: r.sim, simLabel: `SSH ${ip}`, why: r.ok || r.kind === 'refused' ? (r.kind === 'refused' ? 'Cổng 22 đóng/bị từ chối: thiết bị chưa bật SSH (hostname, ip domain-name, crypto key ≥768 bit, line vty "login local" + "transport input ssh", có username) hoặc access-class trên VTY không cho nguồn này.' : null) : r.fail?.why, ok: r.ok && !!target?.users[user] });
+      Object.assign(s, { pw: 'ssh', pwPrompt: 'Password: ', ssh: { target: target.id, user, ip } });
+      return R([], { sim: r.sim, simLabel: `SSH ${ip}` });
+    }
+    const quiet = r.kind === 'refused' && target && N.loginQuiet(target);
+    const out = r.kind === 'refused' ? ['% Connection refused by remote host'] : ['% Connection timed out; remote host not responding'];
+    const why = r.kind === 'refused' ? (quiet ? `${target.name} đang ở QUIET MODE (login block-for) sau quá nhiều lần đăng nhập sai — mọi kết nối VTY bị từ chối tới khi hết thời gian chặn (trừ nguồn trong "login quiet-mode access-class").` : 'Cổng 22 đóng/bị từ chối: thiết bị chưa bật SSH (hostname, ip domain-name, crypto key ≥768 bit, line vty "login local" hoặc "aaa new-model" + "transport input ssh", có username) hoặc access-class trên VTY không cho nguồn này.') : r.fail?.why;
+    return R(out, { sim: r.sim, simLabel: `SSH ${ip}`, why, ok: false });
   }
+  function sshPw(d, s, line) {
+    const { target, user, ip } = s.ssh;
+    s.pw = null; s.ssh = null;
+    const T = net.devices[target];
+    const u = T?.users[user];
+    if (u && u.pw === line.trim()) {
+      if (T.loginSec?.logOk) N.secLog(T, `%SEC_LOGIN-5-LOGIN_SUCCESS: Login Success [user: ${user}] [Source: ${epIpOf(d)}] [localport: 22]`);
+      return R(['', T.banner || '', `[Lab] SSH v2 tới ${T.name} thành công với tài khoản "${user}" — phiên được MÃ HOÁ.`, `[Connection to ${ip} closed by foreign host]`], { ok: true });
+    }
+    if (T.loginSec?.logFail || T.loginSec?.blockFor) N.secLog(T, `%SEC_LOGIN-4-LOGIN_FAILED: Login failed [user: ${user}] [Source: ${epIpOf(d)}] [localport: 22] [Reason: Login Authentication Failed]`);
+    const q = N.loginFailed(T);
+    return R(['% Authentication failed.', '', `[Connection to ${ip} closed by foreign host]`, ...(q ? [`[Lab] ${T.name} vừa vào QUIET MODE ${T.loginSec.blockFor} giây (login block-for): ${T.loginSec.attempts} lần sai trong ${T.loginSec.within} giây → mọi kết nối SSH/Telnet mới bị từ chối.`] : [])], { ok: false, why: u ? 'Sai mật khẩu.' : `Không có username "${user}" trên ${T.name}.` });
+  }
+  const epIpOf = (d) => (d.type === 'pc' || d.type === 'server' ? d.ip : '');
 
   // ---------- IOS / flash / NVRAM ----------
   function cfgSnap(d) {
@@ -1804,7 +2011,10 @@ export function createCli(net) {
         return R(['DHCP request failed. ', ...ipconfigOut(d, false)], { sim: r.sim, simLabel: `${d.name} DHCP (thất bại)`, why: 'Không nhận được DHCP OFFER. ' + (r.why || ''), ok: false });
       }
       if (a === '/release') {
-        for (const x of Object.values(net.devices)) if (x.dhcp?.bindings) x.dhcp.bindings = x.dhcp.bindings.filter((b) => b.ip !== d.ip);
+        for (const x of Object.values(net.devices)) {
+          if (x.dhcp?.bindings) x.dhcp.bindings = x.dhcp.bindings.filter((b) => b.ip !== d.ip);
+          if (x.snoop?.bindings) x.snoop.bindings = x.snoop.bindings.filter((b) => b.ip !== d.ip); // DHCPRELEASE xoá binding snooping
+        }
         d.ip = ''; d.gateway = ''; d.dns = '';
         return R(ipconfigOut(d, false));
       }
@@ -1837,7 +2047,7 @@ export function createCli(net) {
     if (cmd === 'ping') { const ip = w.slice(1).find(isIp); return ip ? pcPing(d, ip) : R(['Invalid Command.']); }
     if (cmd === 'tracert') { const ip = w.slice(1).find(isIp); return ip ? pcTrace(d, ip) : R(['Invalid Command.']); }
     if (cmd === 'telnet') { if (!isIp(w[1])) return R(['Invalid Command.']); return tcpConnect(d, w[1], w[2] ? +w[2] : 23); }
-    if (cmd === 'ssh') { const i = w.indexOf('-l'); if (i < 0 || !w[i + 1] || !isIp(w[i + 2])) return R(['Invalid Command.', 'Cú pháp: ssh -l <username> <ip>']); return sshConnect(d, w[i + 2], w[i + 1]); }
+    if (cmd === 'ssh') { const i = w.indexOf('-l'); if (i < 0 || !w[i + 1] || !isIp(w[i + 2])) return R(['Invalid Command.', 'Cú pháp: ssh -l <username> <ip>']); return sshConnect(d, w[i + 2], w[i + 1], sess(d.id)); }
     if (cmd === 'arp' && (w[1] || '').toLowerCase() === '-a') {
       const ent = Object.entries(d.arp);
       if (!ent.length) return R(['No ARP Entries Found']);
@@ -2414,7 +2624,42 @@ export function createCli(net) {
     return ['VTP Version capable             : 1 to 3', 'VTP version running             : 1', `VTP Domain Name                 : ${d.vtpDomain}`, 'VTP Pruning Mode                : Disabled', 'VTP Traps Generation            : Disabled', `Device ID                       : ${N.ciscoMac(N.switchMac(net, d.id))}`, '', 'Feature VLAN:', '--------------', `VTP Operating Mode                : ${d.vtpMode[0].toUpperCase() + d.vtpMode.slice(1)}`, 'Maximum VLANs supported locally   : 255', `Number of existing VLANs          : ${Object.keys(d.vlans).length + 4}`, `Configuration Revision            : ${d.vtpRev}`];
   }
   function showSnoop(d) {
-    return [`Switch DHCP snooping is ${d.snoop.enabled ? 'enabled' : 'disabled'}`, 'DHCP snooping is configured on following VLANs:', d.snoop.vlans.length ? fmtVlist(d.snoop.vlans) : 'none', 'Insertion of option 82 is enabled', 'Interface                  Trusted    Rate limit (pps)', '-----------------------    -------    ----------------', ...Object.keys(d.ports).sort(ifSort).filter((n) => d.ports[n].trust).map((n) => `${pad(longIf(n), 27)}${pad('yes', 11)}unlimited`)];
+    return [`Switch DHCP snooping is ${d.snoop.enabled ? 'enabled' : 'disabled'}`, 'DHCP snooping is configured on following VLANs:', d.snoop.vlans.length ? fmtVlist(d.snoop.vlans) : 'none', `Insertion of option 82 is ${d.snoop.noOpt82 ? 'disabled' : 'enabled'}`, 'Interface                  Trusted    Rate limit (pps)', '-----------------------    -------    ----------------', ...Object.keys(d.ports).sort(ifSort).filter((n) => d.ports[n].trust || d.ports[n].dhcpRate).map((n) => `${pad(longIf(n), 27)}${pad(d.ports[n].trust ? 'yes' : 'no', 11)}${d.ports[n].dhcpRate || 'unlimited'}`)];
+  }
+  function showSnoopBind(d, withStatic) {
+    const B = withStatic ? N.snoopBindings(d) : d.snoop.bindings || [];
+    const L = ['MacAddress          IpAddress        Lease(sec)  Type           VLAN  Interface', '------------------  ---------------  ----------  -------------  ----  --------------------'];
+    for (const b of B) L.push(`${pad(b.mac.toUpperCase(), 20)}${pad(b.ip, 17)}${pad(b.static ? 'infinite' : b.lease, 12)}${pad(b.static ? 'static' : 'dhcp-snooping', 15)}${pad(b.vlan, 6)}${longIf(b.port)}`);
+    L.push(`Total number of bindings: ${B.length}`);
+    return L;
+  }
+  function showDai(d, vlans) {
+    const L = ['', `Source Mac Validation      : ${/src-mac/.test(d.daiValidate || '') ? 'Enabled' : 'Disabled'}`, `Destination Mac Validation : ${/dst-mac/.test(d.daiValidate || '') ? 'Enabled' : 'Disabled'}`, `IP Address Validation      : ${/\bip\b/.test(d.daiValidate || '') ? 'Enabled' : 'Disabled'}`, '', ' Vlan     Configuration    Operation   ACL Match          Static ACL', ' ----     -------------    ---------   ---------          ----------'];
+    for (const v of vlans) L.push(` ${pad(v, 9)}${pad(d.dai.includes(v) ? 'Enabled' : 'Disabled', 17)}${pad(d.dai.includes(v) && d.vlans[v] ? 'Active' : 'Inactive', 12)}`);
+    L.push('', ' Vlan      Forwarded        Dropped     DHCP Drops      ACL Drops', ' ----      ---------        -------     ----------      ---------');
+    for (const v of vlans) { const st = d.daiStats?.[v] || { fwd: 0, drop: 0 }; L.push(` ${pad(v, 10)}${pad(st.fwd, 17)}${pad(st.drop, 12)}${pad(st.drop, 16)}0`); }
+    return L;
+  }
+  function showDaiStats(d) { return showDai(d, d.dai).slice(9); }
+  function showDaiIfs(d) {
+    const L = [' Interface        Trust State     Rate (pps)    Burst Interval', ' ---------------  -----------     ----------    --------------'];
+    for (const n of Object.keys(d.ports).filter((x) => !x.startsWith('po')).sort(ifSort)) { const p = d.ports[n]; L.push(` ${pad(shortIf(n), 17)}${pad(p.daiTrust ? 'Trusted' : 'Untrusted', 16)}${pad(p.daiTrust ? 'None' : p.daiRate ?? 15, 14)}${p.daiTrust ? 'N/A' : 1}`); }
+    return L;
+  }
+  function showIpsg(d) {
+    const L = ['Interface    Filter-type  Filter-mode  IP-address       Mac-address        Vlan', '---------    -----------  -----------  ---------------  -----------------  ----'];
+    for (const n of Object.keys(d.ports).sort(ifSort).filter((x) => d.ports[x].ipsg)) {
+      const bs = N.snoopBindings(d).filter((b) => b.port === n);
+      if (!bs.length) L.push(`${pad(shortIf(n), 13)}${pad('ip', 13)}${pad('inactive-no-snooping-vlan', 13)}`.replace('inactive-no-snooping-vlan', d.snoop.enabled ? 'active       deny-all' : 'inactive-no-snooping-vlan'));
+      for (const b of bs) L.push(`${pad(shortIf(n), 13)}${pad('ip', 13)}${pad('active', 13)}${pad(b.ip, 17)}${pad('', 19)}${b.vlan}`);
+    }
+    return L;
+  }
+  function showLogin(d) {
+    const L = d.loginSec;
+    if (!L?.blockFor) return ['     No login delay has been applied.', '     No Quiet-Mode access list has been configured.', '', '     Router NOT enabled to watch for login Attacks'];
+    const q = N.loginQuiet(d);
+    return [`     A default login delay of ${L.delay || 1} seconds is applied.`, L.quietAcl ? `     Quiet-Mode access list ${L.quietAcl} is applied.` : '     No Quiet-Mode access list has been configured.', '', '     Router enabled to watch for login Attacks.', `     If more than ${L.attempts} login failures occur in ${L.within} seconds or less,`, `     logins will be disabled for ${L.blockFor} seconds.`, '', q ? `     Router presently in Quiet-Mode.` : '     Router presently in Normal-Mode.', q ? `     Will remain in Quiet-Mode for ${Math.ceil((L.quietUntil - N.clock.now()) / 1000)} seconds.` : `     Current Watch Window remaining time ${L.within} seconds.`, `     Present login failure count ${(L.fails || []).length}.`];
   }
 
   // ---- chung ----
@@ -2468,7 +2713,7 @@ export function createCli(net) {
     return L;
   }
   function showSsh(d) {
-    if (d.rsa >= 768) return ['SSH Enabled - version 2.0', 'Authentication timeout: 120 secs; Authentication retries: 3'];
+    if (d.rsa >= 768) return [`SSH Enabled - version ${d.sshVer === 1 ? '1.5' : '2.0'}`, `Authentication timeout: ${d.sshTimeout || 120} secs; Authentication retries: ${d.sshRetries ?? 3}`];
     if (d.rsa > 0) return ['SSH Enabled - version 1.99', 'Authentication timeout: 120 secs; Authentication retries: 3', '(Lab: khoá RSA < 768 bit nên chưa chạy được SSH version 2)'];
     return ['SSH Disabled - version 1.99', '%Please create RSA keys to enable SSH (and of atleast 768 bits for SSH v2).'];
   }
@@ -2490,10 +2735,14 @@ export function createCli(net) {
     const L = ['line con 0'];
     const c0 = d.lines.con, v = d.lines.vty;
     if (c0.password) L.push(` password ${pwShow(d, c0.password)}`);
+    if (c0.execTimeout) L.push(` exec-timeout ${c0.execTimeout.join(' ')}`);
+    if (c0.authList) L.push(` login authentication ${c0.authList}`);
     if (c0.loginLocal) L.push(' login local'); else if (c0.login) L.push(' login');
     L.push('!', 'line aux 0', '!', 'line vty 0 4');
     if (v.accessClass) L.push(` access-class ${v.accessClass} in`);
     if (v.password) L.push(` password ${pwShow(d, v.password)}`);
+    if (v.execTimeout) L.push(` exec-timeout ${v.execTimeout.join(' ')}`);
+    if (v.authList) L.push(` login authentication ${v.authList}`);
     if (v.loginLocal) L.push(' login local'); else if (v.login) L.push(' login');
     if (v.transport && v.transport !== 'all') L.push(` transport input ${v.transport}`);
     L.push('!');
@@ -2505,6 +2754,15 @@ export function createCli(net) {
     if (d.enableSecret) L.push(`enable secret 5 ${md5ish(d.enableSecret)}`);
     if (d.enablePassword) L.push(`enable password ${pwShow(d, d.enablePassword)}`);
     if (d.enableSecret || d.enablePassword) L.push('!');
+    if (d.aaa?.newModel) { L.push('aaa new-model', ...Object.entries(d.aaa.lists).map(([n, m]) => `aaa authentication login ${n} ${m.join(' ')}`), ...(d.aaa.enable ? [`aaa authentication enable default ${d.aaa.enable}`] : []), '!'); }
+    if (d.pwMin) L.push(`security passwords min-length ${d.pwMin}`);
+    const ls = d.loginSec;
+    if (ls?.blockFor) L.push(`login block-for ${ls.blockFor} attempts ${ls.attempts} within ${ls.within}`);
+    if (ls?.quietAcl) L.push(`login quiet-mode access-class ${ls.quietAcl}`);
+    if (ls?.delay) L.push(`login delay ${ls.delay}`);
+    if (ls?.logFail) L.push('login on-failure log');
+    if (ls?.logOk) L.push('login on-success log');
+    if (d.pwMin || ls?.blockFor || ls?.logFail) L.push('!');
     return L;
   }
   function tailBlock(d) {
@@ -2520,6 +2778,11 @@ export function createCli(net) {
   function usersBlock(d) {
     const L = [];
     if (d.domain) L.push(`ip domain-name ${d.domain}`);
+    if (d.sshVer) L.push(`ip ssh version ${d.sshVer}`);
+    if (d.sshTimeout) L.push(`ip ssh time-out ${d.sshTimeout}`);
+    if (d.sshRetries) L.push(`ip ssh authentication-retries ${d.sshRetries}`);
+    if (d.httpServer) L.push('ip http server');
+    if (d.httpsServer) L.push('ip http secure-server');
     for (const [u, x] of Object.entries(d.users)) L.push(`username ${u}${x.priv !== 1 ? ` privilege ${x.priv}` : ''} ${x.kind === 'secret' ? `secret 5 ${md5ish(x.pw)}` : `password ${pwShow(d, x.pw)}`}`);
     if (L.length) L.push('!');
     return L;
@@ -2605,6 +2868,7 @@ export function createCli(net) {
     for (const a of f.ipv6 || []) L.push(a.eui ? ` ipv6 address ${A6.net6(a.ip, 64)}/64 eui-64` : ` ipv6 address ${a.ip}/${a.prefix}`);
     if (f.ipv6Enable) L.push(' ipv6 enable');
     if (f.ospf6) L.push(` ipv6 ospf ${f.ospf6.pid} area ${f.ospf6.area}`);
+    if (f.zone) L.push(` zone-member security ${f.zone}`);
     if (f.bw != null) L.push(` bandwidth ${f.bw}`);
     if (n.startsWith('s') && f.l2enc === 'ppp') L.push(' encapsulation ppp');
     if (f.pppAuth) L.push(` ppp authentication ${f.pppAuth}`);
@@ -2651,6 +2915,10 @@ export function createCli(net) {
       if (p.ps.violation !== 'shutdown') L.push(` switchport port-security violation ${p.ps.violation}`);
     }
     if (p.trust) L.push(' ip dhcp snooping trust');
+    if (p.dhcpRate) L.push(` ip dhcp snooping limit rate ${p.dhcpRate}`);
+    if (p.daiTrust) L.push(' ip arp inspection trust');
+    if (p.daiRate != null) L.push(` ip arp inspection limit rate ${p.daiRate}`);
+    if (p.ipsg) L.push(' ip verify source');
     if (p.cdp === false) L.push(' no cdp enable');
     if (p.group != null) L.push(` channel-group ${p.group} mode ${p.chMode}`);
     if (p.shutdown) L.push(' shutdown');
@@ -2673,6 +2941,14 @@ export function createCli(net) {
       for (const [ip, k] of Object.entries(d.crypto.keys)) L.push(`crypto isakmp key ${k} address ${ip}`);
       for (const [n, t] of Object.entries(d.crypto.tsets)) L.push(`crypto ipsec transform-set ${n} ${t.join(' ')}`, ' mode tunnel');
       for (const [m, seqs] of Object.entries(d.crypto.maps)) for (const [seq, e] of Object.entries(seqs)) L.push(`crypto map ${m} ${seq} ipsec-isakmp`, ...(e.peer ? [` set peer ${e.peer}`] : []), ...(e.tset ? [` set transform-set ${e.tset}`] : []), ...(e.acl ? [` match address ${e.acl}`] : []), '!');
+      if (d.zbf) {
+        const z = d.zbf;
+        for (const [n, c0] of Object.entries(z.classMaps)) L.push(`class-map type inspect ${c0.all ? 'match-all' : 'match-any'} ${n}`, ...c0.matches.map((m) => (m.protocol ? ` match protocol ${m.protocol}` : ` match access-group name ${m.acl}`)), '!');
+        for (const [n, pm] of Object.entries(z.policyMaps)) L.push(`policy-map type inspect ${n}`, ...pm.flatMap((e) => [e.cls === 'class-default' ? ' class class-default' : ` class type inspect ${e.cls}`, ...(e.action ? [`  ${e.action}`] : [])]), '!');
+        for (const [n, o] of Object.entries(z.zones)) L.push(`zone security ${n}`, ...(o.desc ? [` description ${o.desc}`] : []));
+        for (const p of z.pairs) L.push(`zone-pair security ${p.name} source ${p.src} destination ${p.dst}`, ...(p.policy ? [` service-policy type inspect ${p.policy}`] : []));
+        L.push('!');
+      }
       for (const n of ifOrder(d)) L.push(...runIfRouter(d, n));
       L.push(...routingBlock(d));
       for (const r of d.nat.dyn) L.push(r.iface ? `ip nat inside source list ${r.acl} interface ${longIf(r.iface)} overload` : `ip nat inside source list ${r.acl} pool ${r.pool}${r.overload ? ' overload' : ''}`);
@@ -2691,6 +2967,9 @@ export function createCli(net) {
       if (d.snoop.vlans.length) L.push(`ip dhcp snooping vlan ${fmtVlist(d.snoop.vlans)}`);
       if (d.snoop.enabled) L.push('ip dhcp snooping');
       if (d.dai.length) L.push(`ip arp inspection vlan ${fmtVlist(d.dai)}`);
+      if (d.daiValidate) L.push(`ip arp inspection validate ${d.daiValidate}`);
+      if (d.snoop.noOpt82) L.push('no ip dhcp snooping information option');
+      for (const b of d.snoop.statics || []) L.push(`ip source binding ${N.ciscoMac(b.mac)} vlan ${b.vlan} ${b.ip} interface ${longIf(b.port)}`);
       L.push(...usersBlock(d), `spanning-tree mode ${d.stp.mode}`);
       if (d.stp.portfastDefault) L.push('spanning-tree portfast default');
       if (d.stp.bpduDefault) L.push('spanning-tree portfast bpduguard default');
@@ -2729,6 +3008,7 @@ export function createCli(net) {
   function complete(id, line0) {
     const d = net.devices[id];
     const s = sess(id);
+    if (VENDOR[d.os]) return null; // Tab hoàn thành lệnh chỉ hỗ trợ cú pháp IOS/ASA
     const m = String(line0).match(/^(.*?)(\S*)$/);
     const head = m[1], part = m[2].toLowerCase();
     if (!part) return null;

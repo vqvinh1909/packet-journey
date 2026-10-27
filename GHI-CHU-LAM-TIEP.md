@@ -1,5 +1,28 @@
 # Ghi chú làm tiếp — Packet Journey
 
+## 🛡️ ĐANG LÀM: Bảo mật & Firewall (đợt 4, 2026-10-27) — kế hoạch 6 giai đoạn user đã duyệt
+1. ✅ Lõi firewall stateful `lab/fw.js` (kind asa / zbf / policy; phiên stateful theo ctx; firewall xét ACL in SAU NAT;
+   `firewall(id,name,x,y,ifs,os)` trong net.js; tests/fw.test.js).
+2. ✅ Cisco ASA `lab/asa.js` (dialect riêng, gắn vào ios.js qua `d.os === 'asa'`) + lab F01–F04.
+3. ✅ Zone-Based Firewall trong ios.js (mode zone/cmapi/pmapi/pmapic/zpair) + lab Z01–Z03.
+4. ✅ FortiGate `lab/fortios.js` (FG01–02) + Palo Alto `lab/panos.js` (PA01–02, commit, pre-NAT IP/post-NAT zone) — kind
+   'policy'. Sophos / Check Point / pfSense dạng GUI web: logic `lab/guifw.js` (d.os sophos|checkpoint|pfsense, "lệnh
+   thao tác" `if/gw/obj/svc/rule/nat/outbound/install/apply/show`, cand/live cho CP + pfSense), trang web `ui/guifw.js`
+   (ui/lab.js ẩn console, hiện #lab-gui) + lab SP01–02, CP01–02, PF01–02. Token `key="a b"` giữ 1 từ (pfSense "LAN net").
+5. ✅ Bảo mật L2 + thiết bị (`lab/labs-l2sec.js`, nhóm `l2s`, S01–S06; tests/l2sec.test.js):
+   - DHCP: mọi server trong miền quảng bá là ứng viên, máy trạm lấy OFFER đầu tiên (thứ tự flood) → DHCP giả "thắng";
+     snooping loại OFFER vào cổng untrusted; ACK ghi `sw.snoop.bindings` {mac, ip, vlan, port}; /release xoá binding.
+   - `ip source binding` → `sw.snoop.statics`; `snoopBindings(sw)` = cả hai, dùng cho DAI + IPSG.
+   - DAI trong `deliverL2` (net.js): ARP Request (bên hỏi) + Reply (bên trả lời) vào cổng untrusted của VLAN có DAI
+     phải khớp binding; `daiTrust` per-port; `daiStats` + `secLog` (show logging). IPSG (`ports.ipsg`): gói IP vào cổng
+     phải có IP nguồn = binding của chính cổng đó.
+   - SSH hỏi mật khẩu thật (`s.pw = 'ssh'`, cả PC lẫn IOS); `login block-for` (`d.loginSec`, đồng hồ `N.clock` thay được
+     trong test), quiet-mode access-class; `aaa new-model` thay "login local"; `security passwords min-length`;
+     `ip http server` mở cổng 80; `exec-timeout`, `ip ssh version` lưu và hiện trong running-config.
+6. ⏳ Kịch bản tấn công byte-thật (ARP spoofing, DHCP giả/starvation, VLAN hopping) trong scenarios/.
+- Tổng hiện tại: 101 lab, `node --test` 206/206, `node tools/ui-smoke.cjs` 33/33; sandbox thêm được 6 loại firewall.
+
+
 ## ✅ ĐÃ XONG Lab CLI đợt 3 (session 2026-10-27/28) — 7 cải tiến
 - **Cách giải báo nhiệm vụ vừa đạt** (`withGain` trong `ui/lab.js`): sau "▶ Gõ bước này"/"Gõ lời giải" hiện bước đó làm
   đạt nhiệm vụ nào; nhiệm vụ mới chuyển xanh nháy sáng (so với lần chấm trước, cả khi gõ tay).

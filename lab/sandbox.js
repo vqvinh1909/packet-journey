@@ -11,6 +11,12 @@ export const SANDBOX_KINDS = {
   sw2960: { label: '⇄ Switch 2960', prefix: 'SW', make: (id, name, x, y) => N.sw(id, name, x, y, fa(24, ['g0/1', 'g0/2'])) },
   sw3560: { label: '⇶ Switch L3 3560', prefix: 'L3SW', make: (id, name, x, y) => { const d = N.sw(id, name, x, y, fa(24, ['g0/1', 'g0/2'])); d.model = '3560'; return d; } },
   router: { label: '⛁ Router', prefix: 'R', make: (id, name, x, y) => N.router(id, name, x, y, ['g0/0', 'g0/1', 'g0/2', 's0/0/0', 's0/0/1']) },
+  asa: { label: '🛡 Firewall ASA', prefix: 'ASA', make: (id, name, x, y) => N.firewall(id, name, x, y, ['g1/1', 'g1/2', 'g1/3', 'g1/4'], 'asa') },
+  fortios: { label: '🛡 FortiGate', prefix: 'FGT', make: (id, name, x, y) => N.firewall(id, name, x, y, ['port1', 'port2', 'port3', 'port4'], 'fortios') },
+  panos: { label: '🛡 Palo Alto', prefix: 'PA', make: (id, name, x, y) => N.firewall(id, name, x, y, ['e1/1', 'e1/2', 'e1/3', 'e1/4'], 'panos') },
+  sophos: { label: '🛡 Sophos (web)', prefix: 'XG', make: (id, name, x, y) => N.firewall(id, name, x, y, ['port1', 'port2', 'port3', 'port4'], 'sophos') },
+  checkpoint: { label: '🛡 Check Point (web)', prefix: 'CP', make: (id, name, x, y) => N.firewall(id, name, x, y, ['eth1', 'eth2', 'eth3', 'eth4'], 'checkpoint') },
+  pfsense: { label: '🛡 pfSense (web)', prefix: 'PFS', make: (id, name, x, y) => N.firewall(id, name, x, y, ['em0', 'em1', 'em2', 'em3'], 'pfsense') },
 };
 const TYPES = ['pc', 'server', 'switch', 'router'];
 export const SANDBOX_VIEW = { w: 1000, h: 440 };
@@ -88,9 +94,11 @@ export function renameDevice(net, id, name) {
 export function duplicateDevice(net, id) {
   const src = net.devices[id];
   if (!src) return null;
-  const kind = src.type === 'switch' ? (src.model === '3560' ? 'sw3560' : 'sw2960') : src.type;
+  const kind = src.type === 'switch' ? (src.model === '3560' ? 'sw3560' : 'sw2960') : SANDBOX_KINDS[src.os] ? src.os : src.type;
   const nid = addDevice(net, kind, src.x + 60, src.y + 50);
   const fresh = net.devices[nid];
+  // FortiGate / Palo Alto / firewall web giữ cấu hình (kể cả IP) trong model riêng của hãng → bản sao để trống
+  if (src.os && src.os !== 'asa') return nid;
   const d = N.cloneNet({ devices: { x: src }, links: [] }).devices.x;
   Object.assign(d, { id: nid, name: fresh.name, x: fresh.x, y: fresh.y, arp: {} });
   if (isHostLike(d)) { d.ip = ''; d.gateway = ''; }
@@ -181,7 +189,7 @@ const sameNet = (x, y) => x.prefix === y.prefix && N.netOf(x.ip, x.prefix) === N
 export const SANDBOX_LAB = {
   id: 'SBX', group: 'sbx', kind: 'sandbox', level: 1, lesson: 'Chế độ tự do',
   title: 'Tự dựng mạng riêng (sandbox)',
-  story: 'Thêm PC / Server / Switch 2960 / Switch L3 3560 / Router bằng thanh công cụ, kéo thả để sắp xếp, 🔗 Nối dây (chọn 2 thiết bị rồi chọn cổng), bấm vào thiết bị để mở console và cấu hình như IOS thật. Mạng được tự lưu trong trình duyệt; dùng ⬇ Xuất / ⬆ Nhập JSON để chia sẻ. Các nhiệm vụ bên phải chỉ là gợi ý lộ trình — mạng của bạn, luật của bạn.',
+  story: 'Thêm PC / Server / Switch 2960 / Switch L3 3560 / Router / firewall (Cisco ASA, FortiGate, Palo Alto, Sophos, Check Point, pfSense) bằng thanh công cụ, kéo thả để sắp xếp, 🔗 Nối dây (chọn 2 thiết bị rồi chọn cổng), bấm vào thiết bị để mở console và cấu hình như thiết bị thật (Sophos / Check Point / pfSense mở trang quản trị web). Mạng được tự lưu trong trình duyệt; dùng ⬇ Xuất / ⬆ Nhập JSON để chia sẻ. Các nhiệm vụ bên phải chỉ là gợi ý lộ trình — mạng của bạn, luật của bạn.',
   build: emptySandbox,
   tasks: [
     { text: 'Thêm ít nhất 2 PC và 1 switch, mọi PC đều đã cắm dây', verify: 'Thanh công cụ: 🖥 PC, ⇄ Switch, 🔗 Nối dây', check: (a) => { const ds = Object.values(a.net.devices); const pcs = ds.filter((d) => d.type === 'pc'); return pcs.length >= 2 && ds.some((d) => d.type === 'switch') && pcs.every((d) => N.linkAt(a.net, d.id, 'fa0')); } },

@@ -15,7 +15,7 @@ for (const lab of LABS) {
     const cli = createCli(net);
     const errs = [];
     for (const o of applySolution(lab, net, cli)) {
-      if (o.out.some((l) => /^% (Invalid|Incomplete|Ambiguous|Unknown)/.test(l) || l.includes("'^' marker"))) errs.push(`${o.dev}: "${o.cmd}" → ${o.out.join(' | ')}`);
+      if (o.out.some((l) => /^% (Invalid|Incomplete|Ambiguous|Unknown)/.test(l) || /^ERROR:/.test(l) || l.includes("'^' marker"))) errs.push(`${o.dev}: "${o.cmd}" → ${o.out.join(' | ')}`);
     }
     assert.deepEqual(errs, [], 'Lệnh trong lời giải bị CLI từ chối');
     const after = checkLab(lab, net, quizAnswers(lab));
@@ -32,7 +32,7 @@ test('id lab là duy nhất và đủ trường bắt buộc', () => {
     for (const k of ['group', 'title', 'story', 'build', 'tasks', 'hints']) assert.ok(l[k], `${l.id} thiếu ${k}`);
     assert.ok(l.solution || l.guide, `${l.id} thiếu solution/guide`);
   }
-  assert.ok(LABS.length >= 76);
+  assert.ok(LABS.length >= 101);
 });
 
 // ---------- CLI giống IOS ----------

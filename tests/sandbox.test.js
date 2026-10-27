@@ -102,3 +102,26 @@ test('mẫu mạng dựng sẵn hợp lệ (xuất/nhập được, mọi dây �
     S.importSandbox(S.exportSandbox(net));
   }
 });
+
+test('sandbox: thêm firewall các hãng (CLI + web), nhân bản đúng loại, xuất/nhập giữ cấu hình', () => {
+  const net = S.emptySandbox();
+  const ids = ['asa', 'fortios', 'panos', 'sophos', 'checkpoint', 'pfsense'].map((k) => S.addDevice(net, k, 100, 100));
+  assert.deepEqual(ids, ['asa1', 'fgt1', 'pa1', 'xg1', 'cp1', 'pfs1']);
+  for (const id of ids) assert.ok(net.devices[id].fw && net.devices[id].os, id);
+  // PC — pfSense — SRV: cấu hình qua "lệnh thao tác" của trang web, rule mặc định LAN cho qua
+  const pc = S.addDevice(net, 'pc', 0, 0), srv = S.addDevice(net, 'server', 0, 0);
+  S.connect(net, pc, 'fa0', 'pfs1', 'em1');
+  S.connect(net, 'pfs1', 'em0', srv, 'fa0');
+  const cli = createCli(net);
+  runScript(cli, pc, ['ipconfig 10.1.1.10 255.255.255.0 10.1.1.1']);
+  runScript(cli, srv, ['ipconfig 203.0.113.10 255.255.255.0 203.0.113.2']);
+  for (const c of ['if em0 ip=203.0.113.2/24 zone=WAN', 'if em1 ip=10.1.1.1/24 zone=LAN', 'apply']) assert.ok(!cli.exec('pfs1', c).out.some((l) => l.startsWith('ERROR')), c);
+  const ok = (n) => checkLab({ tasks: [{ check: (a) => a.ping(pc, '203.0.113.10') }] }, n, [])[0];
+  assert.ok(ok(net), 'PC ping qua pfSense');
+  const back = S.importSandbox(JSON.parse(JSON.stringify(S.exportSandbox(net))));
+  assert.ok(ok(back), 'sau xuất/nhập vẫn ping được');
+  const dup = S.duplicateDevice(net, 'pfs1');
+  assert.equal(net.devices[dup].os, 'pfsense');
+  assert.equal(net.devices[dup].gfw, undefined, 'bản sao firewall web không chép cấu hình (tránh trùng IP)');
+  assert.equal(net.devices[S.duplicateDevice(net, 'asa1')].name, 'ASA2');
+});

@@ -20,6 +20,7 @@ import { ipToInt, intToIp, parseIp } from '../packet/addr.js';
 import { pingData } from '../scenarios/_common.js';
 
 // Đang chạy thao tác "thật" của người học (ghi lại vi phạm port-security, MAC học được...)
+import { fwCheck, fwEstablished, persistFw, fwSnat } from './fw.js';
 let RECORDING = false;
 
 // ======================================================================
@@ -127,7 +128,7 @@ export function server(id, name, x, y, o = {}) {
 }
 export function newPort() {
   // modeSet=false: chưa gõ "switchport mode" → cổng DTP "dynamic auto" (mặc định của switch Cisco)
-  return { mode: 'access', modeSet: false, dyn: 'auto', vlan: 1, allowed: null, native: 1, shutdown: false, errdis: false, desc: '', group: null, chMode: null, portfast: false, bpduguard: false, ps: null, trust: false, nonegotiate: false, protected: false, cdp: true, pv: null };
+  return { mode: 'access', modeSet: false, dyn: 'auto', vlan: 1, allowed: null, native: 1, shutdown: false, errdis: false, desc: '', group: null, chMode: null, portfast: false, bpduguard: false, ps: null, trust: false, daiTrust: false, ipsg: false, dhcpRate: null, nonegotiate: false, protected: false, cdp: true, pv: null };
 }
 function newIf(name) {
   return { ip: null, prefix: null, shutdown: !name.startsWith('lo') && !name.startsWith('tu'), tunSrc: null, tunDst: null, desc: '', encap: null, native: false, nat: null, aclIn: null, aclOut: null, standby: {}, vrrp: {}, helper: [], ospfCost: null, ospfArea: null, ospfPid: null, ospfHello: null, ospfPrio: null, bw: null, clock: null, l2enc: name.startsWith('s') ? 'hdlc' : null, cdp: true, proxyArp: true, cryptoMap: null, ipv6: [], ipv6Enable: false, ll: null, ospf6: null };
@@ -155,8 +156,9 @@ export function sw(id, name, x, y, ports, o = {}) {
   d.defaultGateway = '';
   d.ipRouting = !!o.l3;
   d.macTable = [];
-  d.snoop = { enabled: false, vlans: [] };
+  d.snoop = { enabled: false, vlans: [], bindings: [], statics: [] }; // bindings: { mac, ip, vlan, port } học từ DHCP ACK
   d.dai = [];
+  d.daiStats = {};                    // vlan -> { fwd, drop }
   d.pvlan = {};                       // vlanId -> { type: primary|isolated|community, assoc: [...] }
   d.vacl = { maps: {}, filters: {} }; // VLAN access-map
   d.model = o.l3 ? '3560' : '2960';
@@ -172,6 +174,17 @@ export function router(id, name, x, y, ifs) {
   d.ipv6Routing = false;
   d.routes6 = [];
   d.ospf6 = null;
+  return d;
+}
+/**
+ * Firewall: router + `fw` (xem lab/fw.js). os = 'asa' | 'fortios' | 'panos' | 'ios-zbf' ... chọn bộ CLI;
+ * kind = 'asa' | 'zbf' | 'policy' chọn cách xét gói.
+ */
+export function firewall(id, name, x, y, ifs, os = 'asa') {
+  const d = router(id, name, x, y, ifs);
+  d.os = os;
+  d.fw = { kind: os === 'asa' ? 'asa' : 'policy', inspectIcmp: false, sameSec: false, rules: [], conns: [] };
+  for (const f of Object.values(d.ifaces)) { f.nameif = null; f.secLevel = null; f.zone = null; }
   return d;
 }
 export function newOspf(pid) { return { pid, rid: null, networks: [], passive: [], noPassive: [], passiveDefault: false, defaultOriginate: false, defaultAlways: false }; }
@@ -209,6 +222,8 @@ export function switchMac(net, id) { return `00:d0:ba:${hx(devIndex(net, id))}:0
 const hsrpMac = (g) => `00:00:0c:07:ac:${hx(+g)}`;
 const vrrpMac = (g) => `00:00:5e:00:01:${hx(+g)}`;
 /** "00:50:79:66:01:01" -> "0050.7966.0101" (kiểu Cisco) */
+/** "aabb.ccdd.eeff" (kiểu Cisco) hoặc "aa:bb:…" → "aa:bb:cc:dd:ee:ff"; sai định dạng → null. */
+export function parseCiscoMac(w) { const h = String(w).toLowerCase().replace(/[.:-]/g, ''); return /^[0-9a-f]{12}$/.test(h) ? h.match(/../g).join(':') : null; }
 export function ciscoMac(m) { const h = m.replace(/:/g, ''); return `${h.slice(0, 4)}.${h.slice(4, 8)}.${h.slice(8)}`; }
 
 // ======================================================================
@@ -1285,6 +1300,33 @@ function ownsIp(net, d, ip) {
   return false;
 }
 
+/** VLAN của frame đi VÀO switch qua cổng `port` (tag 802.1Q nếu có). */
+export function inVlan(net, sd, port, tag) {
+  const e = effPort(net, sd, port);
+  if (e.mode === 'access') return e.vlan;
+  if (e.mode === 'private-vlan') return e.pv?.mode === 'host' ? e.pv.secondary : e.pv?.primary;
+  return tag ?? e.native;
+}
+/** Bảng binding switch dùng cho DAI / IP Source Guard: học từ DHCP snooping + "ip source binding" tĩnh. */
+export function snoopBindings(sd) { return [...(sd.snoop?.bindings || []), ...(sd.snoop?.statics || [])]; }
+/** Nhật ký bảo mật (DAI, DHCP snooping, login) — hiện trong "show logging", giữ 30 dòng mới nhất. */
+export function secLog(d, msg) { const L = (d.secLog ||= []); L.push(msg); if (L.length > 30) L.shift(); }
+const portFlag = (net, sd, port, k) => !!(sd.ports[port]?.[k] || sd.ports[effPort(net, sd, port).bundle]?.[k]);
+/** DAI: ARP của (ip, mac) đi vào các switch theo danh sách cổng vào. Trả { at, why } nếu bị hủy. */
+function daiCheck(net, ingress, ip, mac) {
+  for (const g of ingress) {
+    const sd = net.devices[g.dev];
+    if (sd?.type !== 'switch' || !sd.dai?.length || !sd.ports[g.port]) continue;
+    const vlan = inVlan(net, sd, g.port, g.tag);
+    if (!sd.dai.includes(vlan)) continue;
+    const st = ((sd.daiStats ||= {})[vlan] ||= { fwd: 0, drop: 0 });
+    if (portFlag(net, sd, g.port, 'daiTrust') || snoopBindings(sd).some((b) => b.ip === ip && b.mac === mac && b.vlan === vlan)) { if (RECORDING) st.fwd++; continue; }
+    if (RECORDING) { st.drop++; secLog(sd, `%SW_DAI-4-DHCP_SNOOPING_DENY: 1 Invalid ARPs (Req) on ${shortIf(g.port)}, vlan ${vlan}.([${ciscoMac(mac)}/${ip}])`); }
+    return { at: sd.id, why: `DAI trên ${sd.name} (VLAN ${vlan}) hủy ARP vào cổng UNTRUSTED ${longIf(g.port)}: cặp ${ip} / ${ciscoMac(mac)} không có trong bảng DHCP snooping binding (máy đặt IP tĩnh, giả mạo ARP, hoặc cổng hướng về router/switch khác chưa "ip arp inspection trust")` };
+  }
+  return null;
+}
+
 /** Chuyển 1 gói qua đoạn L2 tới next-hop: ARP (lần đầu) rồi frame đi từng chặng (kiểm VACL). */
 function deliverL2(ctx, R, egress, nh, pkt) {
   const net = ctx.net;
@@ -1302,6 +1344,13 @@ function deliverL2(ctx, R, egress, nh, pkt) {
         R.proc(egress.dev, { packet: f, l: 2, side: 'encap', title: `✗ ARP hỏi ${nh} — không ai trả lời`, ex: `${dname} phát ARP Request tìm MAC của ${nh} nhưng không thiết bị nào trong cùng miền quảng bá trả lời. ${res.diag.length ? 'Nguyên nhân dọc đường: ' + res.diag.join('; ') + '.' : 'Không có thiết bị nào mang IP này trong VLAN/đoạn mạng đó.'}` });
       }
       return { fail: true, why: `ARP cho ${nh} không có trả lời${res.diag.length ? ' — ' + res.diag.join('; ') : ''}` };
+    }
+    // DAI: switch kiểm ARP Request (của bên hỏi) và ARP Reply (của bên trả lời) đi vào cổng untrusted
+    const dai = daiCheck(net, res.hops.map((h) => ({ dev: h.to, port: h.toPort, tag: h.tag })), srcIp, srcMac)
+      || daiCheck(net, [...res.hops].reverse().map((h) => ({ dev: h.from, port: h.fromPort, tag: h.tag })), nh, res.mac);
+    if (dai) {
+      if (R.on) R.proc(dai.at, { l: 2, title: `✗ ${net.devices[dai.at].name}: DAI hủy ARP`, ex: dai.why + '.' });
+      return { fail: true, at: dai.at, kind: 'dai', why: dai.why };
     }
     ctx.arpc[key] = res;
     if (!net.devices[egress.dev].arp[nh]) ctx.firstArp = true;
@@ -1341,6 +1390,16 @@ function deliverL2(ctx, R, egress, nh, pkt) {
       if (!en.acl || aclEval(sd, en.acl, pkt, false).action === 'permit') { act = en.action || 'forward'; break; }
     }
     if (act === 'drop') return { fail: true, at: sd.id, why: `${sd.name}: VACL "${filt[0]}" trên VLAN ${h.vlan} hủy gói ${pktLabel(pkt)} (không khớp dòng forward nào → drop ngầm định, hoặc khớp "action drop")` };
+  }
+  // IP Source Guard: cổng "ip verify source" chỉ nhận gói IP có nguồn đúng binding của CHÍNH cổng đó
+  for (const h of res.hops) {
+    const sd = net.devices[h.to];
+    if (sd?.type !== 'switch' || !sd.ports[h.toPort]?.ipsg) continue;
+    const vlan = inVlan(net, sd, h.toPort, h.tag);
+    if (snoopBindings(sd).some((b) => b.ip === pkt.src && b.port === h.toPort && b.vlan === vlan)) continue;
+    const why = `${sd.name} ${longIf(h.toPort)}: IP Source Guard hủy gói nguồn ${pkt.src} — không có binding DHCP snooping / "ip source binding" nào cho IP này trên cổng (máy tự đặt IP tĩnh hoặc giả mạo IP)`;
+    if (R.on) R.proc(sd.id, { l: 3, title: `✗ ${sd.name}: IP Source Guard hủy gói`, ex: why + '.' });
+    return { fail: true, at: sd.id, kind: 'ipsg', why };
   }
   if (R.on) {
     let prev = null;
@@ -1406,15 +1465,23 @@ function walk(ctx, R, pkt, start, opts = {}) {
       let changed = [];
       if (inIf) {
         const fi = IF[inIf];
-        if (fi.aclIn && !node.decrypted) {
+        // ACL chiều vào: router IOS xét TRƯỚC NAT (thấy IP global); firewall (ASA 8.3+...) xét SAU khi đã
+        // đổi về IP thật; gói trả lời của phiên firewall đã mở thì không xét ACL.
+        const aclIn = () => {
+          if (!fi.aclIn || node.decrypted || (d.fw && fwEstablished(ctx, d, pkt))) return null;
           const a = aclEval(d, fi.aclIn, pkt, ctx.record);
-          if (a.action === 'deny') return fail(node.dev, 'acl', `${d.name}: ACL "${fi.aclIn}" (chiều IN trên ${longIf(inIf)}) chặn gói — ${a.implicit ? 'không khớp dòng permit nào → "deny any" NGẦM ĐỊNH cuối ACL' : 'khớp dòng: ' + aceText(d.acls[fi.aclIn].type, a.entry)}.`, 'U', fi.ip);
-        }
-        if (fi.nat === 'outside') {
+          if (a.action === 'deny') return fail(node.dev, 'acl', `${d.name}: ACL "${fi.aclIn}" (chiều IN trên ${longIf(inIf)}) chặn gói — ${a.implicit ? 'không khớp dòng permit nào → "deny any" NGẦM ĐỊNH cuối ACL' : 'khớp dòng: ' + aceText(d.acls[fi.aclIn].type, a.entry)}.`, d.fw ? '.' : 'U', fi.ip);
+          return null;
+        };
+        const aclAfterNat = !!d.fw && d.fw.kind !== 'zbf'; // ZBF chạy trên router IOS → ACL vẫn xét trước NAT
+        if (!aclAfterNat) { const x = aclIn(); if (x) return x; }
+        if (fi.nat === 'outside' || d.fw) {
           const before = pkt.dst;
           const t = natOut2In(ctx, d, pkt);
+          if (t) pkt.dst0 = before; // địa chỉ đích TRƯỚC NAT (Palo Alto khớp security rule theo địa chỉ này)
           if (t) { changed = ['ip.dst', 'ip.checksum']; R.proc(node.dev, { l: 3, side: 'forward', title: `${d.name} NAT: đích ${before} → ${pkt.dst}`, ex: `Gói vào cổng "ip nat outside" mang địa chỉ inside global ${before}; tra bảng NAT${t.stat ? ' (NAT tĩnh)' : ''} → đổi về inside local ${pkt.dst} rồi mới định tuyến.`, tables: natRows(ctx, d) }); }
         }
+        if (aclAfterNat) { const x = aclIn(); if (x) return x; }
         if (ownsIp(net, d, pkt.dst)) return { ok: true, at: { dev: node.dev, ifn: inIf }, hops };
         pkt.ttl -= 1;
         hops.push({ dev: node.dev, ip: fi.ip });
@@ -1428,6 +1495,18 @@ function walk(ctx, R, pkt, start, opts = {}) {
       nh = rt.nextHop || pkt.dst;
       if (!pkt.src) pkt.src = IF[outIf].ip;
       R.proc(node.dev, { l: 3, side: 'forward', changed, title: `${d.name} tra bảng định tuyến: ${pkt.dst} → ${rt.code} ${rt.net}/${rt.prefix}`, ex: `Longest-prefix match chọn ${rt.code} ${rt.net}/${rt.prefix}${rt.nextHop ? ` via ${rt.nextHop}` : ' (mạng nối trực tiếp)'} ra ${longIf(outIf)}.${inIf ? ` TTL ${pkt.ttl + 1}→${pkt.ttl}, tính lại checksum IP.` : ''}`, tables: routeRows(ctx, node.dev, rt) });
+      // Firewall stateful (ASA / ZBF / rule base): xét trên địa chỉ THẬT, trước NAT chiều ra
+      let fwv = null;
+      if (inIf && d.fw) {
+        fwv = fwCheck(ctx, d, pkt, inIf, outIf);
+        if (!fwv.allow) return fail(node.dev, 'fw', `${d.name} (firewall) chặn gói ${pkt.src} → ${pkt.dst}${pkt.proto !== 'icmp' ? ' ' + pkt.proto + '/' + pkt.dport : ' (ICMP ' + (pkt.reply ? 'echo-reply' : 'echo') + ')'}: ${fwv.why}.`, '.', IF[inIf].ip);
+        R.proc(node.dev, { l: 4, side: 'inspect', title: `${d.name} firewall: ${fwv.established ? 'phiên đã mở → cho qua' : 'cho qua'}`, ex: fwv.why + '.' });
+        if (fwv.snat) {
+          const before = pkt.src;
+          const t = fwSnat(ctx, d, pkt, outIf, fwv.snat);
+          if (t) R.proc(node.dev, { l: 3, side: 'forward', title: `${d.name} NAT nguồn: ${before} → ${pkt.src}`, ex: 'Rule firewall bật NAT nguồn: đổi IP nguồn sang IP cổng ra (PAT), phân biệt bằng port/ICMP id.', tables: natRows(ctx, d) });
+        }
+      }
       if (inIf && d.type === 'router' && IF[inIf].nat === 'inside' && IF[outIf].nat === 'outside') {
         const before = pkt.src;
         const t = natIn2Out(ctx, d, pkt, outIf);
@@ -1436,7 +1515,7 @@ function walk(ctx, R, pkt, start, opts = {}) {
         else R.proc(node.dev, { l: 3, side: 'forward', title: `${d.name}: KHÔNG NAT cho ${before}`, ex: `Gói đi inside → outside nhưng ${before} không khớp quy tắc NAT nào (ACL của "ip nat inside source list" không permit dải này) → đi ra với IP gốc.` });
       }
       const fo = IF[outIf];
-      if (fo.aclOut) {
+      if (fo.aclOut && !(d.fw && fwEstablished(ctx, d, pkt))) {
         const a = aclEval(d, fo.aclOut, pkt, ctx.record);
         if (a.action === 'deny') return fail(node.dev, 'acl', `${d.name}: ACL "${fo.aclOut}" (chiều OUT trên ${longIf(outIf)}) chặn gói — ${a.implicit ? 'không khớp dòng permit nào → "deny any" NGẦM ĐỊNH' : 'khớp dòng: ' + aceText(d.acls[fo.aclOut].type, a.entry)}.`, 'U', inIf ? IF[inIf].ip : fo.ip);
       }
@@ -1473,7 +1552,7 @@ function walk(ctx, R, pkt, start, opts = {}) {
       egress = { dev: node.dev, ifn: outIf };
     }
     const arr = deliverL2(ctx, R, egress, nh, pkt);
-    if (arr.fail) return fail(arr.at || egress.dev, arr.at ? 'vacl' : 'arp', `${arr.at ? '' : net.devices[egress.dev].name + ': '}${arr.why}.`, '.');
+    if (arr.fail) return fail(arr.at || egress.dev, arr.kind || (arr.at ? 'vacl' : 'arp'), `${arr.at ? '' : net.devices[egress.dev].name + ': '}${arr.why}.`, '.');
     node = { dev: arr.dev, ifn: arr.ifn };
   }
   return fail(node.dev, 'loop', 'Vòng lặp định tuyến — gói chạy vòng tới khi hết TTL.', '.');
@@ -1487,10 +1566,30 @@ export function portOpen(d, port) {
   const tr = d.lines.vty.transport || 'all';
   if (port === 23) return tr === 'all' || tr.includes('telnet');
   if (port === 22) return (tr === 'all' || tr.includes('ssh')) && sshReady(d);
+  if (port === 80) return !!d.httpServer;
+  if (port === 443) return !!d.httpsServer;
   return false;
 }
 export function sshReady(d) {
-  return !!d.domain && d.rsa >= 768 && !!d.lines.vty.loginLocal && Object.keys(d.users).length > 0;
+  // "aaa new-model": VTY xác thực theo method list (mặc định = local) thay cho "login local"
+  return !!d.domain && d.rsa >= 768 && (!!d.lines.vty.loginLocal || !!d.aaa?.newModel) && Object.keys(d.users).length > 0;
+}
+/** Đồng hồ cho "login block-for" (thay được trong test). */
+export const clock = { now: () => Date.now() };
+/** Router/switch đang ở "quiet mode" sau quá nhiều lần đăng nhập sai (login block-for). */
+export function loginQuiet(d) { return (d.loginSec?.quietUntil || 0) > clock.now(); }
+/** Ghi 1 lần đăng nhập VTY sai; đủ "attempts" lần trong "within" giây → quiet mode "block-for" giây. */
+export function loginFailed(d) {
+  const L = d.loginSec;
+  if (!L?.blockFor) return false;
+  const now = clock.now();
+  L.fails = (L.fails || []).filter((t) => now - t < L.within * 1000).concat(now);
+  if (L.fails.length < L.attempts) return false;
+  L.fails = [];
+  L.quietUntil = now + L.blockFor * 1000;
+  L.quietCount = (L.quietCount || 0) + 1;
+  secLog(d, `%SEC_LOGIN-1-QUIET_MODE_ON: Still timeleft for watching failures is ${L.within} secs, [user: ] [Source: ] [localport: 22] [Reason: Login Authentication Failed] [ACL: ${L.quietAcl || 'sl_def_acl'}]`);
+  return true;
 }
 
 /**
@@ -1515,18 +1614,20 @@ function sendPacketInner(net, o) {
   const pkt = { src: null, dst: o.dst, proto, ttl: isHost ? 128 : 255, ipId: 0x1a2b, icmpId: id0, seq: 1, reply: false, sport: 49152 + (id0 % 16384), dport: o.dport, flags: { syn: true }, tseq: 1000, tack: 0 };
   const wopts = { noCrypto: !!o.noCrypto };
   const done = (r) => {
-    if (o.record) persistNat(net, ctx);
+    if (o.record) { persistNat(net, ctx); persistFw(net, ctx); }
     return { ...r, sim: R.on ? R.sim.result() : null, firstArp: ctx.firstArp };
   };
   const fwd = walk(ctx, R, pkt, { dev: o.src, ifn: null, origin: true }, wopts);
   if (!fwd.ok) return done({ ok: false, kind: fwd.fail.code === 'U' ? 'unreach' : 'timeout', fail: fwd.fail, hops: fwd.hops });
   const dd = net.devices[fwd.at.dev];
   let open = true;
-  const reply = { ...pkt, src: pkt.dst, dst: pkt.src, reply: true, ttl: dd.type === 'router' || dd.type === 'switch' ? 255 : 128, ipId: 0x3c4d };
+  const reply = { ...pkt, dst0: undefined, src: pkt.dst, dst: pkt.src, reply: true, ttl: dd.type === 'router' || dd.type === 'switch' ? 255 : 128, ipId: 0x3c4d };
   if (proto === 'tcp') {
     open = portOpen(dd, pkt.dport);
     // access-class trên VTY: chỉ cho phép nguồn nằm trong ACL quản trị
     if (open && (dd.type === 'router' || dd.type === 'switch') && (pkt.dport === 22 || pkt.dport === 23) && dd.lines.vty.accessClass && aclEval(dd, dd.lines.vty.accessClass, { src: pkt.src }, o.record).action !== 'permit') open = false;
+    // quiet mode (login block-for): từ chối mọi kết nối VTY, trừ nguồn trong "login quiet-mode access-class"
+    if (open && (pkt.dport === 22 || pkt.dport === 23) && dd.loginSec && loginQuiet(dd) && !(dd.loginSec.quietAcl && aclEval(dd, dd.loginSec.quietAcl, { src: pkt.src }, false).action === 'permit')) open = false;
     Object.assign(reply, { sport: pkt.dport, dport: pkt.sport, flags: open ? { syn: true, ack: true } : { rst: true, ack: true }, tseq: 5000, tack: 1001 });
   }
   R.proc(fwd.at.dev, { l: proto === 'icmp' ? 3 : 4, side: 'decap', title: `${dd.name} nhận gói → ${proto === 'icmp' ? 'trả ICMP Echo Reply' : open ? `cổng ${pkt.dport} MỞ → trả SYN-ACK` : `cổng ${pkt.dport} ĐÓNG/bị từ chối → trả RST`}`, ex: `Gói tới đúng đích ${pkt.dst} (nguồn nhìn thấy: ${pkt.src}). Chiều về cũng phải đi qua mạng: mỗi router trên đường về cần có route tới ${pkt.src}.` });
@@ -1560,22 +1661,45 @@ function dhcpInner(net, pcId, o) {
   const mac = epMac(net, { dev: pcId, ifn: 'fa0' });
   const diag = [];
   const reach = flood(net, { dev: pcId, ifn: 'fa0' }, diag);
-  let srv = null;
+  // Mọi DHCP server (hoặc relay) trong miền quảng bá đều trả OFFER — máy trạm nhận OFFER đến TRƯỚC (gần nhất).
+  // Vì vậy một router/Wi-Fi "lạ" cắm vào LAN có pool là thắng server thật → DHCP snooping để chặn.
+  const cands = [];
   for (const t of reach.values()) {
     const d = net.devices[t.dev];
     if ((d.type !== 'router' && d.type !== 'switch') || !ifUp(net, t.dev, t.ifn)) continue;
     const f = l3ifs(d)[t.ifn];
     if (!f?.ip) continue;
     const local = findPool(d, f.ip);
-    if (local) { srv = { dev: d, pool: local[1], name: local[0], t, gi: f.ip }; break; }
+    if (local) { cands.push({ dev: d, pool: local[1], name: local[0], t, gi: f.ip }); continue; }
     if (!isL3(d)) continue;
     for (const h of f.helper || []) {
       const S = Object.values(net.devices).find((x) => isL3(x) && Object.entries(l3ifs(x)).some(([n, ff]) => ff.ip === h && ifUp(net, x.id, n)));
       if (!S || (S.id !== d.id && !lookup(ctx, d.id, h))) continue;
       const pl = findPool(S, f.ip);
-      if (pl) { srv = { dev: S, pool: pl[1], name: pl[0], t, gi: f.ip, relay: { dev: d, ifn: t.ifn, helper: h } }; break; }
+      if (pl) { cands.push({ dev: S, pool: pl[1], name: pl[0], t, gi: f.ip, relay: { dev: d, ifn: t.ifn, helper: h } }); break; }
     }
-    if (srv) break;
+  }
+  // DHCP snooping: OFFER/ACK (server → client) chỉ được vào switch qua cổng TRUSTED
+  const snoopBlock = (c) => {
+    for (const h of c.t.hops) {
+      const sd = net.devices[h.from];
+      if (sd.type !== 'switch' || !sd.snoop.enabled) continue;
+      const e = effPort(net, sd, h.fromPort);
+      const vlan = h.vlan ?? (e.mode === 'access' ? e.vlan : e.native);
+      if (!sd.snoop.vlans.includes(vlan)) continue;
+      if (sd.ports[h.fromPort].trust || (e.bundle && sd.ports[e.bundle]?.trust)) continue;
+      if (o.record) secLog(sd, `%DHCP_SNOOPING-5-DHCP_SNOOPING_UNTRUSTED_PORT: DHCP_SNOOPING drop message on untrusted port, message type: DHCPOFFER, MAC sa: ${ciscoMac(epMac(net, c.t))}`);
+      return { sd, why: `DHCP snooping trên ${sd.name} chặn DHCP OFFER của ${c.dev.name} đi vào từ cổng UNTRUSTED ${longIf(h.fromPort)} (cổng hướng về DHCP server hợp lệ phải "ip dhcp snooping trust")` };
+    }
+    return null;
+  };
+  let srv = null;
+  const dropped = [];
+  for (const c of cands) {
+    const b = snoopBlock(c);
+    if (b) { dropped.push(b); continue; }
+    srv = c;
+    break;
   }
   const xid = 0x3903f326;
   const disc = (hops) => {
@@ -1586,25 +1710,18 @@ function dhcpInner(net, pcId, o) {
       R.transit(h, f, { l: 7, title: 'DHCP DISCOVER (broadcast)', ex: `${pcd.name} chưa có IP → gửi từ 0.0.0.0 tới 255.255.255.255 (UDP 68→67) để tìm DHCP server.` });
     }
   };
+  const showDropped = () => { for (const b of dropped) R.proc(b.sd.id, { l: 7, title: `✗ ${b.sd.name}: DHCP snooping chặn OFFER`, ex: b.why + '.' }); };
+  if (!srv && dropped.length) {
+    disc(cands[0].t.hops);
+    showDropped();
+    return { ok: false, why: dropped[0].why, sim: R.on ? R.sim.result() : null };
+  }
   if (!srv) {
     disc([...reach.values()][0]?.hops || []);
     R.proc(pcId, { title: '✗ Không có DHCP server trả lời → APIPA 169.254.x.x', ex: `Không router nào trong miền quảng bá có pool phù hợp hoặc ip helper-address tới server có pool cho subnet này.${diag.length ? ' Dọc đường: ' + diag.join('; ') : ''}` });
     return { ok: false, why: diag.join('; '), sim: R.on ? R.sim.result() : null };
   }
   const { dev: S, pool } = srv;
-  // DHCP snooping: OFFER/ACK (server → client) chỉ được vào switch qua cổng TRUSTED
-  for (const h of srv.t.hops) {
-    const sd = net.devices[h.from];
-    if (sd.type !== 'switch' || !sd.snoop.enabled) continue;
-    const e = effPort(net, sd, h.fromPort);
-    const vlan = h.vlan ?? (e.mode === 'access' ? e.vlan : e.native);
-    if (!sd.snoop.vlans.includes(vlan)) continue;
-    if (sd.ports[h.fromPort].trust || (e.bundle && sd.ports[e.bundle]?.trust)) continue;
-    const why = `DHCP snooping trên ${sd.name} chặn DHCP OFFER đi vào từ cổng UNTRUSTED ${longIf(h.fromPort)} (cổng hướng về DHCP server hợp lệ phải "ip dhcp snooping trust")`;
-    disc(srv.t.hops);
-    R.proc(sd.id, { l: 7, title: `✗ ${sd.name}: DHCP snooping chặn OFFER`, ex: why + '.' });
-    return { ok: false, why, sim: R.on ? R.sim.result() : null };
-  }
   // chọn địa chỉ
   const used = new Set();
   for (const d of Object.values(net.devices)) {
@@ -1624,6 +1741,18 @@ function dhcpInner(net, pcId, o) {
   }
   if (!addr) return { ok: false, why: `Pool ${srv.name} hết địa chỉ`, sim: R.on ? R.sim.result() : null };
   if (o.record && !S.dhcp.bindings.some((b) => b.mac === mac)) S.dhcp.bindings.push({ ip: addr, mac, pool: srv.name });
+  // DHCP snooping: switch thấy ACK đi qua → ghi binding (MAC, IP, VLAN, cổng phía máy trạm)
+  if (o.record) {
+    for (const h of srv.t.hops) {
+      const sd = net.devices[h.to];
+      if (sd?.type !== 'switch' || !sd.snoop.enabled || !sd.ports[h.toPort]) continue;
+      const vlan = inVlan(net, sd, h.toPort, h.tag);
+      if (!sd.snoop.vlans.includes(vlan) || portFlag(net, sd, h.toPort, 'trust')) continue;
+      const B = (sd.snoop.bindings ||= []);
+      for (let i = B.length - 1; i >= 0; i--) if (B[i].mac === mac || (B[i].ip === addr && B[i].vlan === vlan)) B.splice(i, 1);
+      B.push({ mac, ip: addr, vlan, port: h.toPort, lease: 86400 });
+    }
+  }
   if (R.on) {
     const sip = srv.relay ? srv.relay.helper : srv.gi;
     const opts = (t) => [{ code: 53, data: [t] }, { code: 1, data: parseIp(prefixToMask(pool.prefix)) }, ...(pool.router ? [{ code: 3, data: parseIp(pool.router) }] : []), ...(pool.dns ? [{ code: 6, data: parseIp(pool.dns) }] : []), { code: 51, data: [0, 1, 81, 128] }, { code: 54, data: parseIp(sip) }];
@@ -1636,6 +1765,7 @@ function dhcpInner(net, pcId, o) {
       }
     };
     disc(srv.t.hops);
+    showDropped();
     if (srv.relay) R.proc(srv.relay.dev.id, { l: 7, side: 'forward', title: `${srv.relay.dev.name} relay DHCP → ${srv.relay.helper}`, ex: `Router không chuyển broadcast, nhưng "ip helper-address ${srv.relay.helper}" trên ${longIf(srv.relay.ifn)} biến DISCOVER thành unicast gửi tới server, điền giaddr = ${srv.gi} để server chọn đúng pool.` });
     reply(2, 'OFFER');
     for (const h of srv.t.hops) {

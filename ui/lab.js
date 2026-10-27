@@ -8,6 +8,8 @@ import { LABS, LAB_GROUPS, getLab, buildLab, checkLab, solutionOf, applySolution
 import { createCli } from '../lab/ios.js';
 import * as N from '../lab/net.js';
 import { SANDBOX_LAB, SANDBOX_KINDS, SANDBOX_VIEW, SANDBOX_TEMPLATES, emptySandbox, addDevice, freeSpot, moveDevice, removeDevice, renameDevice, duplicateDevice, createHistory, freePorts, connect, disconnect, exportSandbox, importSandbox } from '../lab/sandbox.js';
+import { GUI_VENDORS } from '../lab/guifw.js';
+import { renderGuiFw } from './guifw.js';
 import { load, save } from './store.js';
 import { lessonHref } from './i18n.js';
 
@@ -42,6 +44,7 @@ export function openLab(onRun) {
     `<svg class="lab-topo" id="lab-topo" viewBox="0 0 1000 440" role="img" aria-label="topology"></svg>` +
     `<input type="file" id="lab-file" accept=".json,application/json" hidden>` +
     `<div class="lab-tabs" id="lab-tabs"></div>` +
+    `<div class="lab-gui" id="lab-gui" hidden></div>` +
     `<div class="lab-term" id="lab-term"><div class="lab-out" id="lab-out"></div>` +
     `<div class="lab-inrow"><span class="lab-prompt" id="lab-prompt"></span><input class="lab-in" id="lab-in" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Nhập lệnh"></div></div>` +
     `</main>` +
@@ -395,7 +398,11 @@ export function openLab(onRun) {
   }
   function glyph(g, d) {
     const { x, y } = d;
-    if (d.type === 'router') {
+    if (d.fw && d.os) {
+      // firewall: bức tường gạch (router chạy Zone-Based Firewall vẫn vẽ như router)
+      g.appendChild(el('rect', { x: x - 24, y: y - 18, width: 48, height: 36, rx: 4, class: 'lab-g fw' }));
+      g.appendChild(el('path', { d: `M${x - 24} ${y - 6}h48 M${x - 24} ${y + 6}h48 M${x - 8} ${y - 18}v12 M${x + 10} ${y - 18}v12 M${x} ${y - 6}v12 M${x - 16} ${y - 6}v12 M${x + 16} ${y - 6}v12 M${x - 8} ${y + 6}v12 M${x + 10} ${y + 6}v12`, class: 'lab-gl fwl' }));
+    } else if (d.type === 'router') {
       g.appendChild(el('circle', { cx: x, cy: y, r: 22, class: 'lab-g router' }));
       for (const [ax, ay, bx, by] of [[-11, -11, 11, 11], [11, -11, -11, 11]]) g.appendChild(el('line', { x1: x + ax, y1: y + ay, x2: x + bx, y2: y + by, class: 'lab-gl' }));
       for (const [px, py] of [[-11, -11], [11, 11], [11, -11], [-11, 11]]) g.appendChild(el('circle', { cx: x + px, cy: y + py, r: 2.6, class: 'lab-gd' }));
@@ -420,7 +427,7 @@ export function openLab(onRun) {
   // ---------------------------------------------------------------- tab thiết bị + console
   function renderTabs() {
     const ico = { router: '⛁', switch: '⇄', pc: '🖥', server: '🗄' };
-    $('lab-tabs').innerHTML = Object.values(s.net.devices).map((d) => `<button class="lab-tab${d.id === s.dev ? ' active' : ''}" data-id="${d.id}"><span class="lab-ti">${ico[d.type]}</span>${esc(d.name)}</button>`).join('');
+    $('lab-tabs').innerHTML = Object.values(s.net.devices).map((d) => `<button class="lab-tab${d.id === s.dev ? ' active' : ''}" data-id="${d.id}"><span class="lab-ti">${d.fw && d.os ? '🛡' : ico[d.type]}</span>${esc(d.name)}</button>`).join('');
     $('lab-tabs').querySelectorAll('.lab-tab').forEach((b) => (b.onclick = () => pickDev(b.dataset.id)));
   }
   function pickDev(id) {
@@ -436,6 +443,12 @@ export function openLab(onRun) {
   function renderTerm() {
     const out = $('lab-out');
     out.innerHTML = '';
+    // Firewall cấu hình bằng web (Sophos / Check Point / pfSense): hiện trang quản trị thay cho console
+    const gd = s.dev && s.net.devices[s.dev];
+    const isGui = !!(gd && GUI_VENDORS[gd.os]);
+    $('lab-gui').hidden = !isGui;
+    $('lab-term').hidden = isGui;
+    if (isGui) { renderGui(gd); return; }
     if (!s.dev || !s.net.devices[s.dev]) {
       s.dev = null;
       out.innerHTML = '<div class="lab-ln sys">Chưa có thiết bị nào — thêm thiết bị rồi bấm vào nó để mở console.</div>';
@@ -463,7 +476,7 @@ export function openLab(onRun) {
     out.scrollTop = out.scrollHeight;
   }
   function classify(l) {
-    if (/^\s*\^$/.test(l) || /^% (Invalid|Incomplete|Ambiguous|Unknown|Bad|Login|Auth)/.test(l) || l.startsWith('Command rejected') || /^% (Access VLAN|Please|Connection)/.test(l) || l === 'Invalid Command.' || l.startsWith('VTP VLAN configuration not allowed')) return 'err';
+    if (/^ERROR:/.test(l) || /^\s*\^$/.test(l) || /^% (Invalid|Incomplete|Ambiguous|Unknown|Bad|Login|Auth)/.test(l) || l.startsWith('Command rejected') || /^% (Access VLAN|Please|Connection)/.test(l) || l === 'Invalid Command.' || l.startsWith('VTP VLAN configuration not allowed')) return 'err';
     if (/^%[A-Z]+-\d-/.test(l)) return 'log';
     if (/^(Reply from .* bytes=|!!!!!|\.!!!!|Success rate is [1-9])/.test(l) || l.includes('...Open')) return 'good';
     if (l.startsWith('[Lab]') || l.startsWith('(Lab:')) return 'note';
@@ -498,6 +511,23 @@ export function openLab(onRun) {
     exec(s.dev, line, opts);
     s.hpos = -1;
     renderAll(false);
+  }
+  /** Trang quản trị web: mỗi thao tác = 1 lệnh chạy qua exec() (ghi nhật ký, khôi phục được). */
+  function renderGui(d) {
+    const g = (s.gui ||= {});
+    const T = termOf(s, d.id);
+    renderGuiFw($('lab-gui'), d, {
+      tab: g.tab, ruleIf: g.ruleIf, addOpen: g.addOpen, lastErr: g.err,
+      history: T.filter((l) => l.c === 'cmd').map((l) => l.t.replace(/^\[[^\]]*\]\s*/, '')),
+      setTab: (t) => { g.tab = t; g.err = null; renderGui(d); },
+      setRuleIf: (z) => { g.ruleIf = z; renderGui(d); },
+      run: (cmd, o = {}) => {
+        const res = exec(d.id, cmd);
+        g.err = res.out.find((l) => l.startsWith('ERROR:')) || null;
+        g.addOpen = !!(g.err && o.keepAdd);
+        renderAll(false);
+      },
+    });
   }
   /** Đưa console thiết bị IOS về EXEC trước khi gõ chuỗi lệnh mẫu (bắt đầu bằng enable). */
   function toExec(dev) {
