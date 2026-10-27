@@ -11,7 +11,7 @@
    (ui/lab.js ẩn console, hiện #lab-gui) + lab SP01–02, CP01–02, PF01–02. Token `key="a b"` giữ 1 từ (pfSense "LAN net").
 5. ⏳ Gói bảo mật L2 + thiết bị: DAI thật (hiện chỉ parse), IP Source Guard, DHCP giả, AAA/login block-for/hardening.
 6. ⏳ Kịch bản tấn công byte-thật (ARP spoofing, DHCP giả/starvation, VLAN hopping) trong scenarios/.
-- Tổng hiện tại: 95 lab, `node --test` 194/194, `node tools/ui-smoke.cjs` 28/28.
+- Tổng hiện tại: 95 lab, `node --test` 195/195, `node tools/ui-smoke.cjs` 30/30; sandbox thêm được 6 loại firewall.
 
 
 ## ✅ ĐÃ XONG Lab CLI đợt 3 (session 2026-10-27/28) — 7 cải tiến

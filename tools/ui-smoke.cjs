@@ -85,6 +85,11 @@ server.listen(8799, '127.0.0.1', async () => {
   await p.click('#lab-sbx-open');
   await p.click('[data-add="asa"]');
   ok((await p.$$eval('.lab-node', (x) => x.map((e) => e.getAttribute('aria-label')))).includes('ASA1'), 'sandbox: thêm firewall ASA');
+  await p.click('[data-add="fortios"]');
+  ok((await p.textContent('#lab-prompt')).includes('FGT1') && await p.isVisible('#lab-term'), 'sandbox: thêm FortiGate → console FortiOS');
+  await p.click('[data-add="pfsense"]');
+  ok(await p.isVisible('#lab-gui') && (await p.textContent('#lab-gui')).includes('pfSense'), 'sandbox: thêm pfSense → trang quản trị web');
+  await p.screenshot({ path: process.env.SHOT_SBX || '/dev/null' }).catch(() => {});
   // 7) FortiGate + Palo Alto: CLI riêng, prompt theo ngữ cảnh, commit
   await p.click('.lab-item[data-id="FG02"]');
   await p.click('.lab-guide summary');
