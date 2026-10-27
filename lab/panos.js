@@ -5,10 +5,12 @@
 // rulebase security (from/to/source/destination/application/service/action), rulebase nat
 // (source-translation dynamic-ip-and-port interface-address; destination-translation), move,
 // delete, show config diff; vận hành: show session all, show running security-policy, show routing
-// route, show interface all, test security-policy-match, ping host.
+// route, show interface all, test security-policy-match, ping host. "?" liệt kê lệnh / từ tiếp theo ở cả
+// hai chế độ, Tab hoàn thành lệnh (lab/vhelp.js).
 // Engine (d.fw kind 'policy', preNatDst) dựng từ RUNNING config sau mỗi commit.
 
 import * as N from './net.js';
+import { nextChoices, completeLine } from './vhelp.js';
 
 const APPS = {
   'web-browsing': [{ proto: 'tcp', port: 80 }], ssl: [{ proto: 'tcp', port: 443 }], dns: [{ proto: 'udp', port: 53 }, { proto: 'tcp', port: 53 }],
@@ -28,6 +30,42 @@ function toks(line) {
 }
 const arr = (v) => (Array.isArray(v) ? v : v == null ? [] : [v]);
 const cidr = (v) => { const m = String(v).match(/^(\d+\.\d+\.\d+\.\d+)(?:\/(\d+))?$/); return m && N.isIp(m[1]) ? { ip: m[1], prefix: m[2] != null ? +m[2] : 32 } : null; };
+
+// ---------------------------------------------------------------- cây lệnh cho "?" / Tab
+const OP_CMDS = [
+  ['configure', 'Manipulate software configuration information'],
+  ['show session all', 'Show all sessions'], ['show running security-policy', 'Show the running security policy'], ['show routing route', 'Show routing table'],
+  ['show interface all', 'Show all interfaces'], ['show config running', 'Show the running configuration'],
+  ['test security-policy-match from <zone> to <zone> source <ip> destination <ip> protocol <number> destination-port <port>', 'Test security policy match'],
+  ['ping host <ip>', 'Ping hosts and networks'],
+];
+const RULE_KEYS = { from: 'Source zone', to: 'Destination zone', source: 'Source address', destination: 'Destination address', application: 'Application', service: 'Service', action: 'Action (allow, deny, drop)', disabled: 'Disable the rule (yes/no)', description: 'Description' };
+const CFG_CMDS = [
+  ['set deviceconfig system hostname <value>', 'Hostname'],
+  ['set network interface ethernet <ethernet1/N> layer3 ip <ip/prefix>', 'Layer3 interface IP address'],
+  ['set zone <name> network layer3 <interface...>', 'Layer3 interfaces in this zone'],
+  ['set network virtual-router default interface <interface...>', 'Interfaces of the virtual router'],
+  ['set network virtual-router default routing-table ip static-route <name> destination <ip/prefix> nexthop ip-address <ip>', 'Static route'],
+  ['set address <name> ip-netmask <ip/prefix>', 'IP address with netmask'],
+  ...Object.entries(RULE_KEYS).map(([k, ds]) => [`set rulebase security rules <name> ${k} <value...>`, ds]),
+  ...['from', 'to', 'source', 'destination', 'service', 'disabled', 'description'].map((k) => [`set rulebase nat rules <name> ${k} <value...>`, RULE_KEYS[k]]),
+  ['set rulebase nat rules <name> source-translation dynamic-ip-and-port interface-address interface <interface>', 'Source NAT to the egress interface address'],
+  ['set rulebase nat rules <name> destination-translation translated-address <ip>', 'Destination NAT address'],
+  ...['security', 'nat'].flatMap((k) => [['top', 'Move to top'], ['bottom', 'Move to bottom'], ['before <name>', 'Move before a rule'], ['after <name>', 'Move after a rule']].map(([w, ds]) => [`move rulebase ${k} rules <name> ${w}`, ds])),
+  ['delete rulebase security rules <name>', 'Delete a security rule'], ['delete rulebase nat rules <name>', 'Delete a NAT rule'],
+  ['delete address <name>', 'Delete an address object'], ['delete zone <name>', 'Delete a zone'],
+  ['commit', 'Commit the candidate configuration'], ['show config diff', 'Show candidate vs running configuration'], ['show <path...>', 'Show the candidate configuration'],
+  ['run <command...>', 'Run an operational-mode command'], ['exit', 'Exit from configuration mode'], ['quit', 'Exit from configuration mode'],
+];
+const WORDS = {
+  show: 'Show information', test: 'Test the configuration', ping: 'Ping hosts and networks', session: 'Show session information', running: 'Show running operational parameters',
+  routing: 'Show routing information', interface: 'Interface configuration', config: 'Show configuration', set: 'Set a parameter', delete: 'Delete a parameter',
+  move: 'Move an entry in the list', rulebase: 'Rulebase configuration', security: 'Security rules', nat: 'NAT rules', rules: 'Rules', network: 'Network configuration',
+  deviceconfig: 'Device configuration', system: 'System parameters', zone: 'Zone configuration', address: 'Address objects', 'virtual-router': 'Virtual routers', default: 'Virtual router "default"',
+  'routing-table': 'Routing table', ip: 'IPv4', 'static-route': 'Static routes', ethernet: 'Ethernet interfaces', layer3: 'Layer3 interface',
+  'show interface': 'Show interface information', 'show session': 'Show session information', 'show routing': 'Show routing information', 'show config': 'Show configuration',
+  'show running': 'Show running operational parameters', 'test security-policy-match': 'Test security policy match', 'ping host': 'Hostname or IP address of the destination',
+};
 
 function emptyCfg(name) { return { hostname: name, ifs: {}, zones: {}, vr: { ifs: [], routes: {} }, addr: {}, sec: [], nat: [] }; }
 
@@ -227,7 +265,17 @@ export function makePan(h) {
   }
 
   // ---------------------------------------------------------------- thực thi 1 dòng
+  const cmds = (s) => (s.panCfg ? CFG_CMDS : OP_CMDS);
+  function help(s, text) {
+    const L = nextChoices(cmds(s), text, WORDS);
+    if (!L.length) return R([nextChoices(cmds(s), '').some((c) => c.word === text.trim().split(/\s+/)[0]) ? 'Invalid syntax.' : `Unknown command: ${text.trim().split(/\s+/)[0]}`]);
+    const w = Math.max(...L.map((x) => x.word.length)) + 2;
+    return R(L.map((x) => (x.word === '<Enter>' ? '  <Enter>  Finish input' : `${x.word.startsWith('<') ? ' ' : '>'} ${x.word.padEnd(w)}${x.desc}`)));
+  }
+  function complete(d, s, line) { return completeLine(cmds(s), line); }
+
   function exec(d, s, line) {
+    if (line.endsWith('?')) return help(s, line.slice(0, -1));
     const st = P(d);
     const t = toks(line);
     if (!t.length) return R([]);
@@ -265,5 +313,5 @@ export function makePan(h) {
     return R(['Unknown command: ' + t[0]]);
   }
   function prompt(d, s) { return `admin@${P(d).run.hostname || d.name}${s.panCfg ? '#' : '>'} `; }
-  return { exec, prompt, rebuild };
+  return { exec, prompt, rebuild, complete };
 }

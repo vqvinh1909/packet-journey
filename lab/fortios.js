@@ -2,10 +2,12 @@
 //   config <bảng> → edit <tên/id> → set <khoá> <giá trị...> → next → end
 // Bảng hỗ trợ: system global, system interface, router static, firewall address, firewall vip,
 // firewall service custom, firewall policy (move ... before/after). Lệnh xem: show <bảng>,
-// get router info routing-table all, get system session list, execute ping <ip>.
+// get system status, get router info routing-table all, get system session list, execute ping <ip>.
+// "?" liệt kê lệnh / từ tiếp theo theo ngữ cảnh (config → edit), Tab hoàn thành lệnh (lab/vhelp.js).
 // Mọi thay đổi được dựng lại vào engine (d.fw kind 'policy', NAT, route) ngay sau mỗi lệnh.
 
 import * as N from './net.js';
+import { nextChoices, completeLine } from './vhelp.js';
 
 const BUILTIN_SVC = {
   ALL: 'any', HTTP: [{ proto: 'tcp', port: 80 }], HTTPS: [{ proto: 'tcp', port: 443 }], DNS: [{ proto: 'udp', port: 53 }, { proto: 'tcp', port: 53 }],
@@ -15,6 +17,23 @@ const BUILTIN_SVC = {
 const TABLES = ['system global', 'system interface', 'router static', 'firewall address', 'firewall vip', 'firewall service custom', 'firewall policy'];
 /** Tách dòng lệnh, giữ chuỗi trong ngoặc kép: set srcaddr "LAN NET" "all" → ['set','srcaddr','LAN NET','all']. */
 function words(line) { return [...line.matchAll(/"([^"]*)"|(\S+)/g)].map((m) => m[1] ?? m[2]); }
+// khoá "set" theo bảng (dùng cho "?" / Tab)
+const KEYS = {
+  'system global': [['hostname', 'FortiGate host name.']],
+  'system interface': [['ip', 'Interface IPv4 address and subnet mask.'], ['allowaccess', 'Permitted types of management access to this interface.'], ['alias', 'Alias will be displayed with the interface name.'], ['role', 'Interface role.'], ['description', 'Description.'], ['status', 'Bring the interface up or shut the interface down.']],
+  'router static': [['dst', 'Destination IP and mask for this route.'], ['gateway', 'Gateway IP for this route.'], ['device', 'Gateway out interface or tunnel.']],
+  'firewall address': [['subnet', 'IP address and subnet mask of address.'], ['type', 'Type of address.'], ['start-ip', 'First IP address (inclusive) in the range.'], ['end-ip', 'Final IP address (inclusive) in the range.']],
+  'firewall vip': [['extip', 'IP address or address range on the external interface.'], ['mappedip', 'IP address or address range on the destination network.'], ['extintf', 'Interface connected to the source network.'], ['portforward', 'Enable/disable port forwarding.'], ['protocol', 'Protocol to use when forwarding packets.'], ['extport', 'Incoming port number range.'], ['mappedport', 'Port number range on the destination network.']],
+  'firewall service custom': [['tcp-portrange', 'Multiple TCP port ranges.'], ['udp-portrange', 'Multiple UDP port ranges.']],
+  'firewall policy': [['name', 'Policy name.'], ['srcintf', 'Incoming (ingress) interface.'], ['dstintf', 'Outgoing (egress) interface.'], ['srcaddr', 'Source IPv4 address and address group names.'], ['dstaddr', 'Destination IPv4 address and address group names.'], ['service', 'Service and service group names.'], ['action', 'Policy action (accept/deny).'], ['nat', 'Enable/disable source NAT.'], ['schedule', 'Schedule name.'], ['status', 'Enable or disable this policy.'], ['logtraffic', 'Enable or disable logging.'], ['comments', 'Comment.']],
+};
+const WORDS = {
+  config: 'Configure object.', get: 'Get dynamic and system information.', show: 'Show configuration.', execute: 'Execute static commands.',
+  system: 'Configure system.', router: 'Configure router.', firewall: 'Configure firewall.', info: 'Show routing information.', 'routing-table': 'Routing table.',
+  service: 'Configure service.', set: 'Modify value.', unset: 'Set to default value.', move: 'Move this entry.',
+  'get system': 'Show system information.', 'get router': 'Show router information.', 'get router info': 'Show routing information.', 'execute ping': 'PING command.',
+  'show system': 'Show system configuration.', 'show router': 'Show router configuration.', 'show firewall': 'Show firewall configuration.',
+};
 const q = (v) => (/^\d+$/.test(v) ? v : `"${v}"`);
 
 export function makeForti(h) {
@@ -171,6 +190,7 @@ export function makeForti(h) {
 
   // ---------------------------------------------------------------- thực thi 1 dòng
   function exec(d, s, line) {
+    if (line.endsWith('?')) return help(d, s, line.slice(0, -1));
     const F = cfgOf(d);
     const w = words(line);
     if (!w.length) return R([]);
@@ -233,11 +253,45 @@ export function makeForti(h) {
       return R(['Command fail. Return code -61']);
     }
     if (cmd === 'get' && /^router info routing-table( all)?$/.test(w.slice(1).join(' '))) return R(showRoutes(d));
+    if (cmd === 'get' && w.slice(1).join(' ').toLowerCase() === 'system status') return R(sysStatus(d));
     if (cmd === 'get' && w.slice(1).join(' ') === 'system session list') return R(showSessions(d));
     if (cmd === 'execute' && w[1] === 'ping' && N.isIp(w[2])) return fortiPing(d, w[2]);
     if (cmd === 'abort' && st.edit) { st.edit = null; return R([]); }
     return R(['Unknown action 0', 'Command fail. Return code -61']);
   }
+  // ---------------------------------------------------------------- get system status, "?" và Tab
+  function sysStatus(d) {
+    const sn = 'FGVMEV' + [...d.id].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7).toString(36).toUpperCase().padStart(8, '0').slice(-8);
+    const t = new Date(N.clock.now());
+    const day = t.toUTCString().slice(0, 3), mon = t.toUTCString().slice(8, 11), two = (n) => String(n).padStart(2, '0');
+    return ['Version: FortiGate-VM64 v7.4.4,build2662,240514 (GA.F)', 'Security Level: 1', 'Firmware Signature: certified', 'Virus-DB: 92.07160(2024-10-01 15:35)', 'IPS-DB: 6.00741(2015-12-01 02:30)',
+      `Serial-Number: ${sn}`, 'License Status: Valid', 'VM Resources: 1 CPU/1 allowed, 2007 MB RAM', 'Log hard disk: Not available', `Hostname: ${cfgOf(d).hostname || d.name}`, 'Private Encryption: Disable',
+      'Operation Mode: NAT', 'Current virtual domain: root', 'Max number of virtual domains: 1', 'Virtual domains status: 1 in NAT mode, 0 in TP mode', 'Virtual domain configuration: disable',
+      'FIPS-CC mode: disable', 'Current HA mode: standalone', 'Branch point: 2662', 'Release Version Information: GA', 'FortiOS x86-64: Yes',
+      `System time: ${day} ${mon} ${two(t.getUTCDate())} ${two(t.getUTCHours())}:${two(t.getUTCMinutes())}:${two(t.getUTCSeconds())} ${t.getUTCFullYear()}`, 'Last reboot reason: power cycle'];
+  }
+  /** Cây lệnh dùng được ở ngữ cảnh hiện tại (gốc / trong "config <bảng>" / trong "edit"). */
+  function entries(s) {
+    const st = s.fz || {};
+    const keys = KEYS[st.table] || [];
+    const setE = keys.flatMap(([k, ds]) => [[`set ${k} <value...>`, ds], [`unset ${k}`, ds]]);
+    if (st.table && (st.edit || st.table === 'system global')) return [...setE, ['show', 'Show configuration.'], ['next', 'Configure next table entry.'], ['abort', 'End and discard last config.'], ['end', 'End and save last config.']];
+    if (st.table) {
+      const L = [['edit <name>', 'Create new table entry or edit existing one.'], ['delete <name>', 'Delete table entry.'], ['show', 'Show configuration.'], ['end', 'End and save last config.']];
+      if (st.table === 'firewall policy') L.push(['move <id> before <id>', 'Move this entry.'], ['move <id> after <id>', 'Move this entry.'], ['edit 0', 'Create a new policy with the next free ID.']);
+      return L;
+    }
+    return [...TABLES.map((t) => [`config ${t}`, `Configure ${t}.`]), ...TABLES.map((t) => [`show ${t}`, `Show ${t} configuration.`]),
+      ['get system status', 'System status.'], ['get system session list', 'List system sessions.'], ['get router info routing-table all', 'Show all routing table entries.'], ['execute ping <ip>', 'Send ICMP ECHO_REQUEST packets to network hosts.']];
+  }
+  function help(d, s, text) {
+    const L = nextChoices(entries(s), text, WORDS);
+    if (!L.length) return R(['command parse error before \'' + (text.trim().split(/\s+/).pop() || '?') + '\'', 'Command fail. Return code -61']);
+    const w = Math.max(...L.map((x) => x.word.length)) + 4;
+    return R(L.map((x) => (x.word === '<Enter>' ? '<Enter>' : x.word.padEnd(w) + x.desc)));
+  }
+  function complete(d, s, line) { return completeLine(entries(s), line); }
+
   function prompt(d, s) {
     const st = s.fz || {};
     const h = cfgOf(d).hostname || d.name;
@@ -245,5 +299,5 @@ export function makeForti(h) {
     if (st.table) return `${h} (${st.table.split(' ').pop()}) # `;
     return `${h} # `;
   }
-  return { exec, prompt, rebuild };
+  return { exec, prompt, rebuild, complete };
 }
