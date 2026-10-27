@@ -397,6 +397,8 @@ html, body {
 .lab-tools button, .lab-wire button { font: inherit; font-size: 12px; padding: 4px 9px; border: 1px solid var(--border); background: var(--panel-2); color: var(--text); border-radius: 7px; cursor: pointer; }
 .lab-tools button:hover, .lab-wire button:hover { border-color: var(--accent); }
 .lab-tools button.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+.lab-tools button:disabled { opacity: 0.45; cursor: default; border-color: var(--border); }
+.lab-tools select { font: inherit; font-size: 12px; padding: 4px 6px; border: 1px solid var(--border); background: var(--panel-2); color: var(--text); border-radius: 7px; cursor: pointer; }
 .lab-tsep { width: 1px; height: 20px; background: var(--border); margin: 0 3px; }
 .lab-tstat { font-size: 12px; color: var(--muted); margin-left: 4px; }
 .lab-wire { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 12.5px; background: var(--accent-soft); border: 1px solid var(--accent-line); border-radius: 8px; padding: 6px 10px; }

@@ -72,6 +72,84 @@ export function connect(net, a, ap, b, bp) {
 }
 export function disconnect(net, linkId) { net.links = net.links.filter((l) => l.id !== linkId); }
 
+/** Đổi tên hiển thị (router/switch: chính là hostname). Trả null hoặc chuỗi lỗi. */
+export function renameDevice(net, id, name) {
+  const d = net.devices[id];
+  const n = String(name ?? '').trim();
+  if (!d) return 'Thiết bị không tồn tại';
+  if (!n) return 'Tên không được để trống';
+  if (n.length > 30) return 'Tên tối đa 30 ký tự';
+  if (!isHostLike(d) && !/^[A-Za-z][A-Za-z0-9_-]*$/.test(n)) return 'Hostname IOS: bắt đầu bằng chữ cái, chỉ gồm chữ, số, "-" hoặc "_" (không dấu cách)';
+  if (Object.values(net.devices).some((x) => x.id !== id && x.name.toUpperCase() === n.toUpperCase())) return `Đã có thiết bị tên "${n}"`;
+  d.name = n;
+  return null;
+}
+/** Nhân bản thiết bị: giữ cấu hình (VLAN, cổng, routing...) nhưng bỏ địa chỉ IP, bảng động và dây. Trả id mới. */
+export function duplicateDevice(net, id) {
+  const src = net.devices[id];
+  if (!src) return null;
+  const kind = src.type === 'switch' ? (src.model === '3560' ? 'sw3560' : 'sw2960') : src.type;
+  const nid = addDevice(net, kind, src.x + 60, src.y + 50);
+  const fresh = net.devices[nid];
+  const d = N.cloneNet({ devices: { x: src }, links: [] }).devices.x;
+  Object.assign(d, { id: nid, name: fresh.name, x: fresh.x, y: fresh.y, arp: {} });
+  if (isHostLike(d)) { d.ip = ''; d.gateway = ''; }
+  for (const f of Object.values(d.ifaces || {})) f.ip = null;
+  for (const f of Object.values(d.svis || {})) f.ip = null;
+  if (d.macTable) d.macTable = [];
+  if (d.natTable) d.natTable = [];
+  if (d.dhcp) d.dhcp.bindings = [];
+  for (const p of Object.values(d.ports || {})) if (p.ps) p.ps.macs = [];
+  net.devices[nid] = d;
+  return nid;
+}
+const isHostLike = (d) => d.type === 'pc' || d.type === 'server';
+
+/** Lịch sử hoàn tác / làm lại: lưu ảnh chụp JSON của mạng trước mỗi thay đổi. */
+export function createHistory(limit = 60) {
+  const undo = [], redo = [];
+  const snap = (net) => JSON.stringify({ devices: net.devices, links: net.links });
+  const restore = (net, str) => { const o = JSON.parse(str); net.devices = o.devices; net.links = o.links; };
+  return {
+    /** Chạy fn (thay đổi mạng); nếu mạng thật sự đổi thì ghi lại để hoàn tác được. Trả giá trị của fn. */
+    track(net, fn) {
+      const before = snap(net);
+      const r = fn();
+      this.commit(net, before);
+      return r;
+    },
+    /** Dùng cho thao tác kéo dài (kéo thả): chụp trước, commit khi xong. */
+    snapshot: snap,
+    commit(net, before) {
+      if (snap(net) === before) return false;
+      undo.push(before);
+      if (undo.length > limit) undo.shift();
+      redo.length = 0;
+      return true;
+    },
+    undo(net) { if (!undo.length) return false; redo.push(snap(net)); restore(net, undo.pop()); return true; },
+    redo(net) { if (!redo.length) return false; undo.push(snap(net)); restore(net, redo.pop()); return true; },
+    get canUndo() { return undo.length > 0; },
+    get canRedo() { return redo.length > 0; },
+    clear() { undo.length = 0; redo.length = 0; },
+  };
+}
+
+// ---------------------------------------------------------------- mẫu mạng dựng sẵn (chỉ thiết bị + dây, chưa cấu hình)
+const tpl = (devs, links) => () => {
+  const net = emptySandbox();
+  for (const [kind, x, y] of devs) addDevice(net, kind, x, y);
+  for (const l of links) connect(net, ...l);
+  return net;
+};
+export const SANDBOX_TEMPLATES = [
+  { id: 'lan', title: 'LAN cơ bản', desc: '1 switch + 3 PC — luyện đặt IP, ping, bảng MAC', build: tpl([['sw2960', 500, 120], ['pc', 250, 320], ['pc', 500, 340], ['pc', 750, 320]], [['pc1', 'fa0', 'sw1', 'fa0/1'], ['pc2', 'fa0', 'sw1', 'fa0/2'], ['pc3', 'fa0', 'sw1', 'fa0/3']]) },
+  { id: 'twonet', title: 'Hai mạng qua router', desc: 'R1 nối 2 switch, mỗi bên 1 PC — luyện gateway, định tuyến, DHCP', build: tpl([['router', 500, 80], ['sw2960', 250, 210], ['sw2960', 750, 210], ['pc', 250, 360], ['pc', 750, 360]], [['r1', 'g0/0', 'sw1', 'g0/1'], ['r1', 'g0/1', 'sw2', 'g0/1'], ['pc1', 'fa0', 'sw1', 'fa0/1'], ['pc2', 'fa0', 'sw2', 'fa0/1']]) },
+  { id: 'roas', title: 'VLAN + router-on-a-stick', desc: 'Switch 4 PC (2 phòng) + router 1 cổng trunk — luyện VLAN, trunk, subinterface', build: tpl([['router', 500, 70], ['sw2960', 500, 200], ['pc', 170, 360], ['pc', 390, 380], ['pc', 610, 380], ['pc', 830, 360]], [['r1', 'g0/0', 'sw1', 'g0/1'], ['pc1', 'fa0', 'sw1', 'fa0/1'], ['pc2', 'fa0', 'sw1', 'fa0/2'], ['pc3', 'fa0', 'sw1', 'fa0/3'], ['pc4', 'fa0', 'sw1', 'fa0/4']]) },
+  { id: 'ospf3', title: 'Tam giác 3 router', desc: '3 router nối vòng, mỗi router 1 LAN — luyện OSPF/EIGRP, static, redundancy', build: tpl([['router', 500, 70], ['router', 250, 260], ['router', 750, 260], ['pc', 500, 200], ['pc', 100, 380], ['pc', 900, 380]], [['r1', 'g0/1', 'r2', 'g0/1'], ['r1', 'g0/2', 'r3', 'g0/1'], ['r2', 'g0/2', 'r3', 'g0/2'], ['pc1', 'fa0', 'r1', 'g0/0'], ['pc2', 'fa0', 'r2', 'g0/0'], ['pc3', 'fa0', 'r3', 'g0/0']]) },
+  { id: 'campus', title: 'Campus nhỏ có switch L3', desc: 'Switch L3 làm core + 2 switch access + router biên — luyện SVI, inter-VLAN, default route', build: tpl([['router', 500, 60], ['sw3560', 500, 170], ['sw2960', 270, 290], ['sw2960', 730, 290], ['pc', 170, 400], ['pc', 370, 400], ['pc', 630, 400], ['pc', 830, 400]], [['r1', 'g0/0', 'l3sw1', 'g0/1'], ['l3sw1', 'fa0/1', 'sw1', 'g0/1'], ['l3sw1', 'fa0/2', 'sw2', 'g0/1'], ['pc1', 'fa0', 'sw1', 'fa0/1'], ['pc2', 'fa0', 'sw1', 'fa0/2'], ['pc3', 'fa0', 'sw2', 'fa0/1'], ['pc4', 'fa0', 'sw2', 'fa0/2']]) },
+];
+
 // ---------------------------------------------------------------- xuất / nhập JSON
 export const SANDBOX_FORMAT = 'packet-journey-sandbox';
 export function exportSandbox(net) { return { format: SANDBOX_FORMAT, version: 1, net: N.cloneNet(net) }; }

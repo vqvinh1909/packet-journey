@@ -58,3 +58,47 @@ test('nhiệm vụ sandbox chấm được trên mạng tự dựng', () => {
   const r = checkLab(lab, net);
   assert.deepEqual(lab.tasks.filter((_, i) => !r[i]).map((t) => t.text), []);
 });
+
+test('đổi tên, nhân bản giữ cấu hình nhưng bỏ IP', () => {
+  const net = S.emptySandbox();
+  S.addDevice(net, 'router', 100, 100); S.addDevice(net, 'pc', 200, 100);
+  runScript(createCli(net), 'r1', cfg('interface g0/0', 'ip address 10.0.0.1 255.255.255.0', 'no shutdown', 'exit', 'router ospf 1', 'network 10.0.0.0 0.0.0.255 area 0'));
+  assert.equal(S.renameDevice(net, 'r1', 'HQ-EDGE'), null);
+  assert.equal(net.devices.r1.name, 'HQ-EDGE');
+  assert.match(S.renameDevice(net, 'r1', 'co dau cach'), /Hostname/);
+  assert.match(S.renameDevice(net, 'pc1', 'hq-edge'), /Đã có/);
+  assert.equal(S.renameDevice(net, 'pc1', 'Máy kế toán'), null); // PC được đặt tên tự do
+  const id = S.duplicateDevice(net, 'r1');
+  const d = net.devices[id];
+  assert.equal(d.ifaces['g0/0'].ip, null);
+  assert.equal(d.ospf.pid, 1);
+  assert.notEqual(d.name, 'HQ-EDGE');
+  assert.equal(net.devices.r1.ifaces['g0/0'].ip, '10.0.0.1'); // bản gốc không bị ảnh hưởng
+});
+
+test('hoàn tác / làm lại', () => {
+  const net = S.emptySandbox();
+  const h = S.createHistory();
+  h.track(net, () => S.addDevice(net, 'pc', 0, 0));
+  h.track(net, () => S.addDevice(net, 'sw2960', 0, 0));
+  h.track(net, () => S.connect(net, 'pc1', 'fa0', 'sw1', 'fa0/1'));
+  h.track(net, () => null); // không đổi gì → không ghi lịch sử
+  assert.equal(net.links.length, 1);
+  assert.ok(h.undo(net));
+  assert.equal(net.links.length, 0);
+  assert.ok(h.undo(net));
+  assert.deepEqual(Object.keys(net.devices), ['pc1']);
+  assert.ok(h.redo(net));
+  assert.deepEqual(Object.keys(net.devices), ['pc1', 'sw1']);
+  h.track(net, () => S.addDevice(net, 'router', 0, 0)); // thay đổi mới xoá nhánh redo
+  assert.equal(h.canRedo, false);
+});
+
+test('mẫu mạng dựng sẵn hợp lệ (xuất/nhập được, mọi dây đúng cổng)', () => {
+  for (const t of S.SANDBOX_TEMPLATES) {
+    const net = t.build();
+    assert.ok(Object.keys(net.devices).length >= 3, t.id);
+    assert.ok(net.links.length >= 3, t.id + ' thiếu dây');
+    S.importSandbox(S.exportSandbox(net));
+  }
+});

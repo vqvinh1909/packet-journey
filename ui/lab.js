@@ -7,7 +7,7 @@
 import { LABS, LAB_GROUPS, getLab, buildLab, checkLab, solutionOf, applySolution, labMatch, examMinutes, examResult } from '../lab/labs.js';
 import { createCli } from '../lab/ios.js';
 import * as N from '../lab/net.js';
-import { SANDBOX_LAB, SANDBOX_KINDS, SANDBOX_VIEW, emptySandbox, addDevice, freeSpot, moveDevice, removeDevice, freePorts, connect, disconnect, exportSandbox, importSandbox } from '../lab/sandbox.js';
+import { SANDBOX_LAB, SANDBOX_KINDS, SANDBOX_VIEW, SANDBOX_TEMPLATES, emptySandbox, addDevice, freeSpot, moveDevice, removeDevice, renameDevice, duplicateDevice, createHistory, freePorts, connect, disconnect, exportSandbox, importSandbox } from '../lab/sandbox.js';
 import { load, save } from './store.js';
 import { lessonHref } from './i18n.js';
 
@@ -110,7 +110,7 @@ export function openLab(onRun) {
     else net = buildLab(l);
     const cli = createCli(net);
     const first = solutionOf(l).find(([d]) => net.devices[d]);
-    x = { lab: l, net, cli, dev: first?.[0] || Object.keys(net.devices)[0] || null, term: {}, hist: {}, hpos: -1, log: [], hintN: 0, showSol: false, guideOpen: false, results: [], password: false, answers: load('labans:' + l.id, {}), tool: null, pick: [], drag: null, stepGain: {}, gainMsg: null, exam: null, examRes: null };
+    x = { lab: l, net, cli, dev: first?.[0] || Object.keys(net.devices)[0] || null, term: {}, hist: {}, hpos: -1, log: [], hintN: 0, showSol: false, guideOpen: false, results: [], password: false, answers: load('labans:' + l.id, {}), tool: null, pick: [], drag: null, stepGain: {}, gainMsg: null, exam: null, examRes: null, hist: sbx ? createHistory() : null };
     const old = sbx ? null : load('lablog:' + l.id, null);
     if (Array.isArray(old) && old.length) {
       for (const [dev, cmd] of old) {
@@ -140,6 +140,16 @@ export function openLab(onRun) {
     if (s.log.length > 3000) s.log.shift();
     save('lablog:' + lab.id, s.log);
   }
+  /** Thay đổi mạng sandbox có ghi lịch sử hoàn tác (lab thường thì chạy thẳng). */
+  function mut(fn) { return s.hist ? s.hist.track(s.net, fn) : fn(); }
+  function undoRedo(redo) {
+    if (!s.hist || !(redo ? s.hist.redo(s.net) : s.hist.undo(s.net))) return;
+    if (s.dev && !s.net.devices[s.dev]) s.dev = Object.keys(s.net.devices)[0] || null;
+    s.pick = [];
+    $('lab-wire').hidden = true;
+    saveSandbox();
+    renderAll();
+  }
   function saveSandbox() {
     clearTimeout(saveSandbox.t);
     saveSandbox.t = setTimeout(() => save('sandbox-net', exportSandbox(s.net)), 150);
@@ -166,7 +176,9 @@ export function openLab(onRun) {
     if (sandbox()) html += Object.entries(SANDBOX_KINDS).map(([k, v]) => `<button data-add="${k}" title="Thêm ${esc(v.label)}">＋ ${esc(v.label)}</button>`).join('') + '<span class="lab-tsep"></span>';
     html += b('lab-t-wire', '🔗 Nối dây', 'Chọn thiết bị 1 rồi thiết bị 2, sau đó chọn cổng', s.tool === 'wire') + b('lab-t-cut', '✂ Gỡ dây', 'Bấm vào sợi dây cần gỡ', s.tool === 'cut');
     if (sandbox()) {
-      html += b('lab-t-del', '🗑 Xoá thiết bị', 'Xoá thiết bị đang chọn (cùng dây của nó)') + '<span class="lab-tsep"></span>' +
+      html += b('lab-t-del', '🗑 Xoá thiết bị', 'Xoá thiết bị đang chọn (cùng dây của nó)') + b('lab-t-ren', '✏ Đổi tên', 'Đổi tên thiết bị đang chọn') + b('lab-t-dup', '⧉ Nhân bản', 'Sao thiết bị đang chọn (giữ cấu hình, bỏ IP và dây)') +
+        `<button id="lab-t-undo" title="Hoàn tác (Ctrl+Z khi không gõ console)"${s.hist.canUndo ? '' : ' disabled'}>↶ Hoàn tác</button><button id="lab-t-redo" title="Làm lại (Ctrl+Y)"${s.hist.canRedo ? '' : ' disabled'}>↷ Làm lại</button>` +
+        `<select id="lab-t-tpl" title="Nạp mạng mẫu (chỉ thiết bị + dây, bạn tự cấu hình)"><option value="">📐 Mạng mẫu…</option>${SANDBOX_TEMPLATES.map((t) => `<option value="${t.id}" title="${esc(t.desc)}">${esc(t.title)}</option>`).join('')}</select>` + '<span class="lab-tsep"></span>' +
         b('lab-t-exp', '⬇ Xuất JSON', 'Tải mạng về máy') + b('lab-t-imp', '⬆ Nhập JSON', 'Mở file mạng đã xuất') + b('lab-t-clr', '🧹 Xoá hết', 'Bắt đầu lại từ mạng trống');
     }
     const st = s.tool === 'wire' ? (s.pick.length === 2 ? 'Chọn cổng 2 đầu rồi bấm "Nối"' : s.pick.length ? `Đã chọn ${esc(s.net.devices[s.pick[0]]?.name)} — chọn thiết bị thứ 2` : 'Chọn thiết bị thứ nhất (bấm lại 🔗 để thoát)') : s.tool === 'cut' ? 'Bấm vào dây cần gỡ' : sandbox() ? 'Kéo thiết bị để sắp xếp · bấm để mở console' : '';
@@ -174,7 +186,7 @@ export function openLab(onRun) {
     box.innerHTML = html;
     box.querySelectorAll('[data-add]').forEach((x) => (x.onclick = () => {
       const p = freeSpot(s.net);
-      const id = addDevice(s.net, x.dataset.add, p.x, p.y);
+      const id = mut(() => addDevice(s.net, x.dataset.add, p.x, p.y));
       saveSandbox();
       pickDev(id);
     }));
@@ -184,7 +196,7 @@ export function openLab(onRun) {
     $('lab-t-del').onclick = () => {
       const d = s.net.devices[s.dev];
       if (!d || !confirm(`Xoá ${d.name} cùng mọi dây nối với nó?`)) return;
-      removeDevice(s.net, d.id);
+      mut(() => removeDevice(s.net, d.id));
       delete s.term[d.id];
       s.dev = Object.keys(s.net.devices)[0] || null;
       saveSandbox();
@@ -199,6 +211,30 @@ export function openLab(onRun) {
       setTimeout(() => URL.revokeObjectURL(a.href), 1000);
     };
     $('lab-t-imp').onclick = () => $('lab-file').click();
+    $('lab-t-ren').onclick = () => {
+      const d = s.net.devices[s.dev];
+      if (!d) return alert('Bấm chọn một thiết bị trước.');
+      const n = prompt(`Tên mới cho ${d.name}:`, d.name);
+      if (n == null) return;
+      const err = mut(() => renameDevice(s.net, d.id, n));
+      if (err) return alert(err);
+      saveSandbox();
+      renderAll();
+    };
+    $('lab-t-dup').onclick = () => {
+      if (!s.net.devices[s.dev]) return alert('Bấm chọn một thiết bị trước.');
+      const id = mut(() => duplicateDevice(s.net, s.dev));
+      saveSandbox();
+      pickDev(id);
+    };
+    $('lab-t-undo').onclick = () => undoRedo(false);
+    $('lab-t-redo').onclick = () => undoRedo(true);
+    $('lab-t-tpl').onchange = (e) => {
+      const t = SANDBOX_TEMPLATES.find((x) => x.id === e.target.value);
+      e.target.value = '';
+      if (!t || (Object.keys(s.net.devices).length && !confirm(`Thay mạng hiện tại bằng mẫu "${t.title}"? (Có thể ↶ Hoàn tác)`))) return;
+      replaceSandbox(t.build());
+    };
     $('lab-t-clr').onclick = () => { if (confirm('Xoá toàn bộ mạng đang dựng?')) replaceSandbox(emptySandbox()); };
   }
   $('lab-file').onchange = async (e) => {
@@ -208,10 +244,12 @@ export function openLab(onRun) {
     try { replaceSandbox(importSandbox(JSON.parse(await f.text()))); }
     catch (err) { alert('Không nhập được file: ' + err.message); }
   };
+  /** Thay toàn bộ mạng sandbox (mẫu / nhập file / xoá hết) — vẫn hoàn tác được. */
   function replaceSandbox(net) {
-    live.delete(SBX);
-    save('sandbox-net', exportSandbox(net));
-    s = session(SANDBOX_LAB);
+    mut(() => { s.net.devices = net.devices; s.net.links = net.links; });
+    s.dev = Object.keys(s.net.devices)[0] || null;
+    s.term = {};
+    saveSandbox();
     renderAll();
   }
   function setTool(t) { s.tool = t; s.pick = []; $('lab-wire').hidden = true; renderTools(); drawTopo(); }
@@ -230,7 +268,7 @@ export function openLab(onRun) {
       box.innerHTML = `<b>${esc(A.name)}</b> <select id="lab-w-a">${opt(A, fa)}</select> ⟷ <b>${esc(B.name)}</b> <select id="lab-w-b">${opt(B, fb)}</select> <button id="lab-w-ok" class="btn-accent">Nối</button> <button id="lab-w-x">Huỷ</button> <span class="lab-werr" id="lab-w-err"></span>`;
       $('lab-w-ok').onclick = () => {
         const ap = $('lab-w-a').value, bp = $('lab-w-b').value;
-        const err = connect(s.net, a, ap, b, bp);
+        const err = mut(() => connect(s.net, a, ap, b, bp));
         if (err) { $('lab-w-err').textContent = err; return; }
         logAct('@link', [a, ap, b, bp]);
         s.pick = [];
@@ -294,7 +332,7 @@ export function openLab(onRun) {
         const tt = el('title', {});
         tt.textContent = `Gỡ dây ${A.name} ${N.shortIf(l.ap)} ↔ ${B.name} ${N.shortIf(l.bp)}`;
         hit.appendChild(tt);
-        hit.onclick = () => { disconnect(net, l.id); logAct('@unlink', l.id); renderAll(); };
+        hit.onclick = () => { mut(() => disconnect(net, l.id)); logAct('@unlink', l.id); renderAll(); };
         layerLinks.appendChild(hit);
       }
       for (const [D, port, t] of [[A, l.ap, 0.24], [B, l.bp, 0.76]]) {
@@ -332,7 +370,7 @@ export function openLab(onRun) {
     const svg = $('lab-topo');
     const toSvg = (ev) => { const p = svg.createSVGPoint(); p.x = ev.clientX; p.y = ev.clientY; return p.matrixTransform(svg.getScreenCTM().inverse()); };
     const d = s.net.devices[id], p0 = toSvg(e);
-    s.drag = { id, dx: d.x - p0.x, dy: d.y - p0.y, moved: false, sx: e.clientX, sy: e.clientY };
+    s.drag = { id, dx: d.x - p0.x, dy: d.y - p0.y, moved: false, sx: e.clientX, sy: e.clientY, before: s.hist.snapshot(s.net) };
     const move = (ev) => {
       const g = s.drag;
       if (!g) return;
@@ -345,7 +383,7 @@ export function openLab(onRun) {
     const up = () => {
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
-      if (s.drag?.moved) { saveSandbox(); drawTopo(); }
+      if (s.drag?.moved) { s.hist.commit(s.net, s.drag.before); saveSandbox(); renderTools(); drawTopo(); }
       setTimeout(() => { s.drag = null; }, 0); // để onclick ngay sau khi thả biết là vừa kéo
     };
     window.addEventListener('pointermove', move);
@@ -441,7 +479,7 @@ export function openLab(onRun) {
     const pr = s.cli.prompt(dev);
     const wasPw = dev === s.dev && s.password;
     let res;
-    try { res = s.cli.exec(dev, line); } catch (e) { res = { out: ['% Lỗi mô phỏng: ' + e.message], prompt: pr }; }
+    try { res = mut(() => s.cli.exec(dev, line)); } catch (e) { res = { out: ['% Lỗi mô phỏng: ' + e.message], prompt: pr }; }
     pushOut(dev, line, res, pr, wasPw);
     if (dev === s.dev) s.password = !!res.password;
     if (!opts.noLog) {
@@ -730,6 +768,14 @@ export function openLab(onRun) {
     else { clearTimeout(renderAll.t); renderAll.t = setTimeout(renderSide, 30); }
   }
 
+  // Ctrl+Z / Ctrl+Y trong sandbox (khi KHÔNG gõ ở console — ở console Ctrl+Z = "end" như IOS)
+  const onKey = (e) => {
+    if (!document.body.contains(back)) { document.removeEventListener('keydown', onKey); return; }
+    if (!sandbox() || !e.ctrlKey || e.target === input || /^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName)) return;
+    const k = e.key.toLowerCase();
+    if (k === 'z' || k === 'y') { e.preventDefault(); undoRedo(k === 'y' || e.shiftKey); }
+  };
+  document.addEventListener('keydown', onKey);
   $('lab-term').addEventListener('click', (e) => { if (e.target.tagName !== 'BUTTON' && !window.getSelection()?.toString()) input.focus(); });
 
   selectLab(lab.id);
