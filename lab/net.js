@@ -20,6 +20,7 @@ import { ipToInt, intToIp, parseIp } from '../packet/addr.js';
 import { pingData } from '../scenarios/_common.js';
 
 // Đang chạy thao tác "thật" của người học (ghi lại vi phạm port-security, MAC học được...)
+import { fwCheck, fwEstablished, persistFw, fwSnat } from './fw.js';
 let RECORDING = false;
 
 // ======================================================================
@@ -172,6 +173,17 @@ export function router(id, name, x, y, ifs) {
   d.ipv6Routing = false;
   d.routes6 = [];
   d.ospf6 = null;
+  return d;
+}
+/**
+ * Firewall: router + `fw` (xem lab/fw.js). os = 'asa' | 'fortios' | 'panos' | 'ios-zbf' ... chọn bộ CLI;
+ * kind = 'asa' | 'zbf' | 'policy' chọn cách xét gói.
+ */
+export function firewall(id, name, x, y, ifs, os = 'asa') {
+  const d = router(id, name, x, y, ifs);
+  d.os = os;
+  d.fw = { kind: os === 'asa' ? 'asa' : 'policy', inspectIcmp: false, sameSec: false, rules: [], conns: [] };
+  for (const f of Object.values(d.ifaces)) { f.nameif = null; f.secLevel = null; f.zone = null; }
   return d;
 }
 export function newOspf(pid) { return { pid, rid: null, networks: [], passive: [], noPassive: [], passiveDefault: false, defaultOriginate: false, defaultAlways: false }; }
@@ -1406,15 +1418,21 @@ function walk(ctx, R, pkt, start, opts = {}) {
       let changed = [];
       if (inIf) {
         const fi = IF[inIf];
-        if (fi.aclIn && !node.decrypted) {
+        // ACL chiều vào: router IOS xét TRƯỚC NAT (thấy IP global); firewall (ASA 8.3+...) xét SAU khi đã
+        // đổi về IP thật; gói trả lời của phiên firewall đã mở thì không xét ACL.
+        const aclIn = () => {
+          if (!fi.aclIn || node.decrypted || (d.fw && fwEstablished(ctx, d, pkt))) return null;
           const a = aclEval(d, fi.aclIn, pkt, ctx.record);
-          if (a.action === 'deny') return fail(node.dev, 'acl', `${d.name}: ACL "${fi.aclIn}" (chiều IN trên ${longIf(inIf)}) chặn gói — ${a.implicit ? 'không khớp dòng permit nào → "deny any" NGẦM ĐỊNH cuối ACL' : 'khớp dòng: ' + aceText(d.acls[fi.aclIn].type, a.entry)}.`, 'U', fi.ip);
-        }
-        if (fi.nat === 'outside') {
+          if (a.action === 'deny') return fail(node.dev, 'acl', `${d.name}: ACL "${fi.aclIn}" (chiều IN trên ${longIf(inIf)}) chặn gói — ${a.implicit ? 'không khớp dòng permit nào → "deny any" NGẦM ĐỊNH cuối ACL' : 'khớp dòng: ' + aceText(d.acls[fi.aclIn].type, a.entry)}.`, d.fw ? '.' : 'U', fi.ip);
+          return null;
+        };
+        if (!d.fw) { const x = aclIn(); if (x) return x; }
+        if (fi.nat === 'outside' || d.fw) {
           const before = pkt.dst;
           const t = natOut2In(ctx, d, pkt);
           if (t) { changed = ['ip.dst', 'ip.checksum']; R.proc(node.dev, { l: 3, side: 'forward', title: `${d.name} NAT: đích ${before} → ${pkt.dst}`, ex: `Gói vào cổng "ip nat outside" mang địa chỉ inside global ${before}; tra bảng NAT${t.stat ? ' (NAT tĩnh)' : ''} → đổi về inside local ${pkt.dst} rồi mới định tuyến.`, tables: natRows(ctx, d) }); }
         }
+        if (d.fw) { const x = aclIn(); if (x) return x; }
         if (ownsIp(net, d, pkt.dst)) return { ok: true, at: { dev: node.dev, ifn: inIf }, hops };
         pkt.ttl -= 1;
         hops.push({ dev: node.dev, ip: fi.ip });
@@ -1428,6 +1446,18 @@ function walk(ctx, R, pkt, start, opts = {}) {
       nh = rt.nextHop || pkt.dst;
       if (!pkt.src) pkt.src = IF[outIf].ip;
       R.proc(node.dev, { l: 3, side: 'forward', changed, title: `${d.name} tra bảng định tuyến: ${pkt.dst} → ${rt.code} ${rt.net}/${rt.prefix}`, ex: `Longest-prefix match chọn ${rt.code} ${rt.net}/${rt.prefix}${rt.nextHop ? ` via ${rt.nextHop}` : ' (mạng nối trực tiếp)'} ra ${longIf(outIf)}.${inIf ? ` TTL ${pkt.ttl + 1}→${pkt.ttl}, tính lại checksum IP.` : ''}`, tables: routeRows(ctx, node.dev, rt) });
+      // Firewall stateful (ASA / ZBF / rule base): xét trên địa chỉ THẬT, trước NAT chiều ra
+      let fwv = null;
+      if (inIf && d.fw) {
+        fwv = fwCheck(ctx, d, pkt, inIf, outIf);
+        if (!fwv.allow) return fail(node.dev, 'fw', `${d.name} (firewall) chặn gói ${pkt.src} → ${pkt.dst}${pkt.proto !== 'icmp' ? ' ' + pkt.proto + '/' + pkt.dport : ' (ICMP ' + (pkt.reply ? 'echo-reply' : 'echo') + ')'}: ${fwv.why}.`, '.', IF[inIf].ip);
+        R.proc(node.dev, { l: 4, side: 'inspect', title: `${d.name} firewall: ${fwv.established ? 'phiên đã mở → cho qua' : 'cho qua'}`, ex: fwv.why + '.' });
+        if (fwv.snat) {
+          const before = pkt.src;
+          const t = fwSnat(ctx, d, pkt, outIf, fwv.snat);
+          if (t) R.proc(node.dev, { l: 3, side: 'forward', title: `${d.name} NAT nguồn: ${before} → ${pkt.src}`, ex: 'Rule firewall bật NAT nguồn: đổi IP nguồn sang IP cổng ra (PAT), phân biệt bằng port/ICMP id.', tables: natRows(ctx, d) });
+        }
+      }
       if (inIf && d.type === 'router' && IF[inIf].nat === 'inside' && IF[outIf].nat === 'outside') {
         const before = pkt.src;
         const t = natIn2Out(ctx, d, pkt, outIf);
@@ -1436,7 +1466,7 @@ function walk(ctx, R, pkt, start, opts = {}) {
         else R.proc(node.dev, { l: 3, side: 'forward', title: `${d.name}: KHÔNG NAT cho ${before}`, ex: `Gói đi inside → outside nhưng ${before} không khớp quy tắc NAT nào (ACL của "ip nat inside source list" không permit dải này) → đi ra với IP gốc.` });
       }
       const fo = IF[outIf];
-      if (fo.aclOut) {
+      if (fo.aclOut && !(d.fw && fwEstablished(ctx, d, pkt))) {
         const a = aclEval(d, fo.aclOut, pkt, ctx.record);
         if (a.action === 'deny') return fail(node.dev, 'acl', `${d.name}: ACL "${fo.aclOut}" (chiều OUT trên ${longIf(outIf)}) chặn gói — ${a.implicit ? 'không khớp dòng permit nào → "deny any" NGẦM ĐỊNH' : 'khớp dòng: ' + aceText(d.acls[fo.aclOut].type, a.entry)}.`, 'U', inIf ? IF[inIf].ip : fo.ip);
       }
@@ -1515,7 +1545,7 @@ function sendPacketInner(net, o) {
   const pkt = { src: null, dst: o.dst, proto, ttl: isHost ? 128 : 255, ipId: 0x1a2b, icmpId: id0, seq: 1, reply: false, sport: 49152 + (id0 % 16384), dport: o.dport, flags: { syn: true }, tseq: 1000, tack: 0 };
   const wopts = { noCrypto: !!o.noCrypto };
   const done = (r) => {
-    if (o.record) persistNat(net, ctx);
+    if (o.record) { persistNat(net, ctx); persistFw(net, ctx); }
     return { ...r, sim: R.on ? R.sim.result() : null, firstArp: ctx.firstArp };
   };
   const fwd = walk(ctx, R, pkt, { dev: o.src, ifn: null, origin: true }, wopts);
