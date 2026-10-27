@@ -147,3 +147,12 @@ test('tìm lab không dấu, nhiều từ khoá', async () => {
   assert.ok(labMatch(x03, '  '));
   assert.ok(LABS.filter((l) => labMatch(l, 'nat')).length >= 5);
 });
+
+test('thi thử: thời gian theo độ khó, chấm thang 1000 đạt từ 800', async () => {
+  const { examMinutes, examResult } = await import('../lab/labs.js');
+  assert.equal(examMinutes(LABS.find((l) => l.id === 'X01')), 60);
+  assert.equal(examMinutes({ group: 'c1', level: 1 }), 10);
+  assert.deepEqual(examResult([true, true, true, true, false]), { ok: 4, total: 5, score: 800, pass: true });
+  assert.equal(examResult([true, false, false]).pass, false);
+  assert.equal(examResult([]).score, 0);
+});

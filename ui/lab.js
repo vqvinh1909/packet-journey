@@ -4,7 +4,7 @@
 // Thêm: câu hỏi trắc nghiệm trong nhiệm vụ, "🧭 Cách giải chi tiết" (lab có guide), nối dây
 // (lab edit:'wire') và chế độ "🧱 Tự dựng mạng riêng" (lab/sandbox.js).
 
-import { LABS, LAB_GROUPS, getLab, buildLab, checkLab, solutionOf, applySolution, labMatch } from '../lab/labs.js';
+import { LABS, LAB_GROUPS, getLab, buildLab, checkLab, solutionOf, applySolution, labMatch, examMinutes, examResult } from '../lab/labs.js';
 import { createCli } from '../lab/ios.js';
 import * as N from '../lab/net.js';
 import { SANDBOX_LAB, SANDBOX_KINDS, SANDBOX_VIEW, emptySandbox, addDevice, freeSpot, moveDevice, removeDevice, freePorts, connect, disconnect, exportSandbox, importSandbox } from '../lab/sandbox.js';
@@ -110,7 +110,7 @@ export function openLab(onRun) {
     else net = buildLab(l);
     const cli = createCli(net);
     const first = solutionOf(l).find(([d]) => net.devices[d]);
-    x = { lab: l, net, cli, dev: first?.[0] || Object.keys(net.devices)[0] || null, term: {}, hist: {}, hpos: -1, log: [], hintN: 0, showSol: false, guideOpen: false, results: [], password: false, answers: load('labans:' + l.id, {}), tool: null, pick: [], drag: null, stepGain: {}, gainMsg: null };
+    x = { lab: l, net, cli, dev: first?.[0] || Object.keys(net.devices)[0] || null, term: {}, hist: {}, hpos: -1, log: [], hintN: 0, showSol: false, guideOpen: false, results: [], password: false, answers: load('labans:' + l.id, {}), tool: null, pick: [], drag: null, stepGain: {}, gainMsg: null, exam: null, examRes: null };
     const old = sbx ? null : load('lablog:' + l.id, null);
     if (Array.isArray(old) && old.length) {
       for (const [dev, cmd] of old) {
@@ -148,7 +148,8 @@ export function openLab(onRun) {
   // ---------------------------------------------------------------- phần đầu (đề bài)
   function renderHead() {
     const kind = { ticket: '🎫 Ticket sự cố', project: '🏢 Dự án tổng hợp', sandbox: '🧱 Sandbox', config: '🛠️ Lab cấu hình' }[lab.kind] || '🛠️ Lab cấu hình';
-    const meta = [kind, lab.lesson ? esc(lab.lesson) : '', sandbox() ? '' : `Độ khó ${'●'.repeat(lab.level)}${'○'.repeat(3 - lab.level)}`, lab.lessonPath ? `<a href="${lessonHref(lab.lessonPath)}" target="_blank" rel="noopener">📖 Đọc bài trong giáo trình</a>` : ''].filter(Boolean).join(' · ');
+    const best = load('labexam-best', {})[lab.id];
+    const meta = [kind, lab.lesson ? esc(lab.lesson) : '', sandbox() ? '' : `Độ khó ${'●'.repeat(lab.level)}${'○'.repeat(3 - lab.level)}`, lab.lessonPath ? `<a href="${lessonHref(lab.lessonPath)}" target="_blank" rel="noopener">📖 Đọc bài trong giáo trình</a>` : '', best ? `<span class="lab-best${best.score >= 800 ? ' pass' : ''}">🏅 Thi thử tốt nhất: ${best.score}/1000 (${fmtTime(best.secs)})</span>` : ''].filter(Boolean).join(' · ');
     $('lab-head').innerHTML =
       `<div class="lab-title"><span class="lab-badge">${sandbox() ? '🧱' : lab.id}</span> ${esc(lab.title)}</div>` +
       `<div class="lab-meta">${meta}</div>` +
@@ -539,6 +540,11 @@ export function openLab(onRun) {
   const stepOf = (g) => [g.dev, g.raw || g.dev === '@link' ? g.cmds : ['enable', 'configure terminal', ...g.cmds, 'end']];
 
   function taskHtml(t, i, ok, fresh) {
+    if (s.exam) {
+      // đang thi: không lộ đạt/chưa đạt, quiz chỉ hiện lựa chọn của mình
+      if (!t.quiz) return `<li class="exam"><span class="lab-mk">○</span><div><div class="lab-tt">${esc(t.text)}</div></div></li>`;
+      return `<li class="exam quiz"><span class="lab-mk">?</span><div><div class="lab-tt">❓ ${esc(t.text)}</div><div class="lab-qopts">${t.quiz.options.map((o, j) => `<button class="lab-qopt${s.answers[i] === j ? ' sel' : ''}" data-q="${i}" data-o="${j}" aria-pressed="${s.answers[i] === j}">${String.fromCharCode(65 + j)}. ${esc(o)}</button>`).join('')}</div></div></li>`;
+    }
     if (!t.quiz) return `<li class="${ok ? 'ok' : 'no'}${fresh ? ' new' : ''}"><span class="lab-mk">${ok ? '✓' : '○'}</span><div><div class="lab-tt">${esc(t.text)}</div><div class="lab-vf">Kiểm tra: <code>${esc(t.verify)}</code></div></div></li>`;
     const ans = s.answers[i];
     const picked = ans != null;
@@ -556,6 +562,7 @@ export function openLab(onRun) {
     // nhiệm vụ vừa chuyển sang đạt (so với lần chấm trước) → nháy sáng
     const fresh = res.map((x, i) => x && prev.length === res.length && !prev[i]);
     s.results = res;
+    if (s.exam) { renderExamSide(); return; } // đang thi: không lộ tiến độ (kể cả dấu ✓ ở danh sách lab)
     const ok = res.filter(Boolean).length;
     const all = ok === res.length;
     if (!sandbox()) {
@@ -563,7 +570,7 @@ export function openLab(onRun) {
       if (all && !done[lab.id]) { done[lab.id] = true; save('labs-done', done); renderList(); }
     }
     const pct = Math.round((ok / res.length) * 100);
-    let html = `<div class="lab-side-h">${sandbox() ? 'Lộ trình gợi ý' : 'Nhiệm vụ'} <span class="lab-score${all ? ' all' : ''}">${ok}/${res.length}</span></div>` +
+    let html = examResHtml() + `<div class="lab-side-h">${sandbox() ? 'Lộ trình gợi ý' : 'Nhiệm vụ'} <span class="lab-score${all ? ' all' : ''}">${ok}/${res.length}</span></div>` +
       `<div class="lab-bar"><div style="width:${pct}%"></div></div>`;
     if (all) html += `<div class="lab-win">🎉 ${sandbox() ? 'Bạn đã tự dựng được một mạng hoàn chỉnh!' : `Hoàn thành ${lab.id}! Mọi "Kết quả kiểm tra" đều đạt.`}</div>`;
     if (s.gainMsg) {
@@ -573,7 +580,7 @@ export function openLab(onRun) {
     html += `<ol class="lab-tasks">${lab.tasks.map((t, i) => taskHtml(t, i, res[i], fresh[i])).join('')}</ol>`;
     html += `<label class="lab-explain"><input type="checkbox" id="lab-exp"${explainOn() ? ' checked' : ''}> 🔍 Giải thích lý do khi gói bị rớt${lab.kind === 'ticket' ? ' (ticket: mặc định tắt — tự chẩn đoán bằng show)' : ''}</label>`;
     const hasSol = solutionOf(lab).length > 0;
-    html += `<div class="lab-acts"><button id="lab-hint">💡 Gợi ý (${s.hintN}/${lab.hints.length})</button>${hasSol ? '<button id="lab-sol">🔑 Lời giải</button>' : ''}${sandbox() ? '' : '<button id="lab-reset">↺ Làm lại</button>'}</div>`;
+    html += `<div class="lab-acts"><button id="lab-hint">💡 Gợi ý (${s.hintN}/${lab.hints.length})</button>${hasSol ? '<button id="lab-sol">🔑 Lời giải</button>' : ''}${sandbox() ? '' : '<button id="lab-reset">↺ Làm lại</button><button id="lab-exam" title="Làm lại từ đầu, có giờ, không gợi ý — chấm thang 1000">⏱ Thi thử</button>'}</div>`;
     if (s.hintN) html += `<ul class="lab-hints">${lab.hints.slice(0, s.hintN).map((h) => `<li>${esc(h)}</li>`).join('')}</ul>`;
     if (lab.guide?.length) {
       const groups = guideGroups();
@@ -627,7 +634,71 @@ export function openLab(onRun) {
     };
     const rs = $('lab-runsol');
     if (rs) rs.onclick = typeSolution;
+    const ex = $('lab-exam');
+    if (ex) ex.onclick = startExam;
+    const exx = $('lab-exres-x');
+    if (exx) exx.onclick = () => { s.examRes = null; renderSide(); };
   }
+
+  // ---------------------------------------------------------------- chế độ thi thử
+  function startExam() {
+    const min = examMinutes(lab);
+    if (!confirm(`⏱ Thi thử ${lab.id} trong ${min} phút?\n\n• Lab được làm lại TỪ ĐẦU (cấu hình đang gõ sẽ bị xoá)\n• Ẩn gợi ý, lời giải, cách giải, giải thích lỗi và trạng thái từng nhiệm vụ\n• Nộp bài (hoặc hết giờ) → chấm thang 1000, đạt từ 800`)) return;
+    live.delete(lab.id);
+    save('lablog:' + lab.id, []);
+    save('labans:' + lab.id, {});
+    s = session(lab);
+    s.exam = { start: Date.now(), end: Date.now() + min * 60000 };
+    renderAll();
+    input.focus();
+  }
+  function submitExam(auto) {
+    if (!s.exam) return;
+    if (!auto && !confirm('Nộp bài và chấm điểm ngay?')) return;
+    const res = checkLab(lab, s.net, s.answers);
+    const secs = Math.min(Math.round((Date.now() - s.exam.start) / 1000), Math.round((s.exam.end - s.exam.start) / 1000));
+    const r = { ...examResult(res), secs, auto, failed: res.map((x, i) => (x ? -1 : i)).filter((i) => i >= 0) };
+    const best = load('labexam-best', {});
+    const b = best[lab.id];
+    if (!b || r.score > b.score || (r.score === b.score && r.secs < b.secs)) { best[lab.id] = { score: r.score, secs: r.secs }; save('labexam-best', best); }
+    s.exam = null;
+    s.examRes = r;
+    s.results = res; // không nháy cả loạt nhiệm vụ khi vừa nộp
+    renderHead();
+    renderAll();
+  }
+  function renderExamSide() {
+    const left = Math.max(0, Math.round((s.exam.end - Date.now()) / 1000));
+    let html = `<div class="lab-exam-h"><span>⏱ Đang thi thử ${esc(lab.id)}</span><span class="lab-timer${left < 120 ? ' low' : ''}" id="lab-timer">${fmtTime(left)}</span></div>` +
+      `<div class="lab-exam-note">Không có gợi ý / kết quả từng nhiệm vụ. Tự kiểm tra bằng show/ping như thi thật.</div>` +
+      `<ol class="lab-tasks">${lab.tasks.map((t, i) => taskHtml(t, i, false, false)).join('')}</ol>` +
+      `<div class="lab-acts"><button id="lab-submit" class="btn-accent">📝 Nộp bài</button><button id="lab-quit">✖ Huỷ thi</button></div>`;
+    $('lab-side').innerHTML = html;
+    $('lab-submit').onclick = () => submitExam(false);
+    $('lab-quit').onclick = () => { if (confirm('Huỷ bài thi? Cấu hình đã gõ vẫn giữ, không tính điểm.')) { s.exam = null; renderAll(); } };
+    $('lab-side').querySelectorAll('.lab-qopt').forEach((b) => (b.onclick = () => {
+      s.answers[+b.dataset.q] = +b.dataset.o;
+      save('labans:' + lab.id, s.answers);
+      renderSide();
+    }));
+  }
+  function examResHtml() {
+    const r = s.examRes;
+    if (!r) return '';
+    return `<div class="lab-exres ${r.pass ? 'pass' : 'fail'}"><button class="lab-exres-x" id="lab-exres-x" title="Đóng">✕</button>` +
+      `<div class="lab-exres-score">${r.score}<small>/1000</small> — ${r.pass ? 'ĐẠT ✅' : 'CHƯA ĐẠT ❌'}</div>` +
+      `<div>${r.ok}/${r.total} nhiệm vụ · thời gian ${fmtTime(r.secs)}${r.auto ? ' (hết giờ, tự nộp)' : ''}</div>` +
+      (r.failed.length ? `<div class="lab-exres-f">Chưa đạt: ${r.failed.map((i) => '#' + (i + 1)).join(', ')} — bật Gợi ý / Cách giải để xem lại.</div>` : '') + `</div>`;
+  }
+  // đồng hồ thi: cập nhật mỗi giây, hết giờ thì tự nộp; dừng khi đóng modal
+  const timer = setInterval(() => {
+    if (!document.body.contains(back)) { clearInterval(timer); return; }
+    if (!s?.exam) return;
+    const left = Math.round((s.exam.end - Date.now()) / 1000);
+    if (left <= 0) { submitExam(true); return; }
+    const t = $('lab-timer');
+    if (t) { t.textContent = fmtTime(left); t.classList.toggle('low', left < 120); }
+  }, 1000);
 
   /** "Gõ lời giải": chạy applySolution trên mạng hiện tại rồi đổ từng lệnh + kết quả vào console. */
   function typeSolution() { withGain('Lời giải mẫu', typeSolutionRaw); renderAll(); }
@@ -648,7 +719,7 @@ export function openLab(onRun) {
 
   // Ticket sự cố: mặc định KHÔNG giải thích (như ngoài đời, phải tự show/ping để chẩn đoán)
   function explainKey() { return lab.kind === 'ticket' ? 'lab-explain-ticket' : 'lab-explain'; }
-  function explainOn() { return load(explainKey(), lab.kind !== 'ticket'); }
+  function explainOn() { return !s?.exam && load(explainKey(), lab.kind !== 'ticket'); }
 
   function renderAll(full = true) {
     renderTools();
@@ -664,5 +735,6 @@ export function openLab(onRun) {
   selectLab(lab.id);
 }
 
+function fmtTime(sec) { const m = Math.floor(sec / 60), x = sec % 60; return `${String(m).padStart(2, '0')}:${String(x).padStart(2, '0')}`; }
 function el(name, attrs) { const n = document.createElementNS(SVG, name); for (const k in attrs) n.setAttribute(k, attrs[k]); return n; }
 function esc(s) { return String(s ?? '').replace(/[&<>"]/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[m])); }
