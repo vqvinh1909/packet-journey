@@ -1,0 +1,15 @@
+{
+  "name": "Packet Journey — Hành trình gói tin",
+  "short_name": "Packet Journey",
+  "description": "App học mạng CCNA/CCNP: mô phỏng gói tin qua từng tầng, dựng byte thật, xuất .pcap.",
+  "lang": "vi",
+  "start_url": ".",
+  "scope": ".",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#f4f6f9",
+  "theme_color": "#2c5f8a",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

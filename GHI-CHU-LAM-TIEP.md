@@ -1,0 +1,192 @@
+# Ghi chú làm tiếp — Packet Journey
+
+## ✅ ĐÃ XONG (session 2026-10-xx)
+- **Link "Đọc thêm" → HTML giáo trình**: sửa tập trung ở `ui/i18n.js` `lessonHref()` — tự đổi
+  `.../Bai-NN_*.md` sang `Infrastructure-Administrator-Giao-trinh.html#bNN-s0`, tách `#anchor` khỏi
+  encode. KHÔNG phải sửa 12 kịch bản. Đã test: mở ra Bài 02 render đẹp, tiếng Việt đúng.
+- **Fix UTF-8 server**: tạo `E:\SAP\serve.py` (ép charset=utf-8); `Mở-Packet-Journey.bat` giờ gọi
+  `python serve.py 8000`. Đã test: hết mojibake.
+- **Bố cục 3 cột**: `index.html` + `styles/app.css` (`.cols3`) — layerstack TRÁI, topology GIỮA,
+  timeline PHẢI, "Chi tiết gói" full-width BÊN DƯỚI. Responsive: ≤960px timeline xuống dưới, ≤680px xếp dọc.
+  Đã test vị trí 3 cột đúng ở 1024px. 43/43 test vẫn pass.
+
+## 🔭 CÒN LẠI (ưu tiên trên xuống)
+- **Giao diện giống site tham khảo** (hainguyenit.site course_id=8): trang đó CÓ PHÍ, chỉ xem được
+  trang bán khoá (mô tả + review), KHÔNG xem được UI mô phỏng thật → không copy trực tiếp được.
+  Nếu muốn giống, cần user mô tả/đưa ảnh UI bài học của họ, hoặc tự thiết kế đẹp hơn.
+- Các batch CCNA/CCNP còn lại + tính năng học chủ động (xem cuối file).
+
+---
+
+## 🐞 Bug cần sửa: link "Đọc thêm" mở .md bị lỗi tiếng Việt (mojibake)
+Hiện tượng: bấm link bài học → chữ vỡ kiểu `BÃ i 2`, `MÃ´ hÃ¬nh OSI`.
+Nguyên nhân: `python -m http.server` trả file `.md` KHÔNG kèm `charset=utf-8` → trình duyệt đọc
+nhầm sang Windows-1252. (File gốc vẫn đúng UTF-8.)
+
+**Cách sửa:** tạo `E:\SAP\serve.py` rồi chạy `python serve.py 8000` (thay cho `http.server`),
+và sửa `Mở-Packet-Journey.bat` gọi `serve.py`:
+```python
+import http.server, socketserver, sys
+PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 8000
+class H(http.server.SimpleHTTPRequestHandler):
+    extensions_map = {**http.server.SimpleHTTPRequestHandler.extensions_map,
+                      '.md': 'text/plain; charset=utf-8',
+                      '.txt': 'text/plain; charset=utf-8',
+                      '.html': 'text/html; charset=utf-8',
+                      '.js':  'text/javascript; charset=utf-8',
+                      '.json':'application/json; charset=utf-8'}
+with socketserver.TCPServer(('127.0.0.1', PORT), H) as httpd:
+    print(f'Serving E:/SAP on http://127.0.0.1:{PORT}'); httpd.serve_forever()
+```
+**CÁCH TỐT NHẤT (user chốt): trỏ "Đọc thêm" sang file HTML giáo trình đã build, KHÔNG dùng .md thô.**
+File có sẵn:
+- Infra: `../Quản trị Hạ tầng mạng (Infrastructure Administrator)/Infrastructure-Administrator-Giao-trinh.html`
+  (có cả bản nhẹ `..._nhe.html`)
+- Network security: `../Network security/Network-Security-Giao-trinh.html`
+
+HTML là file ĐƠN có sidebar, mỗi bài là một section với **anchor `#bNN-s0`** (bNN = số bài 2 chữ số,
+s0 = section đầu). Ví dụ Bài 02 → `#b02-s0`, Bài 14 → `#b14-s0`.
+
+→ Việc cần làm: trong từng `scenarios/sNN-*.js`, đổi `lesson.path` từ `.../Bai-02_...md` thành
+`../.../Infrastructure-Administrator-Giao-trinh.html#b02-s0`. Nhớ: `lessonHref()` trong `ui/i18n.js`
+encode từng đoạn path — phải CHỪA phần `#b02-s0` không bị encode (hiện split theo '/', anchor nằm ở
+đoạn cuối nên dấu `#` sẽ bị encodeURIComponent làm hỏng → cần sửa `lessonHref` tách anchor ra trước khi encode).
+Làm xong thì hết cả lỗi mojibake LẪN chuyện hiện markdown thô, lại render đẹp.
+
+
+
+## ⭐ Việc ưu tiên: đổi bố cục màn hình học (user yêu cầu 2026-10-26)
+
+Bố cục MỚI mong muốn: **3 cột ngang**
+- **Trái**: Ngăn xếp tầng (layer stack)
+- **Giữa**: Topology (sơ đồ mạng + bảng ARP/MAC/routing/NAT)
+- **Phải**: Timeline (điều khiển ▶ ◀ + danh sách bước)
+
+Bố cục HIỆN TẠI (cần sửa) trong `index.html`:
+- Hàng 1: topology (full width)
+- Hàng 2: timeline `#controls` (full width)
+- Hàng 3: `.cols` = [layer-stack | packet-detail] (2 cột)
+
+### Cách làm (gợi ý)
+- Trong `index.html`: gom 3 vùng vào một grid 3 cột:
+  `grid-template-columns: 230px 1fr 340px` → `#layer-stack` | topology panel | `#controls`.
+- **Chi tiết gói (tabs Cây trường/Hex/Giải thích)**: yêu cầu của user KHÔNG nhắc tới panel này.
+  → Hỏi lại user, hoặc mặc định đặt **full width BÊN DƯỚI 3 cột** (dễ đọc hex). Đừng để mất panel này.
+- `styles/app.css`: sửa `.cols` (hiện 2 cột) thành layout 3 cột; thêm `@media (max-width: 980px)` cho
+  xếp dọc lại trên màn nhỏ.
+- Topology ở giữa hẹp hơn full-width → kiểm lại `viewBox` các kịch bản (một số dùng `0 0 1000 340`)
+  có bị chật không; SVG tự co theo width nên thường ổn, chỉ cần nhìn lại s05/s07 (triangle, nhiều node).
+- Nhớ cập nhật `HƯỚNG-DẪN-TẠO-APP.md` phần mô tả bố cục.
+
+---
+
+## 🎨 Reference giao diện user muốn tham khảo (2026-10-26)
+User gửi: **https://hainguyenit.site/khoahoc/course_content.php?course_id=8** — "sao không làm giống này".
+→ Lần sau MỞ trang này (browser pane), xem nó trình bày khoá học/bài học thế nào rồi mô phỏng cho
+Packet Journey (có thể là trang danh sách bài + trình xem nội dung, hoặc tổng thể look & feel).
+Cần hỏi user: muốn giống ở điểm nào — bố cục xem bài, sidebar chương/bài, hay toàn bộ phong cách?
+
+## Trạng thái hiện tại (chốt tại 2026-10-26)
+- **12 kịch bản** (s01–s12): ping, VLAN, trunk, STP, inter-VLAN, OSPF, EIGRP, DHCP, DNS, NAT, ACL.
+- **12 giao thức** dựng byte thật: ethernet, dot1q, arp, ipv4, icmp, llc, stp, ospf, eigrp, udp, dhcp, dns.
+- **43/43 unit test pass** (`node --test`). Đã xem trực tiếp s01–s08, s11; s09/s10/s12 mới kiểm qua test.
+- UI: topology icon thật + animation, timeline, layer stack, field tree, hex 2 chiều, bảng thiết bị,
+  song ngữ VI/EN, sáng/tối, xuất .pcap, link 📖 sang vault.
+
+## ✅ ĐÃ XONG batch cuối (session 2026-10-xx #2)
+- Protocol mới: **TCP, HSRP, BGP, raw** (payload mảnh). serialize checksum 'transport' đã dùng cho TCP.
+- Kịch bản mới: **s13 HSRP, s14 TCP 3-way, s15 traceroute, s16 fragmentation, s17 BGP eBGP, s18 OSPF multi-area**.
+- Tổng: **18 kịch bản, 16 protocol, 49/49 test pass**. Đã sweep cả 18 kịch bản trong trình duyệt: render OK, 0 lỗi console.
+
+## ✅ ĐÃ XONG CCNP + học chủ động (session #3)
+- **CCNP**: s19 RSTP (reuse stp BPDU v2/type2 + flags), s20 QoS/DSCP, s21 redistribution OSPF↔EIGRP.
+- **Học chủ động**: 🎯 Quiz (`ui/quiz.js` modal, chấm điểm + lưu kỷ lục localStorage; nội dung ở `scenarios/quizzes.js`);
+  🤔 Đoán bước (toggle; step có `decision:{question,options,correct,explainVi}` → hỏi trước, lộ giải thích sau — ở `ui/explain.js`);
+  🔧 2 kịch bản sửa lỗi s22 (sai gateway) + s23 (sai VLAN cổng).
+- Tổng: **23 kịch bản, 16 protocol, 49/49 test pass**. Verify trình duyệt: sweep 23 OK, quiz + đoán bước chạy đúng, 0 lỗi console.
+
+## ✅ ĐÃ XONG nốt tính năng học (session #4)
+- 📘 **Từ điển**: `i18n/glossary.js` (25 thuật ngữ + bảng port + OSI map) + `ui/glossary.js` (modal có tìm kiếm).
+- 💾 **Tiến độ**: `ui/progress.js` (modal: kịch bản đã xem ✓ + điểm quiz + xuất/nhập .json); `ui/store.js` thêm markDone/exportAll/importAll; app markDone khi tới bước cuối.
+- **PWA offline**: `manifest.webmanifest` + `icon.svg` + `sw.js` (network-first, cache fallback) + đăng ký trong `app.js`.
+- **Dev**: `serve.py` thêm `Cache-Control: no-store` (trừ sw.js) để reload luôn lấy file mới.
+
+⚠️ LƯU Ý: Service Worker KHÔNG đăng ký được trong browser pane của Claude (webview nhúng chặn SW) →
+console báo "unknown error fetching the script". Đây là giới hạn môi trường, KHÔNG phải lỗi code —
+sw.js hợp lệ (200, đúng MIME, secure context). Trên Chrome/Edge thật sẽ cài + offline bình thường.
+
+## ✅ ĐÃ XONG M5 Builder (session #5)
+- 🛠️ **Tự tạo kịch bản**: `scenarios/builder.js` (`buildCustom(params)` dựng sim từ IP/mask/gateway) +
+  `ui/builder.js` (form modal có mẫu nhanh same/cross/badgw) + nút header `btn-builder` + `loadCustom` trong app.js.
+- Logic đúng 3 ca: cùng mạng (ARP trực tiếp, OK), khác mạng + GW đúng (định tuyến qua R1, TTL−1, OK),
+  sai/thiếu GW (ARP gateway không hồi đáp → ping HỎNG). Đã verify cả 3 mẫu trong trình duyệt.
+
+## ✅ ĐÃ XONG Canvas kéo-thả (session #6) — HOÀN TẤT M5
+- `scenarios/graphsim.js` `simulateGraph(devices, links, srcId, dstId)`: BFS tìm đường + mô phỏng ping
+  trên topology bất kỳ (host quyết định cùng/khác mạng, switch pass-through, router TTL−1 + viết lại MAC),
+  trả {topology,events,pcap} hoặc {error}. Có test `tests/graphsim.test.js` (5 ca).
+- `ui/canvas.js`: modal kéo-thả — thêm PC/Switch/Router, 4 chế độ (Di chuyển/Nối dây/Cấu hình/Xoá),
+  cấu hình IP/prefix/gateway (router: IP từng cổng theo neighbor), chọn 2 PC → Chạy ping → `loadSimResult` trong app.js.
+- Nút header `btn-canvas` "✏️ Vẽ mạng". Đã verify: seed 2PC+switch, cấu hình IP, chạy → 7 bước ping cùng mạng OK.
+
+→ **App đã phủ TRỌN spec gốc M1–M5 + chế độ học chủ động.** 54/54 test pass.
+
+## ✅ ĐÃ XONG chuyên sâu (session #7)
+- Protocol mới: **ipv6** (40B, no checksum), **icmpv6** (NDP NS/NA 135/136 + Echo, checksum pseudo-header v6),
+  **ospfv3** (Hello, checksum v6), **mstp** (phần mở rộng MST đầy đủ: region/digest/CIST/MSTI). 20 protocol tổng.
+- Nền: `addr.js` thêm parseIpv6/ipv6ToString; `checksum.js` thêm pseudoHeaderV6/transportChecksum6;
+  `serialize.js` thêm chế độ checksum `'transport6'`.
+- Kịch bản: **s24 MST** (region + 2 MSTI cân tải), **s25 QoS nâng cao** (DSCP+CoS/PCP, PHB EF/AF/CS, LLQ/CBWFQ/WRED, policing/shaping),
+  **s26 IPv6 + NDP** (NS/NA thay ARP + ICMPv6 Echo), **s27 OSPFv3** (Hello trên IPv6, link-local, so khác v2).
+- Test `tests/advanced6.test.js` (6 ca). Tổng **60/60 test pass, 27 kịch bản**. Verify trình duyệt: sweep 27 OK, IPv6 field tree đúng (Ethernet/IPv6/ICMPv6), 0 lỗi app.
+
+## ✅ Quiz đủ 27/27 kịch bản (session #8)
+- `scenarios/quizzes.js`: nay có quiz cho TẤT CẢ s01–s27 (87 câu). Đã verify mở quiz chạy đúng.
+
+## ✅ ĐÃ XONG SLAAC & DHCPv6 (session #9)
+- icmpv6.js: thêm Router Solicitation (133) + Router Advertisement (134) với Prefix Information + cờ M/O.
+- dhcpv6.js mới (UDP 546/547): msg-type + xid + options (Client/Server ID, IA_NA + IA Address).
+- serialize `'transport'` nay TỰ NHẬN IPv4/IPv6 → UDP/TCP checksum đúng trên cả hai (DHCPv6 cần v6).
+- Kịch bản **s28 SLAAC & DHCPv6**: RS/RA → SLAAC (tự sinh + DAD) và nhánh DHCPv6 (Solicit/Advertise/Request/Reply). Quiz 5 câu.
+- Test `tests/dhcpv6.test.js`. Tổng **28 kịch bản, 21 protocol, 64/64 test pass, quiz 28/28 bài (92 câu)**.
+
+## ✅ ĐÃ XONG MPLS + VXLAN (session #10)
+- Protocol mới: **mpls** (label stack 4B, EtherType 0x8847, S bit) + **vxlan** (header 8B, UDP 4789, VNI 24-bit).
+- Kịch bản **s29 MPLS** (push/swap/pop qua PE1–P–PE2) và **s30 VXLAN** (VTEP đóng/gỡ gói, bọc nguyên khung trong — field tree 2 Ethernet + 2 IPv4). Quiz mỗi bài 4 câu.
+- Test `tests/overlay.test.js`. Tổng **30 kịch bản, 23 protocol, 68/68 test pass, quiz 30/30 bài (100 câu)**.
+
+## ✅ ĐÃ XONG Lab CLI Cisco IOS (session #11, 2026-10-27) — để giống khoá học thật
+User so app với khoá hainguyenit.site → yêu cầu "càng nhiều lab càng tốt, càng giống doanh nghiệp càng tốt",
+lấy bài từ giáo trình Infrastructure Administrator. Nút header **🧪 Lab CLI**.
+- `lab/net.js` — máy mô phỏng mạng TÍNH TỪ CẤU HÌNH (không scripted): flood L2 theo VLAN/trunk/allowed/native/
+  EtherChannel (LACP/PAgP/on), SVI; routing connected + static/floating + **OSPF** (adjacency thật: subnet/area/
+  hello/passive/router-id, Dijkstra cost, O/O IA/O*E2, default-information originate) + **EIGRP** (AS, wildcard/
+  classful, composite metric); ACL std/ext/named (thứ tự, implicit deny, counters); NAT PAT + static (+ proxy-ARP
+  global); HSRP (bầu priority, VIP, MAC ảo, DIFFVIP); DHCP + relay + DHCP snooping; STP root (hiển thị);
+  `sendPacket()` đi thật 2 chiều (ARP, TTL, NAT, ACL in/out) và ghi Sim → timeline byte-thật + pcap.
+- `lab/ios.js` — CLI IOS: grammar có viết tắt + phát hiện "Ambiguous", lỗi `^` đúng cột, `?` theo ngữ cảnh, Tab
+  completion, mọi mode (if/subif/range/vlan/router/dhcp/acl/line), lệnh global trong sub-mode, `do`, pipe
+  include/section/begin/exclude, enable secret hỏi mật khẩu, log %LINK/%OSPF-5-ADJCHG/%DUAL/%HSRP, ~40 lệnh show
+  định dạng như IOS; PC kiểu Packet Tracer (`ipconfig <ip> <mask> <gw>`, `/renew`, ping, tracert, telnet, ssh).
+- `lab/labs.js` — **27 lab**: L01–L20 theo bài (B05, B07–B21, B26), T01–T06 ticket (T01–T03 = Lab tổng hợp
+  CCNA 04/05/06), P01 GreenMart. Mỗi lab: init bằng chính CLI, tasks tự chấm (ping/tcp/route/whatIf...), hints,
+  solution. `ui/lab.js` (modal: list, đề, topology trạng thái dây, console từng thiết bị, tasks, gợi ý, lời giải,
+  ▶ Xem gói tin). Lưu `pj_lablog:<id>` (replay khi mở lại), `pj_labs-done`.
+- Test `tests/lab.test.js`: mỗi lab ban đầu CHƯA đạt, chạy lời giải qua CLI thì đạt 100% + test hành vi CLI.
+  Tổng **104/104 test pass**. Verify trình duyệt: chạy lời giải cả 27 lab qua UI → đều đạt, 0 lỗi JS.
+- Thêm lab mới: thêm object vào `LABS` (build/init/tasks/hints/solution) — test tự kiểm lời giải.
+
+## Các nhánh còn lại (rất tùy chọn)
+- Lab CLI: IPv6 (ipv6 address / OSPFv3), VPN, WLC/Wireless, ASA, AAA/TACACS, Ansible chưa mô phỏng (GreenMart
+  task 2, 12–20 phần lớn). Có thể thêm: port-security violation khi cắm máy lạ, STP blocking thật trong forwarding.
+1. DHCPv6 Prefix Delegation, QoS hierarchical (HQoS), EVPN control-plane cho VXLAN, SR-MPLS.
+   → Nhưng về cơ bản app đã HOÀN TẤT: phủ trọn CCNA + CCNP + SP(MPLS) + DC(VXLAN) + IPv6.
+3. **Giao diện giống site tham khảo** (hainguyenit.site) — trang đó có phí, chỉ xem được trang bán khoá.
+
+## Cách thêm kịch bản/giao thức mới
+- Protocol mới: thêm `protocols/<ten>.js` (export default có `build`, `checksum`, …) rồi đăng ký trong
+  `protocols/index.js`. Checksum đặc biệt: xem `ospf.js` (hàm) và serialize `checksum: 'transport'` (UDP/TCP).
+- Kịch bản mới: thêm `scenarios/sNN-*.js` (export `meta`, `build`) rồi thêm vào `scenarios/index.js`.
+- Visual nâng cao: dùng `step.overlay` (đổi màu/nhãn link, badge thiết bị) và `device.color`,
+  `topology.viewBox` — xem s05 (STP) và s11 (NAT table) làm mẫu.
+- Luôn viết test trong `tests/` và chạy `node --test` trước khi kết luận xong.

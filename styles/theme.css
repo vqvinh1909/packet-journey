@@ -1,0 +1,59 @@
+/* styles/theme.css — biến màu, theme sáng/tối. Accent xanh dương đồng bộ track Infrastructure. */
+
+:root {
+  --accent: #2c5f8a;
+  --accent-dark: #1e4363;
+  --accent-soft: #e7eef5;
+  --accent-line: #b9cfe3;
+
+  --bg: #f4f6f9;
+  --panel: #ffffff;
+  --panel-2: #f0f3f7;
+  --border: #d7dee7;
+  --text: #1c2430;
+  --muted: #6a7686;
+
+  --changed: #c8611a;          /* trường vừa thay đổi */
+  --changed-soft: #fbe9d7;
+  --hl-byte: #ffd98a;          /* highlight byte khi rê chuột */
+  --hl-field: #fff2cc;
+
+  --l2: #8a6d3b;               /* màu phân biệt tầng */
+  --l25: #7a5ca0;
+  --l3: #2c5f8a;
+  --l4: #2e7d5b;
+  --l7: #a0433a;
+
+  --ok: #2e7d5b;
+  --warn: #c8611a;
+
+  --radius: 10px;
+  --shadow: 0 1px 3px rgba(20, 35, 60, 0.08), 0 4px 16px rgba(20, 35, 60, 0.06);
+  --mono: 'Cascadia Code', 'Consolas', 'SFMono-Regular', ui-monospace, monospace;
+  --sans: 'Segoe UI', system-ui, -apple-system, 'Helvetica Neue', Arial, sans-serif;
+}
+
+:root[data-theme='dark'] {
+  --accent: #5a9bd4;
+  --accent-dark: #3d6b96;
+  --accent-soft: #1b2b3c;
+  --accent-line: #2f4a66;
+
+  --bg: #0f141b;
+  --panel: #161d27;
+  --panel-2: #1b2430;
+  --border: #2a3542;
+  --text: #e4e9f0;
+  --muted: #93a1b3;
+
+  --changed: #f0954a;
+  --changed-soft: #3a2a1a;
+  --hl-byte: #6b5420;
+  --hl-field: #3a330f;
+
+  --l2: #c9a86a;
+  --l25: #b095d6;
+  --l3: #5a9bd4;
+  --l4: #5bbd8e;
+  --l7: #d98279;
+}

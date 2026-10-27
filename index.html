@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="vi" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#2c5f8a" />
+  <title>Packet Journey — Hành trình gói tin</title>
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="icon" href="icon.svg" />
+  <link rel="apple-touch-icon" href="icon.svg" />
+  <link rel="stylesheet" href="styles/theme.css" />
+  <link rel="stylesheet" href="styles/app.css" />
+</head>
+<body>
+  <header class="app-header">
+    <h1 id="app-title">Packet Journey</h1>
+    <span class="sub" id="app-sub"></span>
+    <select id="sel-scenario" aria-label="scenario"></select>
+    <button id="btn-lab" class="btn-lab" title="Lab thực hành dòng lệnh Cisco IOS theo giáo trình (27 lab + ticket sự cố)">🧪 Lab CLI</button>
+    <button id="btn-guess" title="Đoán bước tiếp theo">🤔 Đoán bước</button>
+    <button id="btn-quiz" title="Quiz cuối bài">🎯 Quiz</button>
+    <button id="btn-builder" title="Tự tạo kịch bản">🛠️ Tự tạo</button>
+    <button id="btn-canvas" title="Vẽ mạng kéo-thả">✏️ Vẽ mạng</button>
+    <button id="btn-glossary" title="Từ điển & tra nhanh">📘 Từ điển</button>
+    <button id="btn-progress" title="Tiến độ học">💾 Tiến độ</button>
+    <button id="btn-pcap">Xuất .pcap</button>
+    <button id="btn-lang">EN</button>
+    <button id="btn-theme" title="theme">🌙</button>
+  </header>
+
+  <div class="layout">
+    <div class="cols3">
+      <section class="panel col-left">
+        <div class="panel-h" id="h-layer">Ngăn xếp tầng</div>
+        <div class="panel-b" id="layer-stack"></div>
+      </section>
+
+      <section class="panel col-mid">
+        <div class="panel-h" id="h-topology">Topology</div>
+        <svg id="topology-svg" viewBox="0 0 1000 300" role="img" aria-label="topology"></svg>
+        <div class="panel-b">
+          <div class="dev-tables" id="dev-tables"></div>
+          <p class="scenario-desc" id="scenario-desc"></p>
+        </div>
+      </section>
+
+      <section class="panel col-right">
+        <div class="panel-h" id="h-timeline">Timeline</div>
+        <div class="panel-b" id="controls"></div>
+      </section>
+    </div>
+
+    <section class="panel">
+      <div class="panel-h" id="h-detail">Chi tiết gói tin</div>
+      <div class="tabs" id="tabs"></div>
+      <div class="tab-body" id="tab-body"></div>
+    </section>
+  </div>
+
+  <script>
+    // Tự phục hồi: nếu app KHÔNG khởi động được (thường do service worker/cache giữ file cũ hoặc
+    // file tải dở), tự gỡ service worker + xoá cache rồi tải lại 1 lần — người dùng không phải vào F12.
+    // Nếu lần thử lại vẫn hỏng thì hiện thông báo thay vì để trang trắng.
+    window.addEventListener('load', () => setTimeout(async () => {
+      if (window.__pjBooted) return;
+      if (!sessionStorage.getItem('pj-heal')) {
+        sessionStorage.setItem('pj-heal', '1');
+        try { const regs = (await navigator.serviceWorker?.getRegistrations()) || []; await Promise.all(regs.map((r) => r.unregister())); } catch (e) { /* bỏ qua */ }
+        try { const ks = await caches.keys(); await Promise.all(ks.map((k) => caches.delete(k))); } catch (e) { /* bỏ qua */ }
+        location.reload();
+        return;
+      }
+      const box = document.createElement('div');
+      box.className = 'boot-fail';
+      box.innerHTML = '<b>App chưa khởi động được.</b> Đã tự xoá bộ nhớ đệm và tải lại nhưng vẫn lỗi. ' +
+        'Hãy bấm F12 → tab Console, chụp dòng chữ đỏ gửi người hỗ trợ. ' +
+        '<button onclick="sessionStorage.removeItem(\'pj-heal\');location.reload()">Thử lại</button>';
+      document.body.prepend(box);
+    }, 1500));
+  </script>
+  <script type="module" src="ui/app.js"></script>
+</body>
+</html>
