@@ -84,6 +84,21 @@ server.listen(8799, '127.0.0.1', async () => {
   await p.click('#lab-sbx-open');
   await p.click('[data-add="asa"]');
   ok((await p.$$eval('.lab-node', (x) => x.map((e) => e.getAttribute('aria-label')))).includes('ASA1'), 'sandbox: thêm firewall ASA');
+  // 7) FortiGate + Palo Alto: CLI riêng, prompt theo ngữ cảnh, commit
+  await p.click('.lab-item[data-id="FG02"]');
+  await p.click('.lab-guide summary');
+  for (let g = 0; g < 3; g++) await p.click(`.lab-grun[data-g="${g}"]`);
+  ok((await p.textContent('.lab-score')) === '5/5', 'FG02: 3 bước guide → 5/5');
+  await p.click('.lab-tab[data-id="fw"]');
+  await type('config firewall policy');
+  ok((await p.textContent('#lab-prompt')).includes('(policy) #'), 'FortiGate: prompt theo ngữ cảnh config');
+  await type('end');
+  await p.click('.lab-item[data-id="PA01"]');
+  await p.click('.lab-tab[data-id="fw"]');
+  await type('configure');
+  ok((await p.textContent('#lab-prompt')).trim().endsWith('#'), 'Palo Alto: vào configure');
+  await type('commit');
+  ok((await p.$$eval('.lab-ln', (x) => x.map((e) => e.textContent))).some((l) => l.includes('Configuration committed successfully')), 'Palo Alto: commit');
   ok(errs.length === 0, 'không có lỗi JS: ' + JSON.stringify(errs).slice(0, 300));
   await b.close();
   server.close();

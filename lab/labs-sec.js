@@ -40,6 +40,25 @@ const zbfNet = () => makeNet([
 const RFW = ['hostname R-FW', 'interface g0/0', 'ip address 10.1.1.1 255.255.255.0', 'ip nat inside', 'no shutdown', 'interface g0/1', 'ip address 203.0.113.2 255.255.255.0', 'ip nat outside', 'no shutdown', 'exit', 'ip route 0.0.0.0 0.0.0.0 203.0.113.1', 'access-list 1 permit 10.1.1.0 0.0.0.255', 'ip nat inside source list 1 interface g0/1 overload'];
 const ZBF_BASE = ['zone security INSIDE', 'exit', 'zone security OUTSIDE', 'exit', 'class-map type inspect match-any INTERNET-CM', 'match protocol http', 'match protocol https', 'match protocol dns', 'match protocol icmp', 'exit', 'policy-map type inspect IN-OUT-PM', 'class type inspect INTERNET-CM', 'inspect', 'exit', 'class class-default', 'drop', 'exit', 'exit', 'zone-pair security IN-OUT source INSIDE destination OUTSIDE', 'service-policy type inspect IN-OUT-PM', 'exit', 'interface g0/0', 'zone-member security INSIDE', 'interface g0/1', 'zone-member security OUTSIDE', 'exit'];
 
+// ---------------------------------------------------------------- firewall các hãng: topology dùng chung
+//  PC-IN, PC-IN2 — SW-IN — FW (LAN) | FW (DMZ) — WEB-DMZ | FW (WAN) — ISP — INTERNET + KHACH-NGOAI
+const fwNet = (os, [wan, lan, dmz]) => makeNet([
+  server('inet', 'INTERNET 8.8.8.8', 930, 70, { ip: '8.8.8.8', gw: '8.8.8.1', services: [80, 443, 23, 53] }),
+  pc('ext', 'KHACH-NGOAI', 930, 240, { ip: '198.51.100.66', gw: '198.51.100.1' }),
+  router('isp', 'ISP', 720, 140, ['g0/0', 'g0/1', 'g0/2']),
+  firewall('fw', { fortios: 'FortiGate', panos: 'PA-VM' }[os] || 'FW', 480, 140, [wan, lan, dmz], os),
+  server('web', 'WEB-DMZ', 480, 330, { ip: '172.16.1.10', gw: '172.16.1.1', services: [80, 443, 22] }),
+  sw('swin', 'SW-IN', 240, 140, ['fa0/1', 'fa0/2', 'g0/1']),
+  pc('pin', 'PC-IN', 90, 260, { ip: '10.1.1.10', gw: '10.1.1.1', services: [445] }),
+  pc('pin2', 'PC-IN2', 260, 320, { ip: '10.1.1.11', gw: '10.1.1.1', services: [445] }),
+], [['isp', 'g0/1', 'inet', 'fa0'], ['isp', 'g0/2', 'ext', 'fa0'], ['fw', wan, 'isp', 'g0/0'], ['fw', dmz, 'web', 'fa0'], ['fw', lan, 'swin', 'g0/1'], ['pin', 'fa0', 'swin', 'fa0/1'], ['pin2', 'fa0', 'swin', 'fa0/2']]);
+const fi = (a, n) => a.d('fw').ifaces[n];
+const FG_BASE = ['config system interface', 'edit port1', 'set ip 203.0.113.2 255.255.255.0', 'next', 'edit port2', 'set ip 10.1.1.1 255.255.255.0', 'next', 'edit port3', 'set ip 172.16.1.1 255.255.255.0', 'next', 'end',
+  'config router static', 'edit 1', 'set gateway 203.0.113.1', 'set device port1', 'next', 'end', 'config firewall address', 'edit LAN_NET', 'set subnet 10.1.1.0 255.255.255.0', 'next', 'end',
+  'config firewall policy', 'edit 1', 'set srcintf port2', 'set dstintf port1', 'set srcaddr LAN_NET', 'set dstaddr all', 'set action accept', 'set schedule always', 'set service HTTP HTTPS DNS PING', 'set nat enable', 'next', 'edit 2', 'set srcintf port2', 'set dstintf port3', 'set srcaddr LAN_NET', 'set dstaddr all', 'set action accept', 'set schedule always', 'set service ALL', 'next', 'end'];
+const PA_BASE = ['configure', 'set network interface ethernet ethernet1/1 layer3 ip 203.0.113.2/24', 'set network interface ethernet ethernet1/2 layer3 ip 10.1.1.1/24', 'set network interface ethernet ethernet1/3 layer3 ip 172.16.1.1/24', 'set zone untrust network layer3 ethernet1/1', 'set zone trust network layer3 ethernet1/2', 'set zone dmz network layer3 ethernet1/3', 'set network virtual-router default interface [ ethernet1/1 ethernet1/2 ethernet1/3 ]', 'set network virtual-router default routing-table ip static-route default destination 0.0.0.0/0 nexthop ip-address 203.0.113.1',
+  'set rulebase security rules LAN-OUT from trust to untrust source any destination any application [ web-browsing ssl dns ping ] service application-default action allow', 'set rulebase security rules LAN-DMZ from trust to dmz source any destination any application any service any action allow', 'set rulebase nat rules SNAT from trust to untrust source any destination any service any source-translation dynamic-ip-and-port interface-address interface ethernet1/1'];
+
 export const SEC_LABS = [
   // =====================================================================
   // F01 — ASA cơ bản: 3 vùng, security-level, NAT, inspect ICMP
@@ -230,5 +249,93 @@ export const SEC_LABS = [
       { text: 'Ràng buộc: không zone-pair nào đi VÀO INSIDE; Telnet ra Internet vẫn bị chặn', verify: 'show zone-pair security', check: (a) => !(a.d('rfw').zbf?.pairs || []).some((p) => p.dst === 'INSIDE') && !tcp(a, 'pin', '8.8.8.8', 23) },
     ],
     hints: ['Có 4 lỗi. Bắt đầu bằng: show zone security (cổng nào thuộc zone nào?).', 'show zone-pair security: kiểm tra HƯỚNG source/destination và service-policy.', 'show running-config | section policy-map: action của từng class là inspect, pass hay drop?'],
+  },
+  // =====================================================================
+  // FG01–FG02 — FortiGate (FortiOS)
+  // =====================================================================
+  {
+    id: 'FG01', group: 'sec', lesson: 'Firewall — FortiGate cơ bản', level: 2, kind: 'config',
+    title: 'FortiGate cơ bản: interface, route, address, policy LAN → WAN có NAT',
+    story: 'Công ty Hoa Sen lắp FortiGate (FortiOS) làm firewall biên. Cổng: port1 = WAN (203.0.113.2/24, gateway ISP 203.0.113.1), port2 = LAN (10.1.1.1/24), port3 = DMZ (172.16.1.1/24, máy chủ WEB-DMZ). Chính sách: LAN ra Internet chỉ HTTP, HTTPS, DNS, PING và phải NAT ra IP port1; LAN vào DMZ mọi dịch vụ (không NAT); DMZ không được chủ động vào LAN. Đặt address object LAN_NET cho dải LAN.',
+    build: () => fwNet('fortios', ['port1', 'port2', 'port3']),
+    init: [ISP],
+    guide: [
+      { dev: 'fw', raw: true, title: '1. Cấu hình interface', why: 'FortiOS cấu hình theo khối: config <bảng> → edit <mục> → set ... → next → end. Mỗi cổng có IP/mask; "allowaccess ping" chỉ là quyền quản trị tới chính FortiGate.', cmds: ['config system interface', 'edit port1', 'set ip 203.0.113.2 255.255.255.0', 'set allowaccess ping', 'next', 'edit port2', 'set ip 10.1.1.1 255.255.255.0', 'set allowaccess ping https ssh', 'next', 'edit port3', 'set ip 172.16.1.1 255.255.255.0', 'next', 'end'] },
+      { dev: 'fw', raw: true, title: '2. Default route + address object', why: 'Static route: gateway + device. Address object đặt tên cho dải IP để dùng trong policy (dễ đọc, sửa một chỗ).', cmds: ['config router static', 'edit 1', 'set gateway 203.0.113.1', 'set device port1', 'next', 'end', 'config firewall address', 'edit LAN_NET', 'set subnet 10.1.1.0 255.255.255.0', 'next', 'end'] },
+      { dev: 'fw', raw: true, title: '3. Policy: LAN → WAN (NAT) và LAN → DMZ', why: 'Policy xét từ trên xuống, khớp là dừng; không khớp policy nào → Implicit Deny (ID 0). "set nat enable" = NAT nguồn ra IP cổng ra (port1). Không cần policy chiều về: FortiGate stateful.', cmds: ['config firewall policy', 'edit 1', 'set name "LAN-ra-Internet"', 'set srcintf port2', 'set dstintf port1', 'set srcaddr LAN_NET', 'set dstaddr all', 'set action accept', 'set schedule always', 'set service HTTP HTTPS DNS PING', 'set nat enable', 'next', 'edit 2', 'set name "LAN-vao-DMZ"', 'set srcintf port2', 'set dstintf port3', 'set srcaddr LAN_NET', 'set dstaddr all', 'set action accept', 'set schedule always', 'set service ALL', 'next', 'end'] },
+    ],
+    tasks: [
+      { text: 'port1/port2/port3 đúng IP; default route qua 203.0.113.1 (port1)', verify: 'show system interface ; get router info routing-table all', check: (a) => [['port1', '203.0.113.2'], ['port2', '10.1.1.1'], ['port3', '172.16.1.1']].every(([n, ip]) => fi(a, n).ip === ip && a.up('fw', n)) && a.route('fw', '0.0.0.0/0')?.nextHop === '203.0.113.1' },
+      { text: 'LAN ra Internet: web 80/443 + ping 8.8.8.8 (có NAT — ISP không có route về LAN)', verify: 'PC-IN: telnet 8.8.8.8 80 ; ping 8.8.8.8 ; FortiGate: get system session list', check: (a) => a.d('isp').routes.length === 0 && tcp(a, 'pin', '8.8.8.8', 80) && tcp(a, 'pin2', '8.8.8.8', 443) && a.ping('pin', '8.8.8.8') },
+      { text: 'Dịch vụ khác ra Internet (Telnet 23) bị Implicit Deny', verify: 'telnet 8.8.8.8', check: (a) => !tcp(a, 'pin', '8.8.8.8', 23) },
+      { text: 'LAN vào DMZ mọi dịch vụ (80, 22); DMZ KHÔNG mở được vào LAN', verify: 'PC-IN: telnet 172.16.1.10 22', check: (a) => tcp(a, 'pin', '172.16.1.10', 80) && tcp(a, 'pin', '172.16.1.10', 22) && !tcp(a, 'web', '10.1.1.10', 445) },
+      { text: 'Dùng address object LAN_NET (10.1.1.0/24) làm srcaddr', verify: 'show firewall address ; show firewall policy', check: (a) => { const F = a.d('fw').forti; return F?.addr.LAN_NET?.subnet?.ip === '10.1.1.0' && F.addr.LAN_NET.subnet.prefix === 24 && Object.values(F.pol).some((p) => (p.srcaddr || []).includes('LAN_NET')); } },
+      quiz('Không có policy nào khớp gói thì FortiGate làm gì?', ['Chặn — Implicit Deny (policy ID 0) ở cuối danh sách', 'Cho qua', 'Gửi cảnh báo nhưng vẫn cho qua', 'Chuyển sang policy đầu tiên'], 0),
+    ],
+    hints: ['Xem "🧭 Cách giải chi tiết".', 'Nhập sai tên object/cổng → "entry not found in datasource".', 'get system session list: xem phiên + cột SOURCE-NAT.'],
+  },
+  {
+    id: 'FG02', group: 'sec', lesson: 'Firewall — FortiGate VIP & thứ tự policy', level: 3, kind: 'ticket',
+    title: 'FortiGate: publish web bằng VIP — và vì sao policy mới "không ăn"',
+    story: '🎫 FortiGate đã chạy như FG01. Nhóm bảo mật thêm sẵn policy 3 "chan-WAN-vao-DMZ" (WAN → DMZ, ALL, deny) để chặn quét cổng. Giờ cần publish WEB-DMZ ra Internet bằng IP 203.0.113.10: tạo VIP WEB_VIP (203.0.113.10 → 172.16.1.10 trên port1) và policy ID 4 WAN → DMZ chỉ HTTP/HTTPS tới WEB_VIP. Tạo xong mà khách vẫn không vào được… Hãy tìm hiểu vì sao và sửa (không xoá policy 3).',
+    build: () => fwNet('fortios', ['port1', 'port2', 'port3']),
+    init: [ISP, ['fw', [...FG_BASE, 'config firewall policy', 'edit 3', 'set name "chan-WAN-vao-DMZ"', 'set srcintf port1', 'set dstintf port3', 'set srcaddr all', 'set dstaddr all', 'set action deny', 'set schedule always', 'set service ALL', 'next', 'end']]],
+    guide: [
+      { dev: 'fw', raw: true, title: '1. VIP (DNAT) cho WEB', why: 'VIP = Virtual IP: gói tới 203.0.113.10 trên port1 được đổi đích thành 172.16.1.10. FortiGate tự trả ARP cho IP VIP.', cmds: ['config firewall vip', 'edit WEB_VIP', 'set extip 203.0.113.10', 'set mappedip 172.16.1.10', 'set extintf port1', 'next', 'end'] },
+      { dev: 'fw', raw: true, title: '2. Policy 4: WAN → DMZ tới VIP', why: 'Đích của policy là object VIP (không phải "all", không phải IP thật). Chỉ HTTP + HTTPS.', cmds: ['config firewall policy', 'edit 4', 'set name "Publish-WEB"', 'set srcintf port1', 'set dstintf port3', 'set srcaddr all', 'set dstaddr WEB_VIP', 'set action accept', 'set schedule always', 'set service HTTP HTTPS', 'next', 'end'] },
+      { dev: 'fw', raw: true, title: '3. Sửa thứ tự: đưa policy 4 lên trước policy 3', why: 'Policy xét theo THỨ TỰ trong danh sách (không theo số ID). Policy 3 (deny ALL) đứng trước nên khớp trước và chặn hết. "move 4 before 3" đổi thứ tự — giữ nguyên policy chặn cho phần còn lại.', cmds: ['config firewall policy', 'move 4 before 3', 'end'] },
+    ],
+    tasks: [
+      { text: 'VIP WEB_VIP: 203.0.113.10 → 172.16.1.10 trên port1', verify: 'show firewall vip', check: (a) => { const v = a.d('fw').forti?.vip.WEB_VIP; return v?.extip === '203.0.113.10' && v.mappedip === '172.16.1.10' && v.extintf === 'port1'; } },
+      { text: 'Khách ngoài mở được http/https://203.0.113.10', verify: 'KHACH-NGOAI: telnet 203.0.113.10 80', check: (a) => tcp(a, 'ext', '203.0.113.10', 80) && tcp(a, 'ext', '203.0.113.10', 443) },
+      { text: 'SSH (22) vào WEB từ Internet vẫn bị chặn', verify: 'telnet 203.0.113.10 22', check: (a) => !tcp(a, 'ext', '203.0.113.10', 22) },
+      { text: 'Policy chặn WAN → DMZ (ID 3) vẫn còn, đứng SAU policy publish', verify: 'show firewall policy', check: (a) => { const o = a.d('fw').forti?.order || []; return o.includes('3') && a.d('fw').forti.pol[3].action === 'deny' && o.some((id, i) => (a.d('fw').forti.pol[id].dstaddr || []).includes('WEB_VIP') && i < o.indexOf('3')); } },
+      { text: 'LAN vẫn ra Internet bình thường', verify: 'PC-IN: telnet 8.8.8.8 80', check: (a) => tcp(a, 'pin', '8.8.8.8', 80) },
+    ],
+    hints: ['Policy mới tạo nằm CUỐI danh sách. Danh sách xét từ trên xuống, khớp là dừng.', 'config firewall policy → move <ID> before <ID>', 'Policy tới server publish dùng dstaddr = tên VIP.'],
+  },
+
+  // =====================================================================
+  // PA01–PA02 — Palo Alto (PAN-OS)
+  // =====================================================================
+  {
+    id: 'PA01', group: 'sec', lesson: 'Firewall — Palo Alto cơ bản', level: 2, kind: 'config',
+    title: 'Palo Alto cơ bản: zone, virtual-router, App-ID, NAT — và đừng quên commit',
+    story: 'Công ty Sông Hàn dùng Palo Alto (PAN-OS). Cổng ethernet1/1 = untrust (203.0.113.2/24, gateway 203.0.113.1), ethernet1/2 = trust (10.1.1.1/24), ethernet1/3 = dmz (172.16.1.1/24). Yêu cầu: cả 3 cổng thuộc virtual-router default; rule LAN-OUT cho trust → untrust các ứng dụng web-browsing, ssl, dns, ping (service application-default); NAT rule SNAT: trust → untrust đổi nguồn sang IP ethernet1/1; rule LAN-DMZ cho trust → dmz mọi ứng dụng. Ghi nhớ: trên Palo Alto, "set" chỉ sửa candidate config — phải "commit".',
+    build: () => fwNet('panos', ['e1/1', 'e1/2', 'e1/3']),
+    init: [ISP],
+    guide: [
+      { dev: 'fw', raw: true, title: '1. Interface, zone, virtual-router', why: 'Cổng layer3 cần IP + thuộc 1 zone (chính sách viết theo zone) + thuộc virtual-router (thì mới định tuyến).', cmds: ['configure', 'set network interface ethernet ethernet1/1 layer3 ip 203.0.113.2/24', 'set network interface ethernet ethernet1/2 layer3 ip 10.1.1.1/24', 'set network interface ethernet ethernet1/3 layer3 ip 172.16.1.1/24', 'set zone untrust network layer3 ethernet1/1', 'set zone trust network layer3 ethernet1/2', 'set zone dmz network layer3 ethernet1/3', 'set network virtual-router default interface [ ethernet1/1 ethernet1/2 ethernet1/3 ]', 'set network virtual-router default routing-table ip static-route default destination 0.0.0.0/0 nexthop ip-address 203.0.113.1'] },
+      { dev: 'fw', raw: true, title: '2. Security rule theo App-ID + NAT rule', why: 'Palo Alto nhận diện ỨNG DỤNG (App-ID); "service application-default" = chỉ cho ứng dụng chạy trên cổng chuẩn của nó. NAT là rulebase riêng, tách khỏi security. Cùng zone mặc định cho phép (intrazone-default), khác zone mặc định chặn (interzone-default).', cmds: ['set rulebase security rules LAN-OUT from trust to untrust source any destination any application [ web-browsing ssl dns ping ] service application-default action allow', 'set rulebase security rules LAN-DMZ from trust to dmz source any destination any application any service any action allow', 'set rulebase nat rules SNAT from trust to untrust source any destination any service any source-translation dynamic-ip-and-port interface-address interface ethernet1/1'] },
+      { dev: 'fw', raw: true, title: '3. Commit', why: 'Cho tới bước này MỌI thay đổi chỉ nằm trong candidate config — mạng chưa thay đổi gì. "show config diff" xem trước, "commit" để áp dụng.', cmds: ['show config diff', 'commit', 'exit'] },
+    ],
+    tasks: [
+      { text: 'Đã commit: running config = candidate (không còn thay đổi treo)', verify: 'configure → show config diff', check: (a) => !!a.d('fw').pan && JSON.stringify(a.d('fw').pan.run) === JSON.stringify(a.d('fw').pan.cand) && Object.keys(a.d('fw').pan.run.ifs).length === 3 },
+      { text: 'Zone untrust/trust/dmz đúng cổng; cả 3 cổng thuộc virtual-router', verify: 'show interface all', check: (a) => [['e1/1', 'untrust'], ['e1/2', 'trust'], ['e1/3', 'dmz']].every(([n, z]) => fi(a, n).zone === z && a.up('fw', n) && !!fi(a, n).ip) },
+      { text: 'trust ra Internet: web, HTTPS, ping (NAT rule SNAT)', verify: 'PC-IN: telnet 8.8.8.8 80 ; show session all', check: (a) => a.d('isp').routes.length === 0 && tcp(a, 'pin', '8.8.8.8', 80) && tcp(a, 'pin2', '8.8.8.8', 443) && a.ping('pin', '8.8.8.8') },
+      { text: 'Ứng dụng ngoài danh sách (Telnet 23) bị chặn', verify: 'test security-policy-match from trust to untrust source 10.1.1.10 destination 8.8.8.8 protocol 6 destination-port 23', check: (a) => !tcp(a, 'pin', '8.8.8.8', 23) },
+      { text: 'trust vào dmz được; dmz KHÔNG mở được vào trust', verify: 'PC-IN: telnet 172.16.1.10 22', check: (a) => tcp(a, 'pin', '172.16.1.10', 22) && !tcp(a, 'web', '10.1.1.10', 445) },
+      quiz('Gõ xong toàn bộ lệnh "set" nhưng chưa commit thì mạng thế nào?', ['Chưa có gì thay đổi — chỉ candidate config bị sửa', 'Đã áp dụng ngay', 'Áp dụng một nửa', 'Firewall khởi động lại'], 0),
+    ],
+    hints: ['Xem "🧭 Cách giải chi tiết".', 'Cổng có IP + zone nhưng chưa vào virtual-router → commit có Warning và không định tuyến được.', 'test security-policy-match ... cho biết rule nào khớp mà không cần gửi gói.'],
+  },
+  {
+    id: 'PA02', group: 'sec', lesson: 'Firewall — Palo Alto DNAT & pre-NAT/post-NAT', level: 3, kind: 'ticket',
+    title: 'Palo Alto publish web: rule DNAT đúng mà vẫn bị chặn — bẫy "pre-NAT IP, post-NAT zone"',
+    story: '🎫 PA-VM đã chạy như PA01. Kỹ sư thêm sẵn (đã commit): address WEB (172.16.1.10/32), WEB-PUB (203.0.113.10/32), NAT rule DNAT-WEB (untrust → untrust, đích WEB-PUB → dịch thành WEB) và security rule WEB-IN (untrust → dmz, destination WEB, web-browsing + ssl). Khách vẫn không vào được http://203.0.113.10. Sửa rule WEB-IN cho đúng quy tắc của Palo Alto rồi commit. SSH vào WEB từ Internet vẫn phải bị chặn.',
+    build: () => fwNet('panos', ['e1/1', 'e1/2', 'e1/3']),
+    init: [ISP, ['fw', [...PA_BASE, 'set address WEB ip-netmask 172.16.1.10/32', 'set address WEB-PUB ip-netmask 203.0.113.10/32', 'set rulebase nat rules DNAT-WEB from untrust to untrust source any destination WEB-PUB service any destination-translation translated-address WEB', 'set rulebase security rules WEB-IN from untrust to dmz source any destination WEB application [ web-browsing ssl ] service application-default action allow', 'commit', 'exit']]],
+    guide: [
+      { dev: 'fw', raw: true, title: '1. Sửa destination của WEB-IN thành IP TRƯỚC NAT', why: 'Quy tắc Palo Alto: security rule so ĐỊA CHỈ theo gói gốc (pre-NAT: 203.0.113.10 = WEB-PUB) nhưng ZONE đích theo kết quả định tuyến sau NAT (dmz). Rule đang ghi WEB (IP thật) nên không bao giờ khớp. (NAT rule thì ngược lại: zone đích pre-NAT = untrust.)', cmds: ['configure', 'set rulebase security rules WEB-IN destination WEB-PUB', 'commit', 'exit'] },
+      { dev: 'fw', raw: true, title: '2. Kiểm tra bằng test security-policy-match', why: 'Mô phỏng gói khách vào web: from untrust to dmz, destination là IP public.', cmds: ['test security-policy-match from untrust to dmz source 198.51.100.66 destination 203.0.113.10 protocol 6 destination-port 80'] },
+    ],
+    tasks: [
+      { text: 'Khách ngoài mở được http/https://203.0.113.10', verify: 'KHACH-NGOAI: telnet 203.0.113.10 80', check: (a) => tcp(a, 'ext', '203.0.113.10', 80) && tcp(a, 'ext', '203.0.113.10', 443) },
+      { text: 'SSH vào WEB từ Internet vẫn bị chặn', verify: 'telnet 203.0.113.10 22', check: (a) => !tcp(a, 'ext', '203.0.113.10', 22) },
+      { text: 'Rule WEB-IN: untrust → dmz, destination = địa chỉ public (pre-NAT); đã commit', verify: 'show running security-policy', check: (a) => { const r = a.d('fw').pan?.run.sec.find((x) => x.name === 'WEB-IN'); return !!r && [r.destination].flat().includes('WEB-PUB') && r.to === 'dmz'; } },
+      { text: 'Nhân viên vẫn ra Internet', verify: 'PC-IN: telnet 8.8.8.8 80', check: (a) => tcp(a, 'pin', '8.8.8.8', 80) },
+      quiz('Security rule cho khách vào server publish bằng DNAT trên Palo Alto ghi gì?', ['Destination = IP public (trước NAT), zone đích = zone của server (sau NAT)', 'Destination = IP thật, zone đích = untrust', 'Destination = IP thật, zone đích = dmz', 'Destination = IP public, zone đích = untrust'], 0, '"Pre-NAT IP, post-NAT zone" — câu thần chú khi làm DNAT trên Palo Alto.'),
+    ],
+    hints: ['Lệnh "set" trên rule có sẵn chỉ đổi thuộc tính ghi trong lệnh — đừng quên commit.', 'test security-policy-match from untrust to dmz ... destination 203.0.113.10 → rule nào khớp?', 'Nhớ quy tắc: địa chỉ trước NAT, zone sau NAT.'],
   },
 ];

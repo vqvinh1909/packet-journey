@@ -1431,6 +1431,7 @@ function walk(ctx, R, pkt, start, opts = {}) {
         if (fi.nat === 'outside' || d.fw) {
           const before = pkt.dst;
           const t = natOut2In(ctx, d, pkt);
+          if (t) pkt.dst0 = before; // địa chỉ đích TRƯỚC NAT (Palo Alto khớp security rule theo địa chỉ này)
           if (t) { changed = ['ip.dst', 'ip.checksum']; R.proc(node.dev, { l: 3, side: 'forward', title: `${d.name} NAT: đích ${before} → ${pkt.dst}`, ex: `Gói vào cổng "ip nat outside" mang địa chỉ inside global ${before}; tra bảng NAT${t.stat ? ' (NAT tĩnh)' : ''} → đổi về inside local ${pkt.dst} rồi mới định tuyến.`, tables: natRows(ctx, d) }); }
         }
         if (aclAfterNat) { const x = aclIn(); if (x) return x; }
@@ -1553,7 +1554,7 @@ function sendPacketInner(net, o) {
   if (!fwd.ok) return done({ ok: false, kind: fwd.fail.code === 'U' ? 'unreach' : 'timeout', fail: fwd.fail, hops: fwd.hops });
   const dd = net.devices[fwd.at.dev];
   let open = true;
-  const reply = { ...pkt, src: pkt.dst, dst: pkt.src, reply: true, ttl: dd.type === 'router' || dd.type === 'switch' ? 255 : 128, ipId: 0x3c4d };
+  const reply = { ...pkt, dst0: undefined, src: pkt.dst, dst: pkt.src, reply: true, ttl: dd.type === 'router' || dd.type === 'switch' ? 255 : 128, ipId: 0x3c4d };
   if (proto === 'tcp') {
     open = portOpen(dd, pkt.dport);
     // access-class trên VTY: chỉ cho phép nguồn nằm trong ACL quản trị

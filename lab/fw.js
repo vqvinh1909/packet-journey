@@ -82,13 +82,18 @@ function cmMatch(d, cm, pkt) {
 }
 function policyCheck(d, pkt, inIf, outIf) {
   const zi = zoneOf(d, inIf) || inIf, zo = zoneOf(d, outIf) || outIf;
+  const dstM = d.fw.preNatDst ? pkt.dst0 ?? pkt.dst : pkt.dst; // PAN-OS: địa chỉ đích trước NAT, zone sau NAT
   for (const r of d.fw.rules || []) {
     if (r.disabled) continue;
+    if (r.sameZone && zi !== zo) continue;
     if (!inList(zi, r.from) || !inList(zo, r.to)) continue;
-    if (!addrIn(pkt.src, r.src) || !addrIn(pkt.dst, r.dst) || !svcIn(pkt, r.svc)) continue;
+    if (!addrIn(pkt.src, r.src) || !addrIn(dstM, r.dst) || !svcIn(pkt, r.svc)) continue;
     const label = `${d.fw.ruleWord || 'rule'} "${r.name ?? r.id}"`;
     if (r.action === 'deny' || r.action === 'drop' || r.action === 'reject') return { allow: false, rule: r, why: `${label} (${zi} → ${zo}) → ${r.action.toUpperCase()}` };
-    return { allow: true, stateful: true, rule: r, snat: r.nat ? r.natIp || 'iface' : null, why: `${label} (${zi} → ${zo}) → ACCEPT${r.nat ? ' + NAT nguồn' : ''}` };
+    // NAT nguồn: theo chính rule (FortiGate, Sophos...) hoặc theo rulebase NAT riêng (Palo Alto, pfSense outbound NAT)
+    const nr = (d.fw.natRules || []).find((n) => !n.disabled && inList(zi, n.from) && inList(zo, n.to) && addrIn(pkt.src, n.src) && addrIn(dstM, n.dst));
+    const snat = r.nat ? r.natIp || 'iface' : nr ? nr.natIp || 'iface' : null;
+    return { allow: true, stateful: true, rule: r, snat, why: `${label} (${zi} → ${zo}) → ${r.action === 'allow' ? 'ALLOW' : 'ACCEPT'}${snat ? ` + NAT nguồn${nr ? ` (NAT rule "${nr.name}")` : ''}` : ''}` };
   }
   return { allow: false, why: `không ${d.fw.ruleWord || 'rule'} nào khớp ${zi} → ${zo} ${pkt.src} → ${pkt.dst}${L4(pkt) ? ':' + pkt.dport : ''} → ${d.fw.implicitWord || 'deny ngầm định (implicit deny)'}` };
 }

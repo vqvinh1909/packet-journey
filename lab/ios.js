@@ -15,6 +15,8 @@ import * as N from './net.js';
 import * as A6 from './ip6.js';
 import * as V6 from './net6.js';
 import { makeAsa } from './asa.js';
+import { makeForti } from './fortios.js';
+import { makePan } from './panos.js';
 
 const { longIf, shortIf, normIf, isIp, maskToPrefix, prefixToMask, netOf, ifSort } = N;
 
@@ -845,6 +847,8 @@ export function createCli(net) {
     c, R, net, iosPing: (d, ip) => iosPing(d, ip), iosTrace: (d, ip) => iosTrace(d, ip), toPriv: (x) => toPriv(x), saveCfg: (x) => saveCfg(x),
     doIn: (x, table) => { const words = x.a[0].split(/\s+/); const p = parse(table, words); return p.hit ? p.hit.fn({ ...x, a: p.args, words }) : errOut(p, { mode: 'config' }, x.a[0], words, 'do '); },
   });
+  // Firewall các hãng có cú pháp riêng (không dùng bảng lệnh IOS): xử lý cả dòng lệnh
+  const VENDOR = { fortios: makeForti({ net, R }), panos: makePan({ net, R }) };
   function tableFor(d, s) {
     if (d.os === 'asa') return ASA.tableFor(d, s);
     switch (s.mode) {
@@ -887,6 +891,7 @@ export function createCli(net) {
     if (s.pw) return s.pwPrompt || 'Password: ';
     if (s.loggedOut) return '';
     if (d.os === 'asa') return ASA.prompt(d, s);
+    if (VENDOR[d.os]) return VENDOR[d.os].prompt(d, s);
     const h = d.name;
     return ({ user: `${h}>`, priv: `${h}#`, config: `${h}(config)#`, if: `${h}(config-if)#`, subif: `${h}(config-subif)#`, range: `${h}(config-if-range)#`, vlan: `${h}(config-vlan)#`, router: `${h}(config-router)#`, pool: `${h}(dhcp-config)#`, 'acl-std': `${h}(config-std-nacl)#`, 'acl-ext': `${h}(config-ext-nacl)#`, line: `${h}(config-line)#`, isakmp: `${h}(config-isakmp)#`, tset: `${h}(cfg-crypto-trans)#`, cmap: `${h}(config-crypto-map)#`, vamap: `${h}(config-access-map)#`, bgp: `${h}(config-router)#`, mstcfg: `${h}(config-mst)#`, ospf6: `${h}(config-rtr)#`, zone: `${h}(config-sec-zone)#`, cmapi: `${h}(config-cmap)#`, pmapi: `${h}(config-pmap)#`, pmapic: `${h}(config-pmap-c)#`, zpair: `${h}(config-sec-zone-pair)#` })[s.mode] || `${h}#`;
   }
@@ -897,6 +902,7 @@ export function createCli(net) {
     const line = String(raw ?? '');
     let res;
     if (d.type === 'pc' || d.type === 'server') res = pcExec(d, line.trim());
+    else if (VENDOR[d.os]) res = VENDOR[d.os].exec(d, s, line.trim());
     else if (d.rommon) res = R(['(Lab: thiết bị đang ở ROMMON vì không có file IOS khởi động được — bấm "↺ Làm lại" để khôi phục lab.)']);
     else if (s.ask) {
       const a = s.ask;
@@ -2846,6 +2852,7 @@ export function createCli(net) {
   function complete(id, line0) {
     const d = net.devices[id];
     const s = sess(id);
+    if (VENDOR[d.os]) return null; // Tab hoàn thành lệnh chỉ hỗ trợ cú pháp IOS/ASA
     const m = String(line0).match(/^(.*?)(\S*)$/);
     const head = m[1], part = m[2].toLowerCase();
     if (!part) return null;
