@@ -12,6 +12,8 @@
 // Mọi thay đổi ghi trực tiếp vào model `net` (lab/net.js) → mạng được tính lại thật.
 
 import * as N from './net.js';
+import * as A6 from './ip6.js';
+import * as V6 from './net6.js';
 
 const { longIf, shortIf, normIf, isIp, maskToPrefix, prefixToMask, netOf, ifSort } = N;
 
@@ -87,7 +89,7 @@ const flashName = (w) => String(w).replace(/^flash:\/?/i, '');
 // ----------------------------------------------------------------------
 // Bộ so khớp lệnh (grammar) — hỗ trợ viết tắt + phát hiện mơ hồ như IOS
 // ----------------------------------------------------------------------
-// Token: 'keyword' | '{a|b|c}' | '<ip>' '<mask>' '<wild>' '<num>' '<word>' '<if>' '<vlist>' '<rest>'
+// Token: 'keyword' | '{a|b|c}' | '<ip>' '<ip6>' '<ip6p>' (IPv6/prefix) '<mask>' '<wild>' '<num>' '<word>' '<if>' '<vlist>' '<rest>'
 function c(spec, fn) { return { toks: spec.split(' '), fn, spec }; }
 
 function tok(t, words, wi) {
@@ -108,6 +110,8 @@ function tok(t, words, wi) {
   }
   switch (t) {
     case '<ip>': case '<wild>': return isIp(w) ? { val: w, used: 1 } : null;
+    case '<ip6>': { const v = A6.norm6(w); return v ? { val: v, used: 1 } : null; }
+    case '<ip6p>': { const v = A6.parsePrefix6(w); return v ? { val: v, used: 1 } : null; }
     case '<mask>': try { maskToPrefix(w); return { val: w, used: 1 }; } catch { return null; }
     case '<num>': return /^\d+$/.test(w) ? { val: +w, used: 1 } : null;
     case '<word>': return { val: w, used: 1 };
@@ -251,6 +255,10 @@ export function createCli(net) {
   ];
   const SHOW_ROUTER = [
     c('show ip interface brief', (x) => R(showIpIntBriefRouter(x.d))),
+    c('show ipv6 interface brief', (x) => R(showIpv6IntBr(x.d))),
+    c('show ipv6 route', (x) => R(showIpv6Route(x.d, null))),
+    c('show ipv6 route {ospf|static|connected|local}', (x) => R(showIpv6Route(x.d, x.a[0]))),
+    c('show ipv6 ospf neighbor', (x) => R(showOspf6Nei(x.d))),
     ...SHOW_ROUTING,
     c('show ip nat translations', (x) => R(showNatTr(x.d))),
     c('show ip nat statistics', (x) => R(showNatStat(x.d))),
@@ -295,6 +303,8 @@ export function createCli(net) {
   // ================== EXEC ==================
   const EXEC_COMMON = [
     c('ping <ip>', (x) => iosPing(x.d, x.a[0])),
+    c('ping <ip6>', (x) => iosPing6(x.d, x.a[0])),
+    c('ping ipv6 <ip6>', (x) => iosPing6(x.d, x.a[0])),
     c('traceroute <ip>', (x) => iosTrace(x.d, x.a[0])),
     c('telnet <ip>', (x) => tcpConnect(x.d, x.a[0], 23, 'ios')),
     c('telnet <ip> <num>', (x) => tcpConnect(x.d, x.a[0], x.a[1], 'ios')),
@@ -421,7 +431,16 @@ export function createCli(net) {
     c('ip dhcp excluded-address <ip> <ip>', (x) => { x.d.dhcp.excluded.push([x.a[0], x.a[1]]); return R([]); }),
     c('no ip dhcp excluded-address <ip>', (x) => { x.d.dhcp.excluded = x.d.dhcp.excluded.filter(([a]) => a !== x.a[0]); return R([]); }),
     c('no ip dhcp excluded-address <ip> <ip>', (x) => { x.d.dhcp.excluded = x.d.dhcp.excluded.filter(([a, b]) => !(a === x.a[0] && b === x.a[1])); return R([]); }),
-    c('ipv6 unicast-routing', () => R([])),
+    c('ipv6 unicast-routing', (x) => { x.d.ipv6Routing = true; return R([]); }),
+    c('no ipv6 unicast-routing', (x) => { x.d.ipv6Routing = false; return R([]); }),
+    c('ipv6 route <ip6p> <ip6>', (x) => route6(x, x.a[0], { nh: x.a[1] })),
+    c('ipv6 route <ip6p> <ip6> <num>', (x) => route6(x, x.a[0], { nh: x.a[1], ad: x.a[2] })),
+    c('ipv6 route <ip6p> <if>', (x) => route6(x, x.a[0], { iface: x.a[1] })),
+    c('ipv6 route <ip6p> <if> <ip6>', (x) => route6(x, x.a[0], { iface: x.a[1], nh: x.a[2] })),
+    c('no ipv6 route <ip6p>', (x) => route6(x, x.a[0], null)),
+    c('no ipv6 route <ip6p> <ip6>', (x) => route6(x, x.a[0], null)),
+    c('ipv6 router ospf <num>', (x) => routerOspf6(x)),
+    c('no ipv6 router ospf <num>', (x) => { if (x.d.ospf6?.pid === x.a[0]) x.d.ospf6 = null; return R([]); }),
   ];
   const CFG_ROUTER = [
     ...CFG_COMMON,
@@ -533,6 +552,15 @@ export function createCli(net) {
   ];
   const IF_ROUTER = [
     ...IF_L3,
+    c('ipv6 address <ip6p>', (x) => addr6(x, x.a[0], false)),
+    c('ipv6 address <ip6p> eui-64', (x) => addr6(x, x.a[0], true)),
+    c('ipv6 address <ip6> link-local', (x) => ifAll(x, (f) => { if (!A6.isLinkLocal(x.a[0])) return ['% Lab: địa chỉ link-local phải thuộc FE80::/10']; f.ll = x.a[0]; })),
+    c('no ipv6 address', (x) => ifAll(x, (f) => { f.ipv6 = []; f.ll = null; })),
+    c('no ipv6 address <ip6p>', (x) => ifAll(x, (f) => { f.ipv6 = (f.ipv6 || []).filter((a) => !(a.ip === x.a[0].ip && a.prefix === x.a[0].prefix)); })),
+    c('ipv6 enable', (x) => ifAll(x, (f) => { f.ipv6Enable = true; })),
+    c('no ipv6 enable', (x) => ifAll(x, (f) => { f.ipv6Enable = false; })),
+    c('ipv6 ospf <num> area <num>', (x) => ospf6If(x, x.a[0], x.a[1])),
+    c('no ipv6 ospf <num> area <num>', (x) => ifAll(x, (f) => { f.ospf6 = null; })),
     c('encapsulation dot1q <num>', (x) => encapSet(x, x.a[0], false)),
     c('encapsulation dot1q <num> native', (x) => encapSet(x, x.a[0], true)),
     c('encapsulation {ppp|hdlc}', (x) => l2encSet(x, x.a[0])),
@@ -607,6 +635,13 @@ export function createCli(net) {
     c('exit', (x) => { x.s.mode = 'config'; return R([]); }),
     c('end', (x) => toPriv(x)),
     c('do <rest>', (x) => doExec(x)),
+  ];
+  const OSPF6_MODE = [
+    c('router-id <ip>', (x) => { x.d.ospf6.rid = x.a[0]; return R([]); }),
+    c('no router-id', (x) => { x.d.ospf6.rid = null; return R([]); }),
+    c('passive-interface <if>', (x) => { const o = x.d.ospf6; if (!o.passive.includes(x.a[0])) o.passive.push(x.a[0]); return R([]); }),
+    c('no passive-interface <if>', (x) => { x.d.ospf6.passive = x.d.ospf6.passive.filter((n) => n !== x.a[0]); return R([]); }),
+    c('exit', (x) => { x.s.mode = 'config'; return R([]); }),
   ];
   const OSPF_MODE = [
     c('network <ip> <wild> area <num>', (x) => ospfNet(x, x.a[0], x.a[1], x.a[2], true)),
@@ -786,12 +821,13 @@ export function createCli(net) {
       case 'cmap': return CMAP_MODE;
       case 'vamap': return VAMAP_MODE;
       case 'bgp': return BGP_MODE;
+      case 'ospf6': return OSPF6_MODE;
       case 'mstcfg': return MST_MODE;
       default: return [];
     }
   }
   const cfgTable = (d) => (isRouter(d) ? CFG_ROUTER : CFG_SWITCH);
-  const SUB = new Set(['if', 'subif', 'range', 'vlan', 'router', 'pool', 'acl-std', 'acl-ext', 'line', 'isakmp', 'tset', 'cmap', 'vamap', 'bgp', 'mstcfg']);
+  const SUB = new Set(['if', 'subif', 'range', 'vlan', 'router', 'pool', 'acl-std', 'acl-ext', 'line', 'isakmp', 'tset', 'cmap', 'vamap', 'bgp', 'mstcfg', 'ospf6']);
 
   // ================== Thực thi ==================
   function prompt(id) {
@@ -803,7 +839,7 @@ export function createCli(net) {
     if (s.pw) return s.pwPrompt || 'Password: ';
     if (s.loggedOut) return '';
     const h = d.name;
-    return ({ user: `${h}>`, priv: `${h}#`, config: `${h}(config)#`, if: `${h}(config-if)#`, subif: `${h}(config-subif)#`, range: `${h}(config-if-range)#`, vlan: `${h}(config-vlan)#`, router: `${h}(config-router)#`, pool: `${h}(dhcp-config)#`, 'acl-std': `${h}(config-std-nacl)#`, 'acl-ext': `${h}(config-ext-nacl)#`, line: `${h}(config-line)#`, isakmp: `${h}(config-isakmp)#`, tset: `${h}(cfg-crypto-trans)#`, cmap: `${h}(config-crypto-map)#`, vamap: `${h}(config-access-map)#`, bgp: `${h}(config-router)#`, mstcfg: `${h}(config-mst)#` })[s.mode] || `${h}#`;
+    return ({ user: `${h}>`, priv: `${h}#`, config: `${h}(config)#`, if: `${h}(config-if)#`, subif: `${h}(config-subif)#`, range: `${h}(config-if-range)#`, vlan: `${h}(config-vlan)#`, router: `${h}(config-router)#`, pool: `${h}(dhcp-config)#`, 'acl-std': `${h}(config-std-nacl)#`, 'acl-ext': `${h}(config-ext-nacl)#`, line: `${h}(config-line)#`, isakmp: `${h}(config-isakmp)#`, tset: `${h}(cfg-crypto-trans)#`, cmap: `${h}(config-crypto-map)#`, vamap: `${h}(config-access-map)#`, bgp: `${h}(config-router)#`, mstcfg: `${h}(config-mst)#`, ospf6: `${h}(config-rtr)#` })[s.mode] || `${h}#`;
   }
 
   function exec(id, raw) {
@@ -992,6 +1028,76 @@ export function createCli(net) {
   }
   function userSet(x, u, p, priv, kind) { x.d.users[u] = { pw: p, priv, kind }; return R([]); }
   function line(x) { return x.d.lines[x.s.line]; }
+  // ---------- IPv6 ----------
+  function route6(x, p, o) {
+    const d = x.d;
+    d.routes6 = (d.routes6 || []).filter((r) => !(r.net === A6.net6(p.ip, p.prefix) && r.prefix === p.prefix && (!o || (r.nh || null) === (o.nh || null))));
+    if (o) d.routes6.push({ net: A6.net6(p.ip, p.prefix), prefix: p.prefix, nh: o.nh || null, iface: o.iface || null, ad: o.ad ?? 1 });
+    return R([]);
+  }
+  function addr6(x, p, eui) {
+    return ifAll(x, (f, n) => {
+      let ip = p.ip;
+      if (eui) {
+        if (p.prefix !== 64) return ['% Lab: EUI-64 cần prefix /64'];
+        ip = A6.eui64(A6.net6(p.ip, 64), N.epMac(net, { dev: x.d.id, ifn: n }));
+      }
+      f.ipv6 = (f.ipv6 || []).filter((a) => a.ip !== ip);
+      f.ipv6.push({ ip, prefix: p.prefix, ...(eui ? { eui: true } : {}) });
+    });
+  }
+  function routerOspf6(x) {
+    if (!x.d.ipv6Routing) return R(['% IPv6 routing not enabled']);
+    if (!x.d.ospf6) x.d.ospf6 = { pid: x.a[0], rid: null, passive: [] };
+    else if (x.d.ospf6.pid !== x.a[0]) return R([`% Lab: router này đã chạy OSPFv3 process ${x.d.ospf6.pid}.`]);
+    x.s.mode = 'ospf6';
+    return R(V6.ospf6Rid(net, x.d) ? [] : ['%OSPFv3-4-NORTRID: Process OSPFv3-' + x.a[0] + '-IPv6 could not pick a router-id, please configure manually']);
+  }
+  function ospf6If(x, pid, area) {
+    if (!x.d.ipv6Routing) return R(['% IPv6 routing not enabled']);
+    if (!x.d.ospf6) x.d.ospf6 = { pid, rid: null, passive: [] };
+    else if (x.d.ospf6.pid !== pid) return R([`% Lab: router này đã chạy OSPFv3 process ${x.d.ospf6.pid}.`]);
+    const out = ifAll(x, (f) => { f.ospf6 = { pid, area }; });
+    if (!V6.ospf6Rid(net, x.d)) out.out.push(`%OSPFv3-4-NORTRID: Process OSPFv3-${pid}-IPv6 could not pick a router-id, please configure manually`);
+    return out;
+  }
+  function iosPing6(d, ip) {
+    const r = V6.ping6(net, d.id, ip);
+    const marks = r.ok ? '!!!!!' : '.....';
+    const okN = r.ok ? 5 : 0;
+    return R(['Type escape sequence to abort.', `Sending 5, 100-byte ICMP Echos to ${ip}, timeout is 2 seconds:`, marks, `Success rate is ${okN * 20} percent (${okN}/5)${okN ? ', round-trip min/avg/max = 0/1/1 ms' : ''}`], { why: r.ok ? null : r.fail?.why, ok: r.ok });
+  }
+  function showIpv6IntBr(d) {
+    const L = [];
+    for (const n of ifOrder(d)) {
+      const f = d.ifaces[n];
+      const [st, pr] = ifStatus(d, n);
+      L.push(`${pad(longIf(n), 23)}[${st === 'administratively down' ? 'administratively down' : st}/${pr}]`);
+      if (!V6.v6On(f)) { L.push('    unassigned'); continue; }
+      L.push(`    ${V6.llOf(net, d.id, n)}`, ...(f.ipv6 || []).map((a) => `    ${a.ip}`));
+    }
+    return L;
+  }
+  function showIpv6Route(d, filter) {
+    const code = { ospf: ['O', 'OI'], static: ['S'], connected: ['C'], local: ['L'] }[filter];
+    const rows = V6.routeTable6(net, d.id).filter((r) => !code || code.includes(r.code));
+    const L = [`IPv6 Routing Table - default - ${rows.length} entries`, 'Codes: C - Connected, L - Local, S - Static, O - OSPF Intra, OI - OSPF Inter', ''];
+    if (!d.ipv6Routing) L.push('(Lab: "ipv6 unicast-routing" CHƯA bật — router có bảng nhưng KHÔNG chuyển tiếp gói IPv6)', '');
+    for (const r of rows) {
+      L.push(`${pad(r.code, 4)}${r.net}/${r.prefix} [${r.ad}/${r.metric}]`);
+      if (r.code === 'C') L.push(`     via ${longIf(r.iface)}, directly connected`);
+      else if (r.code === 'L') L.push(`     via ${longIf(r.iface)}, receive`);
+      else L.push(`     via ${r.nextHop ? r.nextHop + (r.code !== 'S' || r.nextHop.startsWith('FE80') ? ', ' + longIf(r.iface) : '') : longIf(r.iface) + ', directly connected'}`);
+    }
+    return L;
+  }
+  function showOspf6Nei(d) {
+    if (!d.ospf6) return [];
+    const o = V6.ospf6All(net);
+    const L = ['', '            OSPFv3 Router with ID (' + (o.rid[d.id] || '0.0.0.0') + ') (Process ID ' + d.ospf6.pid + ')', '', 'Neighbor ID     Pri   State           Dead Time   Interface ID    Interface'];
+    for (const a of o.adj[d.id] || []) L.push(`${pad(o.rid[a.to], 16)}${pad(1, 6)}${pad('FULL/  -', 16)}00:00:3${a.to.length % 10}    ${pad(Object.keys(net.devices[a.to].ifaces).indexOf(a.theirIf) + 1, 16)}${longIf(a.outIf)}`);
+    return L;
+  }
   function routerOspf(x) {
     if (x.d.type === 'switch' && !x.d.ipRouting) return R(['% IP routing not enabled']);
     if (!x.d.ospf) x.d.ospf = N.newOspf(x.a[0]);
@@ -1636,11 +1742,14 @@ export function createCli(net) {
   }
 
   // ---------- PC ----------
-  const PC_HELP = ['Available Commands:', '?         Display the list of available commands', 'arp       Display the arp table (arp -a)', 'ipconfig  Display network configuration / ipconfig <IP> <mask> [<gateway>] / ipconfig /renew /release /all', 'ping      Send echo messages', 'ssh       Ssh client (ssh -l <user> <ip>)', 'telnet    Telnet client (telnet <ip> [port])', 'tracert   Trace route to destination'];
+  const PC_HELP = ['Available Commands:', '?         Display the list of available commands', 'arp       Display the arp table (arp -a)', 'ipconfig  Display network configuration / ipconfig <IP> <mask> [<gateway>] / ipconfig /renew /release /all', 'ipv6config <IPv6>/<prefix> [<gateway>] | ipv6config autoconfig (SLAAC)', 'ping      Send echo messages', 'ssh       Ssh client (ssh -l <user> <ip>)', 'telnet    Telnet client (telnet <ip> [port])', 'tracert   Trace route to destination'];
   function ipconfigOut(d, all) {
     const L = ['', 'FastEthernet0 Connection:(default port)', '', '   Connection-specific DNS Suffix..: '];
     if (all) L.push(`   Physical Address................: ${N.ciscoMac(N.epMac(net, { dev: d.id, ifn: 'fa0' })).toUpperCase()}`, `   DHCP Enabled....................: ${d.dhcp ? 'Yes' : 'No'}`);
-    L.push(`   IPv4 Address....................: ${d.ip || '0.0.0.0'}`, `   Subnet Mask.....................: ${d.ip ? prefixToMask(d.prefix) : '0.0.0.0'}`, `   Default Gateway.................: ${d.gateway || '0.0.0.0'}`);
+    const ll = V6.llOf(net, d.id, 'fa0');
+    if (ll) L.push(`   Link-local IPv6 Address.........: ${ll}`);
+    if (d.ip6) L.push(`   IPv6 Address....................: ${d.ip6}/${d.prefix6 ?? 64}`);
+    L.push(`   IPv4 Address....................: ${d.ip || '0.0.0.0'}`, `   Subnet Mask.....................: ${d.ip ? prefixToMask(d.prefix) : '0.0.0.0'}`, `   Default Gateway.................: ${d.gw6 ? d.gw6 + '\n                                     ' : ''}${d.gateway || '0.0.0.0'}`);
     if (all) L.push(`   DNS Servers.....................: ${d.dns || '0.0.0.0'}`);
     L.push('');
     return L;
@@ -1659,6 +1768,13 @@ export function createCli(net) {
     if (got) L.push('Approximate round trip times in milli-seconds:', '    Minimum = 0ms, Maximum = 1ms, Average = 0ms');
     L.push('');
     return R(L, { sim: r.sim, simLabel: `${d.name} ping ${ip}`, why: r.ok ? null : r.fail?.why, ok: r.ok });
+  }
+  function pcPing6(d, ip) {
+    const r = V6.ping6(net, d.id, ip);
+    const L = ['', `Pinging ${ip} with 32 bytes of data:`, ''];
+    for (let i = 0; i < 4; i++) L.push(r.ok ? `Reply from ${ip}: bytes=32 time${i ? '<1ms' : '=1ms'}` : 'Request timed out.');
+    L.push('', `Ping statistics for ${ip}:`, `    Packets: Sent = 4, Received = ${r.ok ? 4 : 0}, Lost = ${r.ok ? 0 : 4} (${r.ok ? 0 : 100}% loss),`, '');
+    return R(L, { why: r.ok ? null : r.fail?.why, ok: r.ok });
   }
   function pcTrace(d, ip) {
     const r = N.sendPacket(net, { src: d.id, dst: ip, record: false, anim: true });
@@ -1701,6 +1817,23 @@ export function createCli(net) {
       }
       return R(['Invalid Command.']);
     }
+    if (cmd === 'ipv6config') {
+      const a = (w[1] || '').toLowerCase();
+      if (!a) return R(ipconfigOut(d, false));
+      if (a === 'autoconfig') {
+        const r = V6.slaac(net, d.id);
+        d.slaac = true;
+        if (!r.ok) { d.ip6 = ''; d.gw6 = ''; return R(['IPv6 autoconfig failed.', ...ipconfigOut(d, false)], { why: r.why, ok: false }); }
+        d.ip6 = r.ip; d.prefix6 = r.prefix; d.gw6 = r.gw;
+        return R([`(SLAAC: nhận Router Advertisement từ ${r.router} → prefix /64 + EUI-64)`, ...ipconfigOut(d, false)]);
+      }
+      const p = A6.parsePrefix6(w[1]);
+      const gw = w[2] ? A6.norm6(w[2]) : '';
+      if (!p || (w[2] && !gw)) return R(['Invalid Command.', 'Cú pháp: ipv6config <IPv6>/<prefix> [<gateway IPv6>] | ipv6config autoconfig']);
+      d.ip6 = p.ip; d.prefix6 = p.prefix; d.gw6 = gw; d.slaac = false;
+      return R([]);
+    }
+    if (cmd === 'ping' && w[1] && A6.isIp6(w[1])) return pcPing6(d, A6.norm6(w[1]));
     if (cmd === 'ping') { const ip = w.slice(1).find(isIp); return ip ? pcPing(d, ip) : R(['Invalid Command.']); }
     if (cmd === 'tracert') { const ip = w.slice(1).find(isIp); return ip ? pcTrace(d, ip) : R(['Invalid Command.']); }
     if (cmd === 'telnet') { if (!isIp(w[1])) return R(['Invalid Command.']); return tcpConnect(d, w[1], w[2] ? +w[2] : 23); }
@@ -2468,6 +2601,10 @@ export function createCli(net) {
     if (f.ospfPrio != null) L.push(` ip ospf priority ${f.ospfPrio}`);
     if (f.ospfHello != null) L.push(` ip ospf hello-interval ${f.ospfHello}`);
     if (f.ospfPid != null) L.push(` ip ospf ${f.ospfPid} area ${f.ospfArea}`);
+    if (f.ll) L.push(` ipv6 address ${f.ll} link-local`);
+    for (const a of f.ipv6 || []) L.push(a.eui ? ` ipv6 address ${A6.net6(a.ip, 64)}/64 eui-64` : ` ipv6 address ${a.ip}/${a.prefix}`);
+    if (f.ipv6Enable) L.push(' ipv6 enable');
+    if (f.ospf6) L.push(` ipv6 ospf ${f.ospf6.pid} area ${f.ospf6.area}`);
     if (f.bw != null) L.push(` bandwidth ${f.bw}`);
     if (n.startsWith('s') && f.l2enc === 'ppp') L.push(' encapsulation ppp');
     if (f.pppAuth) L.push(` ppp authentication ${f.pppAuth}`);
@@ -2543,6 +2680,9 @@ export function createCli(net) {
       for (const s of d.nat.statics) L.push(s.proto ? `ip nat inside source static ${s.proto} ${s.local} ${s.lport} ${s.global} ${s.gport}` : `ip nat inside source static ${s.local} ${s.global}`);
       L.push('ip classless');
       for (const r of d.routes) L.push(`ip route ${r.net} ${prefixToMask(r.prefix)} ${r.iface ? longIf(r.iface) + (r.nh ? ' ' + r.nh : '') : r.nh}${r.ad !== 1 ? ' ' + r.ad : ''}`);
+      if (d.ipv6Routing) L.push('ipv6 unicast-routing');
+      for (const r of d.routes6 || []) L.push(`ipv6 route ${r.net}/${r.prefix} ${r.iface ? longIf(r.iface) + (r.nh ? ' ' + r.nh : '') : r.nh}${(r.ad ?? 1) !== 1 ? ' ' + r.ad : ''}`);
+      if (d.ospf6) L.push(`ipv6 router ospf ${d.ospf6.pid}`, ...(d.ospf6.rid ? [` router-id ${d.ospf6.rid}`] : []), ...d.ospf6.passive.map((n) => ` passive-interface ${longIf(n)}`), '!');
       L.push('!', 'ip flow-export version 9', '!', ...aclBlock(d), '!');
     } else {
       L = headBlock(d);
@@ -2595,7 +2735,7 @@ export function createCli(net) {
     const words = head.trim() ? head.trim().split(/\s+/) : [];
     if (d.type === 'pc' || d.type === 'server') {
       if (words.length) return null;
-      const hit = ['arp', 'help', 'ipconfig', 'ping', 'ssh', 'telnet', 'tracert'].filter((c0) => c0.startsWith(part));
+      const hit = ['arp', 'help', 'ipconfig', 'ipv6config', 'ping', 'ssh', 'telnet', 'tracert'].filter((c0) => c0.startsWith(part));
       return hit.length === 1 ? hit[0] + ' ' : null;
     }
     if (s.pw || s.loggedOut || s.ask) return null;

@@ -117,7 +117,7 @@ function common(id, type, name, x, y) {
   };
 }
 export function pc(id, name, x, y, o = {}) {
-  return { ...common(id, 'pc', name, x, y), ip: o.ip || '', prefix: o.prefix ?? 24, gateway: o.gw || '', dns: o.dns || '', dhcp: !!o.dhcp, services: o.services || [], files: o.files || [] };
+  return { ...common(id, 'pc', name, x, y), ip: o.ip || '', prefix: o.prefix ?? 24, gateway: o.gw || '', dns: o.dns || '', dhcp: !!o.dhcp, services: o.services || [], files: o.files || [], ip6: o.ip6 || '', prefix6: o.prefix6 ?? 64, gw6: o.gw6 || '', slaac: false };
 }
 export function server(id, name, x, y, o = {}) {
   const d = pc(id, name, x, y, o);
@@ -130,7 +130,7 @@ export function newPort() {
   return { mode: 'access', modeSet: false, dyn: 'auto', vlan: 1, allowed: null, native: 1, shutdown: false, errdis: false, desc: '', group: null, chMode: null, portfast: false, bpduguard: false, ps: null, trust: false, nonegotiate: false, protected: false, cdp: true, pv: null };
 }
 function newIf(name) {
-  return { ip: null, prefix: null, shutdown: !name.startsWith('lo') && !name.startsWith('tu'), tunSrc: null, tunDst: null, desc: '', encap: null, native: false, nat: null, aclIn: null, aclOut: null, standby: {}, vrrp: {}, helper: [], ospfCost: null, ospfArea: null, ospfPid: null, ospfHello: null, ospfPrio: null, bw: null, clock: null, l2enc: name.startsWith('s') ? 'hdlc' : null, cdp: true, proxyArp: true, cryptoMap: null };
+  return { ip: null, prefix: null, shutdown: !name.startsWith('lo') && !name.startsWith('tu'), tunSrc: null, tunDst: null, desc: '', encap: null, native: false, nat: null, aclIn: null, aclOut: null, standby: {}, vrrp: {}, helper: [], ospfCost: null, ospfArea: null, ospfPid: null, ospfHello: null, ospfPrio: null, bw: null, clock: null, l2enc: name.startsWith('s') ? 'hdlc' : null, cdp: true, proxyArp: true, cryptoMap: null, ipv6: [], ipv6Enable: false, ll: null, ospf6: null };
 }
 export function newSubIf(name) { const f = newIf(name); f.shutdown = false; return f; }
 function l3Common(d) {
@@ -169,6 +169,9 @@ export function router(id, name, x, y, ifs) {
   d.nat = { dyn: [], statics: [], pools: {} };
   d.natTable = [];
   d.crypto = { isakmp: {}, keys: {}, tsets: {}, maps: {} };
+  d.ipv6Routing = false;
+  d.routes6 = [];
+  d.ospf6 = null;
   return d;
 }
 export function newOspf(pid) { return { pid, rid: null, networks: [], passive: [], noPassive: [], passiveDefault: false, defaultOriginate: false, defaultAlways: false }; }
@@ -438,7 +441,8 @@ export function flood(net, src, diag) {
       }
       if (d.type === 'router') {
         if (it.tag == null) {
-          if (d.ifaces[it.port]?.ip) add(it.dev, it.port, it.hops);
+          const fi = d.ifaces[it.port];
+          if (fi?.ip || fi?.ipv6?.length || fi?.ipv6Enable) add(it.dev, it.port, it.hops);
           for (const [n, f] of Object.entries(d.ifaces)) if (n.startsWith(it.port + '.') && f.native && f.encap != null && !f.shutdown) add(it.dev, n, it.hops);
         } else {
           const sub = Object.entries(d.ifaces).find(([n, f]) => n.startsWith(it.port + '.') && f.encap === it.tag && !f.native);
