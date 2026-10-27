@@ -1,5 +1,11 @@
 # Ghi chú làm tiếp — Packet Journey
 
+## 🐧 VPCS cho PC (2026-10-27, việc 5/11)
+- `lab/ios.js` `vpcsExec` khi `d.shell === 'vpcs'` (prompt `PC1> `); PC không có cờ → `pcExec` kiểu Windows như cũ.
+  `save` lưu `d.vpcsSaved`; `S.wipeDevice` nạp lại. VPCS không có telnet/ssh (như thật) — cần thì đổi shell.
+- `lab/sandbox.js`: kind `pc` tạo với `shell: 'vpcs'`; boot log VPCS. Workspace: menu chuột phải PC đổi shell;
+  capture lặp 5 gói cho ping VPCS. Test sandbox/capture đã đổi sang cú pháp VPCS (test trunk capture giữ Windows vì telnet).
+
 ## ⏱ Thời gian hội tụ thật + log IOS (2026-10-27, việc 4/11)
 - `lab/net.js` (cuối file): `net.clock` tuỳ chọn. Không có → tức thì như cũ (mọi test cũ, breaker, chấm điểm).
   `phaseOf(net, key, kind, meta)` = pha theo tuổi của mục (`PHASES`: stp/rstp/ospf/eigrp/bgp/hsrp/vrrp). Chỗ chặn:
@@ -101,7 +107,7 @@
      trong test), quiet-mode access-class; `aaa new-model` thay "login local"; `security passwords min-length`;
      `ip http server` mở cổng 80; `exec-timeout`, `ip ssh version` lưu và hiện trong running-config.
 6. ⏳ Kịch bản tấn công byte-thật (ARP spoofing, DHCP giả/starvation, VLAN hopping) trong scenarios/.
-- Tổng hiện tại: 101 lab, `node --test` 248/248, `node tools/ui-smoke.cjs` 76/76; workspace tự dựng mạng kiểu EVE-NG + capture; phá mạng ngẫu nhiên; luyện subnet; điểm yếu; đồng hồ hội tụ + log IOS.
+- Tổng hiện tại: 101 lab, `node --test` 253/253, `node tools/ui-smoke.cjs` 78/78; workspace tự dựng mạng kiểu EVE-NG + capture; phá mạng ngẫu nhiên; luyện subnet; điểm yếu; đồng hồ hội tụ + log IOS; VPCS.
 
 
 ## ✅ ĐÃ XONG Lab CLI đợt 3 (session 2026-10-27/28) — 7 cải tiến

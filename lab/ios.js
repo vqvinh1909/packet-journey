@@ -961,7 +961,7 @@ export function createCli(net) {
   function prompt(id) {
     const d = net.devices[id];
     const s = sess(id);
-    if (d.type === 'pc' || d.type === 'server') return s.pw === 'ssh' ? 'Password: ' : 'C:\\>';
+    if (d.type === 'pc' || d.type === 'server') return s.pw === 'ssh' ? 'Password: ' : d.shell === 'vpcs' ? `${d.name}> ` : 'C:\\>';
     if (d.rommon) return 'rommon 1 > ';
     if (s.ask) { const st = s.ask.steps[s.ask.i]; return typeof st.p === 'function' ? st.p(s.ask.data) : st.p; }
     if (s.pw) return s.pwPrompt || 'Password: ';
@@ -978,7 +978,7 @@ export function createCli(net) {
     const line = String(raw ?? '');
     let res;
     if (d.off) res = R(['% Thiết bị đang TẮT — chuột phải → Start (hoặc ▶ Start all) để bật.']);
-    else if (d.type === 'pc' || d.type === 'server') res = s.pw === 'ssh' ? sshPw(d, s, line) : pcExec(d, line.trim());
+    else if (d.type === 'pc' || d.type === 'server') res = s.pw === 'ssh' ? sshPw(d, s, line) : d.shell === 'vpcs' ? vpcsExec(d, line.trim()) : pcExec(d, line.trim());
     else if (VENDOR[d.os]) res = VENDOR[d.os].exec(d, s, line.trim());
     else if (d.rommon) res = R(['(Lab: thiết bị đang ở ROMMON vì không có file IOS khởi động được — bấm "↺ Làm lại" để khôi phục lab.)']);
     else if (s.ask) {
@@ -2044,6 +2044,152 @@ export function createCli(net) {
     L.push('', 'Trace complete.');
     return R(L, { sim: r.sim, simLabel: `${d.name} tracert ${ip}`, why: r.ok ? null : r.fail?.why, ok: r.ok });
   }
+  // ---------- VPCS (Virtual PC Simulator — PC mặc định trong EVE-NG / GNS3) ----------
+  const VPCS_HELP = [
+    '?                        Print help',
+    'arp                      Shortcut for: show arp. Show arp table',
+    'clear ARG                Clear IPv4/IPv6, arp/neighbor cache, command history',
+    'dhcp [OPTION]            Shortcut for: ip dhcp. Get IPv4 address via DHCP',
+    'ip ARG ... [OPTION]      Configure the current VPC\'s IP settings. See ip ?',
+    'ping HOST [OPTION ...]   Ping HOST with ICMP (default) or TCP/UDP. See ping ?',
+    'save [FILENAME]          Save the configuration to the file FILENAME',
+    'show [ARG]               Print the information of VPCs (default). See show ?',
+    'trace HOST [OPTION ...]  Print the path packets take to network HOST',
+    'version                  Print the version information',
+  ];
+  const VPCS_IP_HELP = ['ip ARG ... [OPTION]', 'Configure the current VPC\'s IP settings', '  ARG ...:', '  address [mask] [gateway]', '  address [gateway] [mask]', '                 Set the VPC\'s ip, default gateway ip and network mask', '                 Default IPv4 mask is /24, IPv6 is /64. Example:', '                 ip 10.1.1.70/26 10.1.1.65 set the VPC\'s ip to 10.1.1.70,', '                 the gateway to 10.1.1.65, the netmask to 255.255.255.192.', '                 In tap mode, the ip of the tapx is the maximum host ID', '                 of the subnet. In the example above,', '                 the tapx ip would be 10.1.1.126', '  auto           Attempt to obtain IPv6 address, mask and gateway using SLAAC', '  dhcp [OPTION]  Attempt to obtain IPv4 address, mask, gateway, DNS via DHCP', '  dns ip         Set DNS server ip, delete if ip is \'0\''];
+  const vmac = (d) => N.epMac(net, { dev: d.id, ifn: 'fa0' });
+  const vms = (i) => (0.5 + ((i * 37) % 70) / 100).toFixed(3);
+  function vpcsShowIp(d) {
+    return [
+      '', `NAME        : ${d.name}[1]`, `IP/MASK     : ${d.ip ? `${d.ip}/${d.prefix}` : '0.0.0.0/0'}`, `GATEWAY     : ${d.gateway || '0.0.0.0'}`, `DNS         : ${d.dns || ''}`,
+      ...(d.dhcp && d.ip ? [`DHCP SERVER : ${d.dhcpServer || d.gateway || ''}`, 'DHCP LEASE  : 86391, 86400/43200/75600'] : []),
+      `MAC         : ${vmac(d)}`, 'LPORT       : 20000', 'RHOST:PORT  : 127.0.0.1:30000', 'MTU         : 1500', '',
+    ];
+  }
+  function vpcsSetIp(d, w) {
+    // ip A.B.C.D[/len] [gw] [mask]  |  ip A.B.C.D mask|len [gw]  — như VPCS: mask mặc định /24
+    let [addr, len] = w[1].split('/');
+    if (!isIp(addr)) return R(['Invalid address']);
+    let pfx = len != null ? +len : null, gw = '';
+    for (const x of w.slice(2)) {
+      if (/^\d{1,2}$/.test(x) && pfx == null) pfx = +x;
+      else if (isIp(x)) {
+        let mp = null;
+        try { mp = maskToPrefix(x); } catch { mp = null; }
+        if (pfx == null && mp != null && /^255\./.test(x)) pfx = mp; else if (!gw) gw = x; else return R(['Invalid gateway']);
+      } else return R(['Invalid options']);
+    }
+    pfx ??= 24;
+    if (!(pfx >= 1 && pfx <= 32)) return R(['Invalid netmask']);
+    if (gw && !N.inNet(gw, addr, pfx)) return R([`Gateway ${gw} is not in the subnet ${N.netOf(addr, pfx)}/${pfx}`]);
+    // VPCS gửi gratuitous ARP kiểm tra trùng IP trước khi nhận địa chỉ
+    const out = ['Checking for duplicate address...'];
+    const old = { ip: d.ip, prefix: d.prefix };
+    d.ip = addr; d.prefix = pfx;
+    const dup = N.resolve(net, { dev: d.id, ifn: 'fa0' }, addr);
+    if (!dup.fail && !dup.proxy && !dup.fhrp && dup.ep && dup.ep.dev !== d.id) {
+      d.ip = old.ip; d.prefix = old.prefix;
+      return R([...out, `${addr} is being used by MAC ${dup.mac}`, 'Address not changed']);
+    }
+    d.gateway = gw; d.dhcp = false;
+    return R([...out, `${d.name} : ${addr} ${N.prefixToMask(pfx)}${gw ? ` gateway ${gw}` : ''}`]);
+  }
+  function vpcsDhcp(d) {
+    const r = N.dhcpRequest(net, d.id, { record: true, anim: true });
+    d.dhcp = true;
+    if (r.ok) {
+      d.ip = r.ip; d.prefix = r.prefix; d.gateway = r.gw; d.dns = r.dns; d.dhcpServer = r.gw || '';
+      return R([`DDORA IP ${r.ip}/${r.prefix} GW ${r.gw || '0.0.0.0'}`], { sim: r.sim, simLabel: `${d.name} DHCP`, ok: true });
+    }
+    return R(['DDD', "Can't find dhcp server"], { sim: r.sim, simLabel: `${d.name} DHCP (thất bại)`, why: 'Không nhận được DHCP OFFER. ' + (r.why || ''), ok: false });
+  }
+  function vpcsPing(d, ip, n = 5) {
+    const r = N.sendPacket(net, { src: d.id, dst: ip, record: true, anim: true });
+    icmpDebug(d, ip, r, n);
+    const L = [];
+    if (r.fail?.kind === 'nogw' || r.fail?.kind === 'noip') return R([`host (${ip}) not reachable`], { why: r.fail?.why, ok: false });
+    for (let i = 1; i <= n; i++) {
+      if (r.ok) L.push(`84 bytes from ${ip} icmp_seq=${i} ttl=${r.ttl ?? 64} time=${vms(i)} ms`);
+      else if (r.kind === 'unreach' && r.fail?.ip) L.push(`*${r.fail.ip} icmp_seq=${i} ttl=255 time=${vms(i)} ms (ICMP type:3, code:1, Destination host unreachable)`);
+      else L.push(`${ip} icmp_seq=${i} timeout`);
+    }
+    return R(L, { sim: r.sim, simLabel: `${d.name} ping ${ip}`, why: r.ok ? null : r.fail?.why, ok: r.ok });
+  }
+  function vpcsTrace(d, ip) {
+    const r = N.sendPacket(net, { src: d.id, dst: ip, record: false, anim: true });
+    if (r.fail?.kind === 'nogw' || r.fail?.kind === 'noip') return R([`host (${ip}) not reachable`], { ok: false });
+    const L = [`trace to ${ip}, 8 hops max, press Ctrl+C to stop`];
+    let n = 0;
+    for (const h of r.hops) if (h.ip !== ip) L.push(` ${++n}   ${pad(h.ip, 15)} ${vms(n)} ms  ${vms(n + 1)} ms  ${vms(n + 2)} ms`);
+    if (r.ok) L.push(` ${++n}   *${ip}   ${vms(n)} ms (ICMP type:3, code:3, Destination port unreachable)`);
+    else while (n < 8) L.push(` ${++n}   *  *  *`);
+    return R(L, { sim: r.sim, simLabel: `${d.name} trace ${ip}`, why: r.ok ? null : r.fail?.why, ok: r.ok });
+  }
+  function vpcsArp(d) {
+    const ent = Object.entries(d.arp || {});
+    if (!ent.length) return R(['', 'arp table is empty', '']);
+    return R(['', ...ent.map(([ip, e], i) => `${e.mac}  ${ip} expires in ${117 - ((i * 7) % 40)} seconds `), '']);
+  }
+  function vpcsExec(d, line) {
+    const w = line.split(/\s+/).filter(Boolean);
+    const cmd = (w[0] || '').toLowerCase();
+    const is = (full, min = 2) => cmd.length >= Math.min(min, full.length) && full.startsWith(cmd);
+    if (!cmd) return R([]);
+    if (cmd === '?' || is('help', 1)) return R(VPCS_HELP);
+    if (cmd === 'ip') {
+      const a = (w[1] || '').toLowerCase();
+      if (!a || a === '?') return R(VPCS_IP_HELP);
+      if (a === 'dhcp') return vpcsDhcp(d);
+      if (a === 'dns') {
+        if (!w[2] || !isIp(w[2])) return R(['Invalid address']);
+        d.dns = w[2] === '0' || w[2] === '0.0.0.0' ? '' : w[2];
+        return R([]);
+      }
+      if (a === 'auto') {
+        const r = V6.slaac(net, d.id);
+        d.slaac = true;
+        if (!r.ok) return R(['No router answered ICMPv6 Router Solicitation'], { why: r.why, ok: false });
+        d.ip6 = r.ip; d.prefix6 = r.prefix; d.gw6 = r.gw;
+        return R([`GLOBAL SCOPE      : ${r.ip}/${r.prefix}`, `ROUTER LINK-LAYER : ${r.router}`]);
+      }
+      return vpcsSetIp(d, w);
+    }
+    if (is('dhcp')) return vpcsDhcp(d);
+    if (is('show', 2) || is('arp', 2)) {
+      const a = cmd.startsWith('a') ? 'arp' : (w[1] || '').toLowerCase();
+      if (!a) return R(['', `NAME   IP/MASK              GATEWAY           MAC                LPORT  RHOST:PORT`, `${pad(d.name, 7)}${pad(d.ip ? `${d.ip}/${d.prefix}` : '0.0.0.0/0', 21)}${pad(d.gateway || '0.0.0.0', 18)}${pad(vmac(d), 19)}20000  127.0.0.1:30000`, `       ${d.ip6 ? `${d.ip6}/${d.prefix6}` : 'fe80::250:79ff:fe66:6800/64'}`, '']);
+      if ('ip'.startsWith(a)) return R(vpcsShowIp(d));
+      if ('arp'.startsWith(a)) return vpcsArp(d);
+      if (a === '?') return R(['show [ARG]', '  Show information of VPCs', '  ARG:', '    arp      Show arp table', '    ip       Show IPv4 details', '    ipv6     Show IPv6 details', '    history  List the command history', '    version  Show the version information']);
+      if (a === 'ipv6') return R(['', `NAME              : ${d.name}[1]`, 'LINK-LOCAL SCOPE  : fe80::250:79ff:fe66:6800/64', `GLOBAL SCOPE      : ${d.ip6 ? `${d.ip6}/${d.prefix6}` : ''}`, `ROUTER LINK-LAYER : ${d.gw6 || ''}`, `MAC               : ${vmac(d)}`, '']);
+      if (a === 'version' || a === 'history') return vpcsExec(d, a);
+      return R(['Invalid arguments']);
+    }
+    if (is('ping', 1)) {
+      const ip = w.slice(1).find(isIp);
+      if (!ip) return R([w[1] ? `host (${w[1]}) not found` : 'Incomplete command']);
+      const c = w.indexOf('-c');
+      return vpcsPing(d, ip, c > 0 && /^\d+$/.test(w[c + 1] || '') ? Math.min(20, Math.max(1, +w[c + 1])) : 5);
+    }
+    if (is('trace', 2)) { const ip = w.slice(1).find(isIp); return ip ? vpcsTrace(d, ip) : R(['Incomplete command']); }
+    if (is('save', 2)) {
+      d.vpcsSaved = { ip: d.ip, prefix: d.prefix, gateway: d.gateway, dns: d.dns, dhcp: !!d.dhcp };
+      return R([`Saving startup configuration to ${w[1] || 'startup.vpc'}`, '.  done']);
+    }
+    if (is('clear', 2)) {
+      const a = (w[1] || '').toLowerCase();
+      if (a === 'ip') { d.ip = ''; d.prefix = 24; d.gateway = ''; d.dns = ''; d.dhcp = false; return R(['IPv4 address/mask, gateway, DNS, and DHCP cleared']); }
+      if (a === 'arp') { d.arp = {}; return R([]); }
+      if (a === 'ipv6') { d.ip6 = ''; d.gw6 = ''; d.slaac = false; return R(['IPv6 address/mask and router link-layer address cleared']); }
+      return R(['clear ARG', '  ARG:', '    ip       Clear IPv4 address/mask, gateway, DNS, and DHCP', '    ipv6     Clear IPv6 address/mask and router link-layer address', '    arp      Clear arp table', '    neighbor Clear IPv6 neighbor table', '    hist     Clear the command history']);
+    }
+    if (is('version', 2)) return R(['', 'Welcome to Virtual PC Simulator, version 0.6.2 (mô phỏng trong Packet Journey)', 'Dedicated to Daling.', 'Build time: Oct 27 2026', 'Copyright (c) 2007-2015, Paul Meng (mirnshi@gmail.com)', 'All rights reserved.', '', 'VPCS is free software, distributed under the terms of the "BSD" licence.', '']);
+    if (cmd === 'history' || is('history', 2)) return R((sess(d.id).hist || []).map((h, i) => `${String(i + 1).padStart(4)}  ${h}`));
+    if (cmd === 'ipconfig' || cmd === 'tracert') return R([`Bad command: "${line}". Use ? for help.`, `(Lab: đây là VPCS, không phải Windows — dùng "${cmd === 'ipconfig' ? 'ip 10.0.0.10/24 10.0.0.1 hoặc show ip' : 'trace'}". Chuột phải PC → đổi sang dòng lệnh Windows nếu muốn.)`]);
+    return R([`Bad command: "${line}". Use ? for help.`]);
+  }
+
   function pcExec(d, line) {
     const w = line.split(/\s+/).filter(Boolean);
     const cmd = (w[0] || '').toLowerCase();

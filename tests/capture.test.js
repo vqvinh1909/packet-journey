@@ -12,8 +12,8 @@ function twonet() {
   const net = S.SANDBOX_TEMPLATES.find((t) => t.id === 'twonet').build();
   const cli = createCli(net);
   runScript(cli, 'r1', cfg('interface g0/0', 'ip address 10.1.1.1 255.255.255.0', 'no shutdown', 'interface g0/1', 'ip address 10.2.2.1 255.255.255.0', 'no shutdown'));
-  runScript(cli, 'pc1', ['ipconfig 10.1.1.10 255.255.255.0 10.1.1.1']);
-  runScript(cli, 'pc2', ['ipconfig 10.2.2.10 255.255.255.0 10.2.2.1']);
+  runScript(cli, 'pc1', ['ip 10.1.1.10/24 10.1.1.1']);
+  runScript(cli, 'pc2', ['ip 10.2.2.10/24 10.2.2.1']);
   const link = (a, ap) => net.links.find((l) => (l.a === a && l.ap === ap) || (l.b === a && l.bp === ap)).id;
   return { net, cli, link };
 }
@@ -48,6 +48,7 @@ test('gói của lệnh ping chỉ ghi vào dây đang bắt; ping lặp 4 lư�
 
 test('trunk 802.1Q: gói mang tag VLAN, DHCP + TCP được tóm tắt; lọc vlan.id / tcp.port / ip.addr', () => {
   const net = S.SANDBOX_TEMPLATES.find((t) => t.id === 'roas').build();
+  for (const d of Object.values(net.devices)) delete d.shell; // cần telnet từ PC → dùng dòng lệnh kiểu Windows (VPCS không có telnet)
   const cli = createCli(net);
   runScript(cli, 'sw1', cfg('vlan 10', 'vlan 20', 'interface range fa0/1 - 2', 'switchport mode access', 'switchport access vlan 10', 'interface range fa0/3 - 4', 'switchport mode access', 'switchport access vlan 20', 'interface g0/1', 'switchport mode trunk'));
   runScript(cli, 'r1', cfg('interface g0/0', 'no shutdown', 'interface g0/0.10', 'encapsulation dot1Q 10', 'ip address 10.10.0.1 255.255.255.0', 'interface g0/0.20', 'encapsulation dot1Q 20', 'ip address 10.20.0.1 255.255.255.0', 'exit', 'ip dhcp pool V10', 'network 10.10.0.0 255.255.255.0', 'default-router 10.10.0.1'));

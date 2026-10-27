@@ -21,7 +21,8 @@ export const SANDBOX_KINDS = {
   checkpoint: { vendor: 'checkpoint', label: 'Check Point Gateway', prefix: 'CP', ports: { def: 4, min: 2, max: 8, unit: 'cổng (eth1…)', names: (n) => range(n, (i) => `eth${i + 1}`) }, make: (id, name, x, y, ps) => N.firewall(id, name, x, y, ps, 'checkpoint') },
   pfsense: { vendor: 'pfsense', label: 'pfSense', prefix: 'PFS', ports: { def: 4, min: 2, max: 8, unit: 'cổng (em0…)', names: (n) => range(n, (i) => `em${i}`) }, make: (id, name, x, y, ps) => N.firewall(id, name, x, y, ps, 'pfsense') },
   cloud: { vendor: 'network', label: 'Cloud / Internet', prefix: 'INTERNET', ports: null, make: (id, name, x, y) => N.server(id, name, x, y, { cloud: true }) },
-  pc: { vendor: 'host', label: 'PC', prefix: 'PC', ports: null, make: (id, name, x, y) => N.pc(id, name, x, y) },
+  // PC trong workspace mặc định là VPCS như EVE-NG (lab có sẵn giữ dòng lệnh kiểu Windows)
+  pc: { vendor: 'host', label: 'PC (VPCS)', prefix: 'PC', ports: null, make: (id, name, x, y) => Object.assign(N.pc(id, name, x, y), { shell: 'vpcs' }) },
   server: { vendor: 'host', label: 'Server', prefix: 'SRV', ports: null, make: (id, name, x, y) => N.server(id, name, x, y) },
 };
 /** Bảng thiết bị chia theo hãng (thứ tự hiển thị). */
@@ -163,6 +164,9 @@ export function wipeDevice(net, id) {
   const fresh = k.make(d.id, d.name, d.x, d.y, k.ports ? physPorts(d) : null);
   fresh.kind = kind;
   fresh.off = true;
+  if (d.shell) fresh.shell = d.shell;
+  // VPCS: Wipe nạp lại cấu hình đã "save" (startup.vpc)
+  if (d.vpcsSaved) { fresh.vpcsSaved = d.vpcsSaved; Object.assign(fresh, d.vpcsSaved); }
   net.devices[id] = fresh;
   return true;
 }
@@ -181,6 +185,7 @@ export function bootLog(d) {
     case 'sophos': case 'checkpoint': case 'pfsense':
       return [`${SANDBOX_KINDS[kindOf(d)].label} (mô phỏng) đang khởi động ...`, `Phát hiện ${ports} cổng mạng`, 'Dịch vụ firewall ... OK', 'Trang quản trị web sẵn sàng.'];
     default:
+      if (d.shell === 'vpcs') return ['', 'Welcome to Virtual PC Simulator, version 0.6.2', 'Dedicated to Daling.', 'Build time: Oct 27 2026', 'Copyright (c) 2007-2015, Paul Meng (mirnshi@gmail.com)', 'All rights reserved.', '', 'VPCS is free software, distributed under the terms of the "BSD" licence.', 'Source code and license can be found at vpcs.sf.net.', 'For more information, please visit wiki.freecode.com.cn.', '', d.vpcsSaved ? 'Loading startup.vpc ... done' : '', 'Press \'?\' to get help.', '', 'Executing the startup file', ''];
       return ['Đang khởi động máy trạm ...', 'Card mạng Fa0 ... OK', 'Sẵn sàng.'];
   }
 }
@@ -326,16 +331,16 @@ export const SANDBOX_LAB = {
   build: emptySandbox,
   tasks: [
     { text: 'Thêm ít nhất 2 PC và 1 switch, mọi PC đều đã cắm dây', verify: 'Bảng thiết bị: Host → PC, Cisco → Switch; 🔗 Nối dây', check: (a) => { const ds = Object.values(a.net.devices); const pcs = ds.filter((d) => d.type === 'pc'); return pcs.length >= 2 && ds.some((d) => d.type === 'switch') && pcs.every((d) => N.linkAt(a.net, d.id, 'fa0')); } },
-    { text: 'Đặt IP cho 2 máy cùng subnet và ping được nhau', verify: 'PC: ipconfig <IP> <mask> <gateway> → ping <IP>', check: (a) => pairs(a, sameNet) },
+    { text: 'Đặt IP cho 2 máy cùng subnet và ping được nhau', verify: 'PC (VPCS): ip <IP>/<len> <gateway> → ping <IP>  (kiểu Windows: ipconfig <IP> <mask> <gw>)', check: (a) => pairs(a, sameNet) },
     { text: 'Có VLAN khác VLAN 1 trên switch và ít nhất 1 cổng access (đang cắm dây) thuộc VLAN đó', verify: 'show vlan brief', check: (a) => Object.values(a.net.devices).some((d) => d.type === 'switch' && Object.entries(d.ports).some(([p, c]) => c.modeSet && c.mode === 'access' && c.vlan !== 1 && d.vlans[c.vlan] && N.linkAt(a.net, d.id, p))) },
     { text: 'Định tuyến: một máy ping được máy ở subnet KHÁC (qua router hoặc switch L3)', verify: 'ping ; tracert', check: (a) => pairs(a, (x, y) => !sameNet(x, y)) },
-    { text: 'Có máy nhận IP bằng DHCP (ipconfig /renew) từ router/switch L3', verify: 'ipconfig /renew ; show ip dhcp binding', check: (a) => Object.values(a.net.devices).some((d) => d.type === 'pc' && d.dhcp && d.ip && !d.ip.startsWith('169.254')) },
+    { text: 'Có máy nhận IP bằng DHCP (VPCS: ip dhcp) từ router/switch L3', verify: 'ip dhcp (hoặc ipconfig /renew) ; show ip dhcp binding', check: (a) => Object.values(a.net.devices).some((d) => d.type === 'pc' && d.dhcp && d.ip && !d.ip.startsWith('169.254')) },
     { text: 'Định tuyến động: có ít nhất 1 cặp láng giềng OSPF hoặc EIGRP', verify: 'show ip ospf neighbor / show ip eigrp neighbors', check: (a) => Object.values(a.net.devices).some((d) => N.isL3(d) && (a.nbrs(d.id).length > 0 || a.eigrpNbrs(d.id).length > 0)) },
   ],
   hints: [
-    'Gợi ý mạng đầu tiên: 2 PC — 1 switch. PC1: ipconfig 192.168.1.10 255.255.255.0 192.168.1.1 ; PC2: ipconfig 192.168.1.11 255.255.255.0 192.168.1.1 → ping.',
+    'Gợi ý mạng đầu tiên: 2 PC — 1 switch. PC1: ip 192.168.1.10/24 192.168.1.1 ; PC2: ip 192.168.1.11/24 192.168.1.1 → ping 192.168.1.11 (PC trong workspace là VPCS như EVE-NG; chuột phải PC để đổi sang kiểu Windows).',
     'Thêm router, nối G0/0 vào switch: enable → conf t → interface g0/0 → ip address 192.168.1.1 255.255.255.0 → no shutdown. Thêm subnet thứ 2 trên G0/1.',
-    'DHCP trên router: ip dhcp pool LAN → network 192.168.1.0 255.255.255.0 → default-router 192.168.1.1 ; PC: ipconfig /renew',
+    'DHCP trên router: ip dhcp pool LAN → network 192.168.1.0 255.255.255.0 → default-router 192.168.1.1 ; PC: ip dhcp',
     'Hai router nối nhau qua G0/2 (hoặc Serial) rồi: router ospf 1 → network 0.0.0.0 255.255.255.255 area 0',
     'Kéo thiết bị để sắp xếp; chuột phải vào thiết bị: Start / Stop / Wipe / Console / Đổi tên / Nhân bản / Xoá; chuột phải vào dây: Xoá dây.',
     'Thiết bị đang tắt thì mọi dây nối tới nó đều down — nhớ Start trước khi ping.',

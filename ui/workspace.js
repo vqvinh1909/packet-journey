@@ -335,10 +335,19 @@ export function openWorkspace({ onRun }) {
       { label: '🖥 Console', act: () => openConsole(id) },
       { label: '🔗 Nối dây từ đây', act: () => { W.tool = 'wire'; W.pick = [id]; draw(); } },
       { label: '✏ Đổi tên', act: () => renameDev(id) },
+      ...(d.type === 'pc' ? [{ label: d.shell === 'vpcs' ? '🪟 Dòng lệnh kiểu Windows (ipconfig…)' : '🐧 Dòng lệnh VPCS (ip, show ip…)', act: () => toggleShell(id) }] : []),
       { label: '⧉ Nhân bản', act: () => { const nid = mut(() => S.duplicateDevice(W.net, id)); persist(); W.sel = nid; draw(); scheduleSide(); } },
       '-',
       { label: '🗑 Xoá', act: () => deleteDev(id), danger: true },
     ], e);
+  }
+  /** PC: đổi giữa VPCS (mặc định của workspace, như EVE-NG) và dòng lệnh kiểu Windows (như các lab). */
+  function toggleShell(id) {
+    mut(() => { const d = W.net.devices[id]; if (d.shell === 'vpcs') delete d.shell; else d.shell = 'vpcs'; });
+    const d = net().devices[id];
+    termOf(id).push({ t: d.shell === 'vpcs' ? `— Đã chuyển ${d.name} sang VPCS: ip 10.0.0.10/24 10.0.0.1 · ip dhcp · show ip · ping · trace · save (gõ ? để xem) —` : `— Đã chuyển ${d.name} sang dòng lệnh kiểu Windows: ipconfig · ping · tracert · arp -a —`, c: 'sys' });
+    persist();
+    refreshWin(id);
   }
   function linkMenu(lid, e) {
     const l = net().links.find((x) => x.id === lid);
@@ -519,7 +528,7 @@ export function openWorkspace({ onRun }) {
   function termOf(id) {
     if (!W.term[id]) {
       const d = net().devices[id];
-      W.term[id] = [{ t: isHost(d) ? `${d.name} — dòng lệnh máy trạm (gõ ? để xem lệnh)` : `${d.name} console — ? trợ giúp, Tab hoàn thành lệnh, ↑/↓ lịch sử, Ctrl+Z = end, dán nhiều dòng cấu hình`, c: 'sys' }];
+      W.term[id] = [{ t: d.shell === 'vpcs' ? `${d.name} — VPCS: ip 10.0.0.10/24 10.0.0.1 · ip dhcp · show ip · ping · trace · save (gõ ? để xem lệnh)` : isHost(d) ? `${d.name} — dòng lệnh máy trạm (gõ ? để xem lệnh)` : `${d.name} console — ? trợ giúp, Tab hoàn thành lệnh, ↑/↓ lịch sử, Ctrl+Z = end, dán nhiều dòng cấu hình`, c: 'sys' }];
     }
     return W.term[id];
   }
@@ -779,7 +788,7 @@ export function openWorkspace({ onRun }) {
     afterCommand(net());
     pullLogs();
     // capture: frame của lần mô phỏng này đi qua dây đang bắt (ping: PC gửi 4 lượt, router 5)
-    if (res.sim && C.recordSim(W.cap, res.sim, nowSec(), { repeat: /^\s*ping\b/i.test(line) ? (isHost(d) ? 4 : 5) : 1 })) refreshCaps();
+    if (res.sim && C.recordSim(W.cap, res.sim, nowSec(), { repeat: /^\s*ping\b/i.test(line) ? (isHost(d) && d.shell !== 'vpcs' ? 4 : 5) : 1 })) refreshCaps();
     if (!opts.noHist && !wasPw && line.trim()) (W.hist[id] ||= []).push(line);
     persist();
     refreshWin(id);

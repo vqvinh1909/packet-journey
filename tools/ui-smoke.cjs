@@ -61,10 +61,12 @@ server.listen(8799, '127.0.0.1', async () => {
   await p.selectOption('#ws-tpl', 'lan');
   await p.dblclick('.ws-node[data-id="pc1"]');
   const pcIn = '.ws-win[data-id="pc1"] .lab-in';
-  await p.fill(pcIn, 'ipconfig 10.0.0.1 255.255.255.0'); await p.press(pcIn, 'Enter');
+  ok((await p.textContent('.ws-win[data-id="pc1"] .lab-prompt')).trim() === 'PC1>', 'workspace: PC mặc định là VPCS (dấu nhắc PC1>)');
+  await p.fill(pcIn, 'ip 10.0.0.1/24'); await p.press(pcIn, 'Enter');
   ok((await wsText('.ws-svg')).includes('10.0.0.1/24'), 'workspace: console nổi gõ lệnh → topology cập nhật');
+  ok((await wsText('.ws-win[data-id="pc1"]')).includes('PC1 : 10.0.0.1 255.255.255.0'), 'workspace: VPCS "ip 10.0.0.1/24" in đúng kiểu VPCS');
   await p.press(pcIn, 'ArrowUp');
-  ok((await p.inputValue(pcIn)).startsWith('ipconfig'), 'workspace: lịch sử ↑ trong console');
+  ok((await p.inputValue(pcIn)).startsWith('ip 10.0.0.1'), 'workspace: lịch sử ↑ trong console');
   await p.fill(pcIn, '');
   await p.click('#ws-undo');
   ok(!(await wsText('.ws-svg')).includes('10.0.0.1/24'), 'workspace: hoàn tác lệnh CLI');
@@ -107,13 +109,13 @@ server.listen(8799, '127.0.0.1', async () => {
   await p.click('.ws-menu button:has-text("Start capture")');
   const cw = `.ws-win[data-id="cap:${capLink}"]`;
   ok(await p.isVisible(cw) && !!(await p.$('.ws-cap-ico')), 'Start capture: mở cửa sổ capture + kính lúp trên dây');
-  for (const [dev, c] of [['pc3', 'ipconfig 10.0.0.3 255.255.255.0'], ['pc2', 'ipconfig 10.0.0.2 255.255.255.0'], ['pc2', 'ping 10.0.0.3']]) {
+  for (const [dev, c] of [['pc3', 'ip 10.0.0.3/24'], ['pc2', 'ip 10.0.0.2/24'], ['pc2', 'ping 10.0.0.3']]) {
     await p.dblclick(`.ws-node[data-id="${dev}"]`);
     const i = `.ws-win[data-id="${dev}"] .lab-in`;
     await p.fill(i, c); await p.press(i, 'Enter');
   }
   const capRows = await p.$$eval(`${cw} tbody tr`, (x) => x.map((e) => e.textContent));
-  ok(capRows.some((r) => r.includes('Who has 10.0.0.3? Tell 10.0.0.2')) && capRows.filter((r) => r.includes('Echo (ping) request')).length === 4, 'capture: ARP + 4 Echo request của lệnh ping');
+  ok(capRows.some((r) => r.includes('Who has 10.0.0.3? Tell 10.0.0.2')) && capRows.filter((r) => r.includes('Echo (ping) request')).length === 5, 'capture: ARP + 5 Echo request của lệnh ping (VPCS gửi 5 gói)');
   await p.fill(`${cw} .ws-cap-f`, 'arp'); await p.press(`${cw} .ws-cap-f`, 'Enter');
   ok((await p.$$eval(`${cw} tbody tr`, (x) => x.every((e) => e.textContent.includes('ARP')))) && (await p.textContent(`${cw} .ws-cap-foot`)).startsWith('Đang hiển thị 2 /'), 'capture: bộ lọc "arp"');
   await p.click(`${cw} .ws-wn`); // đưa cửa sổ capture lên trên console
