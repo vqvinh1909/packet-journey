@@ -2452,6 +2452,7 @@ export function createCli(net) {
       for (const [ip, n] of Object.entries(b.neighbors)) {
         L.push(` neighbor ${ip} remote-as ${n.remoteAs}`);
         if (n.desc) L.push(` neighbor ${ip} description ${n.desc}`);
+        if (n.updateSource) L.push(` neighbor ${ip} update-source ${longIf(n.updateSource)}`);
         if (n.nextHopSelf) L.push(` neighbor ${ip} next-hop-self`);
         if (n.defaultOriginate) L.push(` neighbor ${ip} default-originate`);
       }

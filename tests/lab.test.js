@@ -32,7 +32,7 @@ test('id lab là duy nhất và đủ trường bắt buộc', () => {
     for (const k of ['group', 'title', 'story', 'build', 'tasks', 'hints']) assert.ok(l[k], `${l.id} thiếu ${k}`);
     assert.ok(l.solution || l.guide, `${l.id} thiếu solution/guide`);
   }
-  assert.ok(LABS.length >= 25);
+  assert.ok(LABS.length >= 76);
 });
 
 // ---------- CLI giống IOS ----------

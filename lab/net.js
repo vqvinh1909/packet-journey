@@ -980,7 +980,9 @@ export function bgpAll(ctx) {
       let state = 'Idle';
       let myIp = null;
       if (rt) {
-        myIp = rt.code === 'C' ? r.ifaces[rt.iface]?.ip : r.ifaces[rt.iface]?.ip;
+        // "neighbor X update-source lo0": phiên BGP mang IP của cổng đó (iBGP qua loopback)
+        const us = ncfg.updateSource && r.ifaces[ncfg.updateSource];
+        myIp = us?.ip && ifUp(net, r.id, ncfg.updateSource) ? us.ip : r.ifaces[rt.iface]?.ip;
         state = 'Active';
         if (P && P.bgp.as === ncfg.remoteAs) {
           const back = P.bgp.neighbors?.[myIp];
@@ -1500,7 +1502,10 @@ function sendPacketInner(net, o) {
   const srcDev = net.devices[o.src];
   const isHost = srcDev.type === 'pc' || srcDev.type === 'server';
   const proto = o.proto || 'icmp';
-  const pkt = { src: null, dst: o.dst, proto, ttl: isHost ? 128 : 255, ipId: 0x1a2b, icmpId: o.icmpId || 1, seq: 1, reply: false, sport: 49152 + (o.icmpId || 1), dport: o.dport, flags: { syn: true }, tseq: 1000, tack: 0 };
+  // ICMP id / port nguồn: máy trạm dùng 1, router/switch tự phát dùng giá trị khác — như thiết bị thật, để gói
+  // trả lời cho chính router không khớp nhầm entry PAT của máy bên trong (cùng IP global của cổng outside)
+  const id0 = o.icmpId || (isHost ? 1 : 0x7a69);
+  const pkt = { src: null, dst: o.dst, proto, ttl: isHost ? 128 : 255, ipId: 0x1a2b, icmpId: id0, seq: 1, reply: false, sport: 49152 + (id0 % 16384), dport: o.dport, flags: { syn: true }, tseq: 1000, tack: 0 };
   const wopts = { noCrypto: !!o.noCrypto };
   const done = (r) => {
     if (o.record) persistNat(net, ctx);
