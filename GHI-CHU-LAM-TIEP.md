@@ -1,5 +1,22 @@
 # Ghi chú làm tiếp — Packet Journey
 
+## ⏱ Thời gian hội tụ thật + log IOS (2026-10-27, việc 4/11)
+- `lab/net.js` (cuối file): `net.clock` tuỳ chọn. Không có → tức thì như cũ (mọi test cũ, breaker, chấm điểm).
+  `phaseOf(net, key, kind, meta)` = pha theo tuổi của mục (`PHASES`: stp/rstp/ospf/eigrp/bgp/hsrp/vrrp). Chỗ chặn:
+  `stpState` (FWD → LSN/LRN, `stpBlockedFn` coi khác FWD là chặn; PortFast cổng không nối switch thì bỏ qua), `ospfAll`
+  (SPF dùng `adjUp` — chỉ láng giềng đã FULL; `ospfNeighbors` hiện pha), `eigrpAll` (adj chờ 5 s), `bgpAll` (state),
+  `fhrpActives` (thành viên còn Listen/Speak không được bầu; ghi `role` để log failover). `fhrpPhase` cho show standby.
+- `attachClock` (hiện trạng = đã hội tụ), `clockSync(net, quietDev)` = quét toàn mạng (`clockSweep`) → mục mới
+  since = t, mục mất → log down; `clockTick(net, dt)` → log qua mốc pha (in đủ từng bước kể cả tick lớn) rồi sync;
+  `clockConverge` ("⚡ Hội tụ ngay"); `logPush`/`drainLogs` (buffer `d.logBuf` cho show logging + hàng đợi console);
+  `withoutClock` (checkLab dùng). `cloneNet` bỏ `clock`; `exportSandbox` bỏ `logBuf`.
+- `lab/ios.js`: exec → `clockSync(net, id)` + nối log đang chờ của thiết bị vào output; khi có đồng hồ thì `diffSnap`
+  không in log OSPF/EIGRP/BGP/HSRP (đồng hồ in đúng lúc). `%SYS-5-CONFIG_I` khi rời chế độ cấu hình. Lệnh debug/
+  show logging/clear logging/logging synchronous. HSRP log đổi sang `%HSRP-5-STATECHANGE` (khi có đồng hồ).
+- `ui/clock.js` (thanh tốc độ, `clockStep`, `pullLogs`) dùng ở `ui/lab.js` (dưới tab thiết bị) và `ui/workspace.js`
+  (góc trên trái khung sơ đồ). Tốc độ lưu `pj_clock-speed` (mặc định ×5). Chưa làm: hold-timer khi Active chết
+  (Standby lên ngay chứ không chờ 10 s), DR wait timer 40 s.
+
 ## 📊 Điểm yếu của tôi (2026-10-27, việc 3/11)
 - `lab/weak.js`: `TOPICS` (regex) → `labTopics(lab)` (ưu tiên `lab.topics`; đã thêm `topics` cho T01/T05/T06/P01/X04/B02),
   `taskTopics`, `cmdTopic(cmd|spec)`, `cmdError(out)`. Reducer `recordCmd` (lệnh sai → `errs[lệnh]` kèm `sug`; lệnh
@@ -84,7 +101,7 @@
      trong test), quiet-mode access-class; `aaa new-model` thay "login local"; `security passwords min-length`;
      `ip http server` mở cổng 80; `exec-timeout`, `ip ssh version` lưu và hiện trong running-config.
 6. ⏳ Kịch bản tấn công byte-thật (ARP spoofing, DHCP giả/starvation, VLAN hopping) trong scenarios/.
-- Tổng hiện tại: 101 lab, `node --test` 240/240, `node tools/ui-smoke.cjs` 71/71; workspace tự dựng mạng kiểu EVE-NG + capture; phá mạng ngẫu nhiên; luyện subnet; điểm yếu.
+- Tổng hiện tại: 101 lab, `node --test` 248/248, `node tools/ui-smoke.cjs` 76/76; workspace tự dựng mạng kiểu EVE-NG + capture; phá mạng ngẫu nhiên; luyện subnet; điểm yếu; đồng hồ hội tụ + log IOS.
 
 
 ## ✅ ĐÃ XONG Lab CLI đợt 3 (session 2026-10-27/28) — 7 cải tiến

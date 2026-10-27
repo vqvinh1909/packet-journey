@@ -229,7 +229,21 @@ export function createCli(net) {
   // ================== Bảng lệnh: SHOW ==================
   const SHOW_COMMON = [
     c('show login', (x) => R(showLogin(x.d))),
-    c('show logging', (x) => R(['Syslog logging: enabled (0 messages dropped, 0 flushes, 0 overruns)', `    Trap logging: level informational${x.d.logging.length ? ', ' + x.d.logging.map((h) => `logging to ${h}`).join(', ') : ''}`, '', 'Log Buffer (4096 bytes):', ...(x.d.secLog || [])])),
+    c('show logging', (x) => {
+      const buf = [...(x.d.secLog || []), ...(x.d.logBuf || [])];
+      return R(['Syslog logging: enabled (0 messages dropped, 0 messages rate-limited, 0 flushes, 0 overruns, xml disabled, filtering disabled)', '', 'No Active Message Discriminator.', '', '', 'No Inactive Message Discriminator.', '', '', `    Console logging: level debugging, ${buf.length} messages logged, xml disabled,`, '                     filtering disabled', `    Buffer logging:  level debugging, ${buf.length} messages logged, xml disabled,`, '                    filtering disabled', '', `    Trap logging: level informational, ${buf.length} message lines logged${x.d.logging.length ? '' : ''}`, ...x.d.logging.map((h) => `        Logging to ${h}  (udp port 514, audit disabled,`), '', 'Log Buffer (8192 bytes):', '', ...buf]);
+    }),
+    c('debug ip ospf adj', (x) => { (x.d.debug ||= {}).ospfAdj = true; return R(['OSPF adjacency debugging is on']); }),
+    c('debug ip ospf adjacency', (x) => { (x.d.debug ||= {}).ospfAdj = true; return R(['OSPF adjacency debugging is on']); }),
+    c('debug ip icmp', (x) => { (x.d.debug ||= {}).icmp = true; return R(['ICMP packet debugging is on']); }),
+    c('no debug ip ospf adj', (x) => { (x.d.debug ||= {}).ospfAdj = false; return R(['OSPF adjacency debugging is off']); }),
+    c('no debug ip icmp', (x) => { (x.d.debug ||= {}).icmp = false; return R(['ICMP packet debugging is off']); }),
+    c('undebug all', (x) => { x.d.debug = {}; return R(['All possible debugging has been turned off']); }),
+    c('no debug all', (x) => { x.d.debug = {}; return R(['All possible debugging has been turned off']); }),
+    c('undebug ip icmp', (x) => { (x.d.debug ||= {}).icmp = false; return R(['ICMP packet debugging is off']); }),
+    c('undebug ip ospf adj', (x) => { (x.d.debug ||= {}).ospfAdj = false; return R(['OSPF adjacency debugging is off']); }),
+    c('show debugging', (x) => { const g = x.d.debug || {}; const L = []; if (g.ospfAdj) L.push('OSPF:', '  OSPF adjacency debugging is on'); if (g.icmp) L.push('IP:', '  ICMP packet debugging is on'); return R(L); }),
+    c('clear logging', (x) => { x.d.logBuf = []; return R(['Clear logging buffer [confirm]', '']); }),
     c('show running-config', (x) => R(runningConfig(x.d))),
     c('show running-config interface <if>', (x) => R(runIfBlock(x.d, x.a[0]))),
     c('show startup-config', (x) => R(showStartup(x.d))),
@@ -831,7 +845,8 @@ export function createCli(net) {
     c('no exec-timeout', (x) => { line(x).execTimeout = null; return R([]); }),
     c('login authentication <word>', (x) => { if (!x.d.aaa?.newModel) return R(['% AAA chưa bật — gõ "aaa new-model" trước']); line(x).authList = x.a[0]; return R([]); }),
     c('no login authentication', (x) => { line(x).authList = null; return R([]); }),
-    c('logging synchronous', () => R([])),
+    c('logging synchronous', (x) => { line(x).logSync = true; return R([]); }),
+    c('no logging synchronous', (x) => { line(x).logSync = false; return R([]); }),
     c('exit', (x) => { x.s.mode = 'config'; return R([]); }),
     c('end', (x) => toPriv(x)),
     c('do <rest>', (x) => doExec(x)),
@@ -985,15 +1000,26 @@ export function createCli(net) {
         let cmd = t, pipe = null;
         const k = t.indexOf('|');
         if (k > 0) { cmd = t.slice(0, k).trim(); pipe = t.slice(k + 1).trim(); }
-        const before = SUB.has(s.mode) || s.mode === 'config' ? snap(d) : null;
+        const inCfg = SUB.has(s.mode) || s.mode === 'config';
+        // có đồng hồ mô phỏng: log OSPF/EIGRP/BGP/HSRP do đồng hồ in đúng lúc hội tụ, không in ngay
+        const before = inCfg && !net.clock ? snap(d) : null;
         res = dispatch(d, s, cmd.split(/\s+/), cmd, prompt(id));
         if (pipe && res.out) res.out = applyPipe(res.out, pipe);
         if (d.type === 'switch') N.vtpSync(net);
         if (before) res.out = (res.out || []).concat(diffSnap(d, before, snap(d)));
         if (d.type === 'switch') res.out = (res.out || []).concat(pendingLogs(d, s));
+        if (inCfg && s.mode === 'priv' && d.os !== 'asa') res.out = (res.out || []).concat('%SYS-5-CONFIG_I: Configured from console by console');
       }
     }
     res.out = res.out || [];
+    if (d.type === 'router' || d.type === 'switch') {
+      // dòng log in ngay (%LINK, %LINEPROTO, %SYS…) cũng vào buffer "show logging"
+      for (const l of res.out) if (/^%[A-Z0-9_]+-\d-[A-Z0-9_]+:/.test(l)) N.logPush(net, id, l, false, true);
+    }
+    if (net.clock) {
+      N.clockSync(net, id);
+      if (d.type === 'router' || d.type === 'switch') res.out = res.out.concat(N.drainLogs(net, id));
+    }
     res.prompt = prompt(id);
     res.password = !!s.pw;
     return res;
@@ -1779,8 +1805,19 @@ export function createCli(net) {
   }
 
   // ---------- ping / traceroute / telnet / ssh ----------
+  /** debug ip icmp: router nguồn in "echo reply rcvd", router đích in "echo reply sent" (qua hàng đợi log). */
+  function icmpDebug(d, ip, r, n) {
+    if (!r.ok) return;
+    const ctx = ctxOf();
+    const src = d.type === 'pc' || d.type === 'server' ? d.ip : IFS(d)[N.lookup(ctx, d.id, ip)?.iface]?.ip || '0.0.0.0';
+    const tail = 'topology BASE, dscp 0 topoid 0';
+    if (d.debug?.icmp) for (let i = 0; i < n; i++) N.logPush(net, d.id, `ICMP: echo reply rcvd, src ${ip}, dst ${src}, ${tail}`, true);
+    const t = r.at && net.devices[r.at.dev];
+    if (t && t !== d && t.debug?.icmp) for (let i = 0; i < n; i++) N.logPush(net, t.id, `ICMP: echo reply sent, src ${ip}, dst ${src}, ${tail}`, true);
+  }
   function iosPing(d, ip) {
     const r = N.sendPacket(net, { src: d.id, dst: ip, record: true, anim: true });
+    icmpDebug(d, ip, r, 5);
     const marks = r.ok ? (r.firstArp ? '.!!!!' : '!!!!!') : r.kind === 'unreach' ? 'U.U.U' : '.....';
     const okN = (marks.match(/!/g) || []).length;
     return R(['Type escape sequence to abort.', `Sending 5, 100-byte ICMP Echos to ${ip}, timeout is 2 seconds:`, marks, `Success rate is ${okN * 20} percent (${okN}/5)${okN ? ', round-trip min/avg/max = 1/1/4 ms' : ''}`], { sim: r.sim, simLabel: `${d.name} ping ${ip}`, why: r.ok ? null : r.fail?.why, ok: r.ok });
@@ -1976,6 +2013,7 @@ export function createCli(net) {
   }
   function pcPing(d, ip) {
     const r = N.sendPacket(net, { src: d.id, dst: ip, record: true, anim: true });
+    icmpDebug(d, ip, r, 4);
     const L = ['', `Pinging ${ip} with 32 bytes of data:`, ''];
     let got = 0;
     for (let i = 0; i < 4; i++) {
@@ -2286,6 +2324,8 @@ export function createCli(net) {
     const cfg = (proto === 'vrrp' ? f.vrrp : f.standby)[g];
     if (!cfg?.ip || !N.ifUp(net, d.id, n)) return { st: 'Init', act: 'unknown', stby: 'unknown' };
     const a = N.hsrpView(net, d.id, n).find((z) => z.group === g && z.proto === proto);
+    const ph = N.fhrpPhase(net, d.id, n, proto, g); // ⏱ đang Listen / Speak (chưa được bầu)
+    if (ph) return { st: ph, act: a ? IFS(net.devices[a.list[0].ep.dev])[a.list[0].ep.ifn].ip : 'unknown', stby: a?.list[1] ? IFS(net.devices[a.list[1].ep.dev])[a.list[1].ep.ifn].ip : 'unknown', vip: cfg.ip, pri: cfg.priority ?? 100 };
     if (!a) return { st: 'Init', act: 'unknown', stby: 'unknown' };
     const ipOf = (m) => IFS(net.devices[m.ep.dev])[m.ep.ifn].ip;
     const me = a.ep.dev === d.id && a.ep.ifn === n;
@@ -2749,12 +2789,14 @@ export function createCli(net) {
     const c0 = d.lines.con, v = d.lines.vty;
     if (c0.password) L.push(` password ${pwShow(d, c0.password)}`);
     if (c0.execTimeout) L.push(` exec-timeout ${c0.execTimeout.join(' ')}`);
+    if (c0.logSync) L.push(' logging synchronous');
     if (c0.authList) L.push(` login authentication ${c0.authList}`);
     if (c0.loginLocal) L.push(' login local'); else if (c0.login) L.push(' login');
     L.push('!', 'line aux 0', '!', 'line vty 0 4');
     if (v.accessClass) L.push(` access-class ${v.accessClass} in`);
     if (v.password) L.push(` password ${pwShow(d, v.password)}`);
     if (v.execTimeout) L.push(` exec-timeout ${v.execTimeout.join(' ')}`);
+    if (v.logSync) L.push(' logging synchronous');
     if (v.authList) L.push(` login authentication ${v.authList}`);
     if (v.loginLocal) L.push(' login local'); else if (v.login) L.push(' login');
     if (v.transport && v.transport !== 'all') L.push(` transport input ${v.transport}`);

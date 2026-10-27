@@ -289,7 +289,11 @@ export const SANDBOX_TEMPLATES = [
 
 // ---------------------------------------------------------------- xuất / nhập JSON
 export const SANDBOX_FORMAT = 'packet-journey-sandbox';
-export function exportSandbox(net) { return { format: SANDBOX_FORMAT, version: 1, net: N.cloneNet(net) }; }
+export function exportSandbox(net) {
+  const out = N.cloneNet(net);
+  for (const d of Object.values(out.devices)) delete d.logBuf; // buffer "show logging" chỉ sống trong phiên
+  return { format: SANDBOX_FORMAT, version: 1, net: out };
+}
 /** Đọc lại file đã xuất (hoặc object net trần). Ném lỗi tiếng Việt nếu sai định dạng. */
 export function importSandbox(obj) {
   const net = obj?.format === SANDBOX_FORMAT ? obj.net : obj;

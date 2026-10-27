@@ -15,6 +15,7 @@ import { load, save, remove } from './store.js';
 import { isBreakId, breakLab, breakId, randomSeed, addBreakResult, breakScore } from '../lab/breaker.js';
 import { openBreakDialog } from './breakui.js';
 import { trackCmd, trackLab } from './weak.js';
+import { clockStep, afterCommand, pullLogs as pullClockLogs, renderClockBar, TICK_MS } from './clock.js';
 import { cmdError } from '../lab/weak.js';
 import { lessonHref } from './i18n.js';
 import { SVG, el, esc, isHost, drawGlyph, adminUp, classifyLine, stpBlocked, linkEnd } from './topo.js';
@@ -25,6 +26,7 @@ const SBX = SANDBOX_LAB.id;
 /** Lab theo id — kể cả đề "🎲 Phá mạng" (id "RB:<lab>:<số lỗi>:<seed>", dựng lại tất định). */
 const anyLab = (id) => (isBreakId(id) ? breakLab(id) : getLab(id));
 const IOS_MODES_OK = ['user', 'priv'];
+const STP_STS = { BLK: 'BLOCKING', LSN: 'LISTENING (đang hội tụ, chưa chuyển frame)', LRN: 'LEARNING (đang hội tụ, học MAC, chưa chuyển frame)' };
 
 /** o = { labId (mở thẳng lab này), breakLab (mở luôn hộp thoại 🎲 với lab gợi ý) } — dùng từ 📊 Điểm yếu. */
 export function openLab(onRun, o = {}) {
@@ -49,6 +51,7 @@ export function openLab(onRun, o = {}) {
     `<div class="lab-wire" id="lab-wire" hidden></div>` +
     `<svg class="lab-topo" id="lab-topo" viewBox="0 0 1000 440" role="img" aria-label="topology"></svg>` +
     `<div class="lab-tabs" id="lab-tabs"></div>` +
+    `<div class="lab-clock" id="lab-clock"></div>` +
     `<div class="lab-gui" id="lab-gui" hidden></div>` +
     `<div class="lab-term" id="lab-term"><div class="lab-out" id="lab-out"></div>` +
     `<div class="lab-inrow"><span class="lab-prompt" id="lab-prompt"></span><input class="lab-in" id="lab-in" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Nhập lệnh"></div></div>` +
@@ -154,6 +157,8 @@ export function openLab(onRun, o = {}) {
       x.log = old.slice();
       for (const id of Object.keys(net.devices)) termOf(x, id).push({ t: `(Đã khôi phục ${old.length} thao tác bạn làm lần trước — bấm "↺ Làm lại" để bắt đầu sạch)`, c: 'sys' });
     }
+    // ⏱ đồng hồ mô phỏng: trạng thái lúc mở lab coi như đã hội tụ; thay đổi sau đó mới tính giờ
+    N.attachClock(net);
     live.set(l.id, x);
     return x;
   }
@@ -273,12 +278,13 @@ export function openLab(onRun, o = {}) {
       for (const [D, port, t] of [[A, l.ap, 0.24], [B, l.bp, 0.76]]) {
         const px = PA.x + ex * t + ox, py = PA.y + ey * t + oy;
         const bv = blk.get(D.id + '|' + port);
-        const label = (isHost(D) ? 'Fa0' : N.shortIf(port)) + (bv ? ' ✕' : '');
+        const tr = bv && bv.sts !== 'BLK';
+        const label = (isHost(D) ? 'Fa0' : N.shortIf(port)) + (bv ? (tr ? ' ' + bv.sts : ' ✕') : '');
         const w = label.length * 6.6 + 8;
-        const bg = el('rect', { x: px - w / 2, y: py - 8, width: w, height: 15, rx: 4, class: 'lab-port-bg' + (bv ? ' blk' : '') });
-        if (bv) { const tt = el('title', {}); tt.textContent = `STP BLOCKING — VLAN ${bv.join(', ')}`; bg.appendChild(tt); }
+        const bg = el('rect', { x: px - w / 2, y: py - 8, width: w, height: 15, rx: 4, class: 'lab-port-bg' + (bv ? ' blk' : '') + (tr ? ' lsn' : '') });
+        if (bv) { const tt = el('title', {}); tt.textContent = `STP ${STP_STS[bv.sts]} — VLAN ${bv.join(', ')}`; bg.appendChild(tt); }
         layerLabels.appendChild(bg);
-        const tx = el('text', { x: px, y: py + 3.5, 'text-anchor': 'middle', class: 'lab-port' + (bv ? ' blk' : '') });
+        const tx = el('text', { x: px, y: py + 3.5, 'text-anchor': 'middle', class: 'lab-port' + (bv ? ' blk' : '') + (tr ? ' lsn' : '') });
         tx.textContent = label;
         layerLabels.appendChild(tx);
       }
@@ -381,6 +387,8 @@ export function openLab(onRun, o = {}) {
     s.gainMsg = null;
     const dev = s.dev, d = s.net.devices[dev], pw = s.password, mode = s.cli.session(dev)?.mode;
     const res = exec(dev, line, opts);
+    afterCommand(s.net);
+    pullLogs();
     // 📊 Điểm yếu: chỉ lệnh người học tự gõ/dán trên router/switch IOS (không ghi mật khẩu, "?", lệnh mẫu)
     if (!opts.noLog && !pw && !isHost(d) && !GUI_VENDORS[d.os] && d.os !== 'fortios' && d.os !== 'panos') {
       trackCmd({ cmd: line, out: res.out, spec: res.spec, mode, lab: srcLab(), sug: cmdError(res.out) ? s.cli.suggest(dev, line) : [] });
@@ -626,6 +634,32 @@ export function openLab(onRun, o = {}) {
       `<div class="lab-brk-acts"><button id="lab-brk-other">🎲 Đề khác…</button></div></div>`;
   }
 
+  // ---------------------------------------------------------------- ⏱ đồng hồ mô phỏng (hội tụ theo thời gian)
+  /** Log/debug đang chờ → console từng thiết bị; trả true nếu console đang xem có dòng mới. */
+  function pullLogs() {
+    return pullClockLogs(s.net, (id, lines) => {
+      const T = termOf(s, id);
+      T.push(...lines);
+      if (T.length > MAX_LINES) T.splice(1, T.length - MAX_LINES);
+    }).includes(s.dev);
+  }
+  const renderClock = () => renderClockBar($('lab-clock'), s?.net, convergeNow);
+  function convergeNow() {
+    N.clockConverge(s.net);
+    pullLogs();
+    renderTerm();
+    drawTopo();
+    renderClock();
+  }
+  const clockTimer = setInterval(() => {
+    if (!document.body.contains(back)) { clearInterval(clockTimer); return; }
+    if (!s?.net) return;
+    const changed = clockStep(s.net);
+    if (pullLogs()) renderTerm();
+    if (changed) drawTopo();
+    renderClock();
+  }, TICK_MS);
+
   // ---------------------------------------------------------------- chế độ thi thử
   function startExam() {
     const min = examMinutes(lab);
@@ -713,6 +747,7 @@ export function openLab(onRun, o = {}) {
 
   function renderAll(full = true) {
     renderTools();
+    renderClock();
     drawTopo();
     renderTabs();
     renderTerm();

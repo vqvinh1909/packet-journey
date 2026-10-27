@@ -16,6 +16,7 @@ import { GUI_VENDORS } from '../lab/guifw.js';
 import { renderGuiFw } from './guifw.js';
 import { load, save } from './store.js';
 import { el, esc, isHost, drawGlyph, adminUp, classifyLine, stpBlocked, linkEnd } from './topo.js';
+import { clockStep, afterCommand, pullLogs as pullClockLogs, renderClockBar, TICK_MS } from './clock.js';
 import * as C from '../lab/capture.js';
 import { flattenFields } from '../packet/serialize.js';
 import { renderFieldTree, highlightFieldRow, clearFieldHighlight } from './fieldtree.js';
@@ -56,7 +57,7 @@ export function openWorkspace({ onRun }) {
     `<div class="ws-stage" id="ws-stage"><svg class="ws-svg" id="ws-svg" role="img" aria-label="topology"><defs><pattern id="ws-grid" width="40" height="40" patternUnits="userSpaceOnUse"><path d="M40 0H0V40" class="ws-gridl"/></pattern></defs><g id="ws-world"></g></svg>` +
     `<div class="ws-empty" id="ws-empty">Kéo thiết bị từ bảng bên trái vào đây — hoặc chuột phải vào nền → <b>Add node</b>.<br>Thiết bị mới ở trạng thái <b>tắt</b>: chuột phải → <b>Start</b> (hoặc ▶ Start all). Nháy đúp để mở console.</div>` +
     `<div class="ws-zoom"><button data-z="-" title="Thu nhỏ">−</button><span id="ws-zl"></span><button data-z="+" title="Phóng to">+</button><button data-z="fit" title="Vừa khung">⤢</button></div>` +
-    `<div class="ws-stat" id="ws-stat"></div></div>` +
+    `<div class="ws-stat" id="ws-stat"></div><div class="ws-clock lab-clock" id="ws-clock"></div></div>` +
     `<aside class="ws-side" id="ws-side" hidden></aside></div>` +
     `<div class="ws-dock" id="ws-dock"></div>`;
   document.body.appendChild(root);
@@ -198,10 +199,11 @@ export function openWorkspace({ onRun }) {
       for (const [D, port, t] of [[A, l.ap, 0.24], [B, l.bp, 0.76]]) {
         const px = PA.x + ex * t + ox, py = PA.y + ey * t + oy;
         const bv = blk.get(D.id + '|' + port);
-        const label = (isHost(D) ? 'Fa0' : N.shortIf(port)) + (bv ? ' ✕' : '');
+        const tr = bv && bv.sts !== 'BLK';
+        const label = (isHost(D) ? 'Fa0' : N.shortIf(port)) + (bv ? (tr ? ' ' + bv.sts : ' ✕') : '');
         const w = label.length * 6.6 + 8;
-        gT.appendChild(el('rect', { x: px - w / 2, y: py - 8, width: w, height: 15, rx: 4, class: 'lab-port-bg' + (bv ? ' blk' : '') }));
-        const tx = el('text', { x: px, y: py + 3.5, 'text-anchor': 'middle', class: 'lab-port' + (bv ? ' blk' : '') });
+        gT.appendChild(el('rect', { x: px - w / 2, y: py - 8, width: w, height: 15, rx: 4, class: 'lab-port-bg' + (bv ? ' blk' : '') + (tr ? ' lsn' : '') }));
+        const tx = el('text', { x: px, y: py + 3.5, 'text-anchor': 'middle', class: 'lab-port' + (bv ? ' blk' : '') + (tr ? ' lsn' : '') });
         tx.textContent = label;
         gT.appendChild(tx);
       }
@@ -723,6 +725,18 @@ export function openWorkspace({ onRun }) {
       });
     }
   }
+  // ⏱ đồng hồ mô phỏng: STP/OSPF/EIGRP/BGP/HSRP hội tụ theo thời gian, log IOS hiện dần trên console
+  function pullLogs() {
+    for (const id of pullClockLogs(net(), (did, lines) => { const T = termOf(did); T.push(...lines); if (T.length > MAX_LINES) T.splice(1, T.length - MAX_LINES); })) refreshWin(id);
+  }
+  function convergeNow() { N.clockConverge(net()); pullLogs(); draw(); renderClockBar(root.querySelector('#ws-clock'), net(), convergeNow); }
+  const clockTimer = setInterval(() => {
+    if (!alive()) { clearInterval(clockTimer); return; }
+    const changed = clockStep(net());
+    pullLogs();
+    if (changed) draw();
+    renderClockBar(root.querySelector('#ws-clock'), net(), convergeNow);
+  }, TICK_MS);
   // gói định kỳ (OSPF/EIGRP/HSRP Hello, BPDU) theo đồng hồ thật khi đang có dây được bắt
   const capTimer = setInterval(() => {
     if (!alive()) { clearInterval(capTimer); return; }
@@ -762,6 +776,8 @@ export function openWorkspace({ onRun }) {
     let res;
     try { res = mut(() => W.cli.exec(id, line)); } catch (err) { res = { out: ['% Lỗi mô phỏng: ' + err.message] }; }
     pushOut(id, line, res, pr, wasPw);
+    afterCommand(net());
+    pullLogs();
     // capture: frame của lần mô phỏng này đi qua dây đang bắt (ping: PC gửi 4 lượt, router 5)
     if (res.sim && C.recordSim(W.cap, res.sim, nowSec(), { repeat: /^\s*ping\b/i.test(line) ? (isHost(d) ? 4 : 5) : 1 })) refreshCaps();
     if (!opts.noHist && !wasPw && line.trim()) (W.hist[id] ||= []).push(line);

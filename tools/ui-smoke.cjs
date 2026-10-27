@@ -284,6 +284,26 @@ server.listen(8799, '127.0.0.1', async () => {
     await p.click('#brk-x');
     await p.click('.lab-modal .modal-x');
   } else ok(false, 'điểm yếu: thiếu nút phá mạng chủ đề yếu');
+  // 13) ⏱ đồng hồ mô phỏng: OSPF đi INIT… → FULL theo thời gian, "⚡ Hội tụ ngay", log IOS + show logging
+  await p.click('#btn-lab');
+  await p.click('.lab-item[data-id="L10"]');
+  await p.click('#lab-sol');
+  await p.click('#lab-runsol');
+  if (await p.$('#lab-clock .lab-conv')) await p.click('#lab-clock .lab-conv');
+  await p.click('#lab-clock [data-sp="1"]');
+  await p.click('.lab-tab[data-id="r1"]');
+  for (const c of ['configure terminal', 'interface g0/1', 'shutdown', 'no shutdown', 'end', 'show ip ospf neighbor']) await type(c);
+  const outTxt = async () => (await p.$$eval('#lab-out .lab-ln', (x) => x.map((e) => e.textContent))).join('\n');
+  ok(/FULL to DOWN/.test(await outTxt()) && /INIT\/|2WAY\//.test(await outTxt()), 'đồng hồ: shutdown → log FULL to DOWN; no shutdown → láng giềng INIT/2WAY');
+  ok((await p.textContent('#lab-clock')).includes('đang hội tụ'), 'đồng hồ: thanh báo đang hội tụ');
+  ok((await p.textContent('.lab-score')).split('/')[0] === (await p.textContent('.lab-score')).split('/')[1], 'đồng hồ: đang hội tụ vẫn chấm đạt (chấm theo trạng thái đã hội tụ)');
+  await p.click('#lab-clock .lab-conv');
+  await p.waitForTimeout(150);
+  ok(/LOADING to FULL, Loading Done/.test(await outTxt()) && (await p.textContent('#lab-clock')).includes('đã hội tụ'), 'đồng hồ: ⚡ Hội tụ ngay → log LOADING to FULL');
+  await type('show logging');
+  ok(/Log Buffer[\s\S]*%OSPF-5-ADJCHG/.test(await outTxt()), 'show logging có log OSPF');
+  await p.click('#lab-clock [data-sp="5"]');
+  await p.click('.lab-modal .modal-x');
   ok(errs.length === 0, 'không có lỗi JS: ' + JSON.stringify(errs).slice(0, 300));
   await b.close();
   server.close();

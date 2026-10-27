@@ -775,3 +775,17 @@ html, body {
 .wk-mode.other { color: var(--warn); font-weight: 700; }
 .wk-table { margin-top: 12px; font-size: 13px; }
 .wk-table summary { cursor: pointer; color: var(--accent-dark); }
+
+/* ---------- ⏱ đồng hồ mô phỏng ---------- */
+.lab-clock { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 4px 2px; font-size: 12.5px; }
+.lab-clock-t { font-family: var(--mono); color: var(--accent-dark); font-weight: 600; }
+.lab-clock-sp { display: inline-flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.lab-clock-sp button { font: inherit; font-size: 12px; padding: 2px 8px; border: 0; border-right: 1px solid var(--border); background: var(--panel-2); color: var(--text); cursor: pointer; }
+.lab-clock-sp button:last-child { border-right: 0; }
+.lab-clock-sp button.on { background: var(--accent); color: #fff; }
+.lab-clock-p { color: var(--warn); font-weight: 600; }
+.lab-clock-ok { color: var(--ok); }
+.lab-clock > button { font: inherit; font-size: 12px; padding: 2px 10px; border: 1px solid var(--warn); border-radius: 6px; background: var(--panel); color: var(--warn); cursor: pointer; }
+.lab-port-bg.lsn { fill: var(--accent-soft); stroke: var(--accent); stroke-dasharray: 3 2; }
+.lab-port.lsn { fill: var(--accent-dark); }
+.ws-clock { position: absolute; left: 12px; top: 10px; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 3px 8px; box-shadow: var(--shadow); z-index: 5; max-width: calc(100% - 24px); }

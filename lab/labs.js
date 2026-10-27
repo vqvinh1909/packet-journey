@@ -871,9 +871,12 @@ export function makeApi(net) {
 
 /** Chấm toàn bộ nhiệm vụ → mảng true/false. `answers` = {chỉ số nhiệm vụ: phương án đã chọn} cho câu trắc nghiệm. */
 export function checkLab(lab, net, answers = {}) {
-  const api = makeApi(net);
-  return lab.tasks.map((t, i) => {
-    if (t.quiz) return answers[i] === t.quiz.correct;
-    try { return !!t.check(api); } catch { return false; }
+  // ⏱ chấm theo trạng thái ĐÃ hội tụ: cấu hình đúng là đạt, không bắt người học chờ STP/OSPF lên
+  return N.withoutClock(net, () => {
+    const api = makeApi(net);
+    return lab.tasks.map((t, i) => {
+      if (t.quiz) return answers[i] === t.quiz.correct;
+      try { return !!t.check(api); } catch { return false; }
+    });
   });
 }
