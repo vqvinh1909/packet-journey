@@ -136,3 +136,14 @@ test('4 lab tổng hợp doanh nghiệp (X01–X04) có cách giải chi tiết 
     for (const g of l.guide) assert.ok(g.dev && Array.isArray(g.cmds) && g.cmds.length, `${l.id}: bước "${g.title}" thiếu dev/cmds`);
   }
 });
+
+test('tìm lab không dấu, nhiều từ khoá', async () => {
+  const { labMatch, fold } = await import('../lab/labs.js');
+  assert.equal(fold('Định tuyến OSPF'), 'dinh tuyen ospf');
+  const x03 = LABS.find((l) => l.id === 'X03');
+  assert.ok(labMatch(x03, 'eigrp bgp'));
+  assert.ok(labMatch(x03, 'sap nhap'));
+  assert.ok(!labMatch(x03, 'eigrp vxlan'));
+  assert.ok(labMatch(x03, '  '));
+  assert.ok(LABS.filter((l) => labMatch(l, 'nat')).length >= 5);
+});

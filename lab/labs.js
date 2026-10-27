@@ -770,6 +770,16 @@ const INFRA_LABS = [
 export const LABS = [...INFRA_LABS, ...CAP_LABS, ...CCNA_LABS];
 export function getLab(id) { return LABS.find((l) => l.id === id) || null; }
 
+/** Bỏ dấu tiếng Việt + chữ thường (để tìm "định tuyến" bằng "dinh tuyen"). */
+export function fold(str) { return String(str ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd').replace(/Đ/g, 'D').toLowerCase(); }
+/** Lab có khớp chuỗi tìm kiếm không: mọi từ khoá phải xuất hiện trong id/tiêu đề/bài/đề bài/gợi ý. */
+export function labMatch(lab, query) {
+  const words = fold(query).split(/\s+/).filter(Boolean);
+  if (!words.length) return true;
+  const hay = fold([lab.id, lab.title, lab.lesson, lab.story, ...(lab.hints || []), ...(lab.tasks || []).map((t) => t.text)].join(' '));
+  return words.every((w) => hay.includes(w));
+}
+
 /** Dựng mạng cho lab + chạy cấu hình khởi tạo (qua chính CLI). */
 export function buildLab(lab) {
   const net = lab.build();

@@ -4,7 +4,7 @@
 // Thêm: câu hỏi trắc nghiệm trong nhiệm vụ, "🧭 Cách giải chi tiết" (lab có guide), nối dây
 // (lab edit:'wire') và chế độ "🧱 Tự dựng mạng riêng" (lab/sandbox.js).
 
-import { LABS, LAB_GROUPS, getLab, buildLab, checkLab, solutionOf, applySolution } from '../lab/labs.js';
+import { LABS, LAB_GROUPS, getLab, buildLab, checkLab, solutionOf, applySolution, labMatch } from '../lab/labs.js';
 import { createCli } from '../lab/ios.js';
 import * as N from '../lab/net.js';
 import { SANDBOX_LAB, SANDBOX_KINDS, SANDBOX_VIEW, emptySandbox, addDevice, freeSpot, moveDevice, removeDevice, freePorts, connect, disconnect, exportSandbox, importSandbox } from '../lab/sandbox.js';
@@ -32,7 +32,8 @@ export function openLab(onRun) {
   modal.innerHTML =
     `<div class="modal-h"><span>🧪 Lab thực hành CLI — Cisco IOS <span class="lab-count" id="lab-count"></span></span><span class="lab-hbtns"><button class="lab-sbx-btn" id="lab-sbx-open" title="Tự thêm thiết bị, nối dây, cấu hình tự do">🧱 Tự dựng mạng riêng</button><button class="modal-x" title="Đóng (lab vẫn được giữ nguyên)">✕</button></span></div>` +
     `<div class="lab-body">` +
-    `<aside class="lab-list" id="lab-list"></aside>` +
+    `<aside class="lab-list" id="lab-list"><div class="lab-find"><input type="search" id="lab-q" placeholder="🔎 Tìm lab: ospf, nat, vlan, X0…" aria-label="Tìm lab">` +
+    `<div class="lab-filt" id="lab-filt"><button data-f="all">Tất cả</button><button data-f="todo">Chưa xong</button><button data-f="done">Đã xong</button></div></div><div id="lab-items"></div></aside>` +
     `<main class="lab-main">` +
     `<select class="lab-select" id="lab-select" aria-label="Chọn lab"></select>` +
     `<div class="lab-head" id="lab-head"></div>` +
@@ -52,24 +53,36 @@ export function openLab(onRun) {
   const input = $('lab-in');
   modal.querySelector('.modal-x').onclick = () => back.remove();
   $('lab-sbx-open').onclick = () => selectLab(SBX);
+  $('lab-q').oninput = (e) => { query = e.target.value; renderList(); };
+  $('lab-filt').onclick = (e) => { const f = e.target.dataset?.f; if (!f) return; filt = f; save('lab-filter', f); renderList(); };
 
   // ---------------------------------------------------------------- danh sách lab
+  let query = '';
+  let filt = load('lab-filter', 'all');
   function renderList() {
     const done = load('labs-done', {});
     $('lab-count').textContent = `· ${LABS.length} lab · đã xong ${LABS.filter((l) => done[l.id]).length}`;
-    let html = `<div class="lab-grp">🧱 Chế độ tự do</div>` +
+    const show = (l) => labMatch(l, query) && (filt === 'all' || (filt === 'done') === !!done[l.id]);
+    let html = query || filt !== 'all' ? '' : `<div class="lab-grp">🧱 Chế độ tự do</div>` +
       `<button class="lab-item${lab.id === SBX ? ' active' : ''}" data-id="${SBX}"><span class="lab-id">🧱</span><span class="lab-t">Tự dựng mạng riêng (sandbox)</span><span></span></button>`;
+    let shown = 0;
     for (const g of LAB_GROUPS) {
-      const items = LABS.filter((l) => l.group === g.id);
+      const all = LABS.filter((l) => l.group === g.id);
+      const items = all.filter(show);
       if (!items.length) continue;
-      html += `<div class="lab-grp">${esc(g.title)}</div>`;
+      shown += items.length;
+      const nd = all.filter((l) => done[l.id]).length;
+      html += `<div class="lab-grp"><span>${esc(g.title)}</span><span class="lab-gp${nd === all.length ? ' all' : ''}" title="Đã xong ${nd}/${all.length}">${nd}/${all.length}</span></div>` +
+        `<div class="lab-gbar"><div style="width:${Math.round((nd / all.length) * 100)}%"></div></div>`;
       for (const l of items) {
         html += `<button class="lab-item${l.id === lab.id ? ' active' : ''}${done[l.id] ? ' done' : ''}" data-id="${l.id}">` +
           `<span class="lab-id">${done[l.id] ? '✓' : l.id}</span><span class="lab-t">${esc(l.title)}</span><span class="lab-lv" title="Độ khó">${'●'.repeat(l.level)}${'○'.repeat(3 - l.level)}</span></button>`;
       }
     }
-    $('lab-list').innerHTML = html;
-    $('lab-list').querySelectorAll('.lab-item').forEach((b) => (b.onclick = () => selectLab(b.dataset.id)));
+    if (!shown && (query || filt !== 'all')) html += `<div class="lab-none">Không có lab nào khớp${query ? ` "${esc(query)}"` : ''}.</div>`;
+    $('lab-items').innerHTML = html;
+    $('lab-items').querySelectorAll('.lab-item').forEach((b) => (b.onclick = () => selectLab(b.dataset.id)));
+    $('lab-filt').querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.f === filt));
     $('lab-select').innerHTML = `<option value="${SBX}"${lab.id === SBX ? ' selected' : ''}>🧱 Tự dựng mạng riêng (sandbox)</option>` +
       LAB_GROUPS.map((g) => `<optgroup label="${esc(g.title)}">${LABS.filter((l) => l.group === g.id).map((l) => `<option value="${l.id}"${l.id === lab.id ? ' selected' : ''}>${done[l.id] ? '✓ ' : ''}${l.id} — ${esc(l.title)}</option>`).join('')}</optgroup>`).join('');
     $('lab-select').onchange = (e) => selectLab(e.target.value);
@@ -97,7 +110,7 @@ export function openLab(onRun) {
     else net = buildLab(l);
     const cli = createCli(net);
     const first = solutionOf(l).find(([d]) => net.devices[d]);
-    x = { lab: l, net, cli, dev: first?.[0] || Object.keys(net.devices)[0] || null, term: {}, hist: {}, hpos: -1, log: [], hintN: 0, showSol: false, guideOpen: false, results: [], password: false, answers: load('labans:' + l.id, {}), tool: null, pick: [], drag: null };
+    x = { lab: l, net, cli, dev: first?.[0] || Object.keys(net.devices)[0] || null, term: {}, hist: {}, hpos: -1, log: [], hintN: 0, showSol: false, guideOpen: false, results: [], password: false, answers: load('labans:' + l.id, {}), tool: null, pick: [], drag: null, stepGain: {}, gainMsg: null };
     const old = sbx ? null : load('lablog:' + l.id, null);
     if (Array.isArray(old) && old.length) {
       for (const [dev, cmd] of old) {
@@ -438,6 +451,7 @@ export function openLab(onRun) {
   }
   function run(line, opts = {}) {
     if (!s.dev) return;
+    s.gainMsg = null;
     exec(s.dev, line, opts);
     s.hpos = -1;
     renderAll(false);
@@ -449,7 +463,21 @@ export function openLab(onRun) {
     if (!IOS_MODES_OK.includes(s.cli.session(dev).mode)) exec(dev, 'end');
   }
   /** Chạy danh sách bước [[dev, cmds]] (cùng định dạng solutionOf) vào console, kể cả bước '@link'. */
-  function runSteps(steps) {
+  /** Chạy `fn` rồi ghi lại những nhiệm vụ vừa chuyển sang đạt (để báo "bước này làm được gì"). */
+  function withGain(title, fn) {
+    const before = checkLab(lab, s.net, s.answers);
+    fn();
+    const after = checkLab(lab, s.net, s.answers);
+    const gained = after.map((x, i) => (x && !before[i] ? i : -1)).filter((i) => i >= 0);
+    s.gainMsg = { title, gained };
+    return gained;
+  }
+  function runSteps(steps, gi) {
+    const gained = withGain(gi != null ? `Bước ${gi + 1}` : 'Các lệnh mẫu', () => runStepsRaw(steps));
+    if (gi != null) s.stepGain[gi] = gained;
+    renderAll();
+  }
+  function runStepsRaw(steps) {
     for (const [dev, cmds] of steps) {
       if (dev === '@link') {
         for (const w of cmds) if (!connect(s.net, ...w)) logAct('@link', w);
@@ -461,7 +489,6 @@ export function openLab(onRun) {
       s.dev = dev;
     }
     s.password = false;
-    renderAll();
   }
 
   input.addEventListener('keydown', (e) => {
@@ -511,8 +538,8 @@ export function openLab(onRun) {
   }
   const stepOf = (g) => [g.dev, g.raw || g.dev === '@link' ? g.cmds : ['enable', 'configure terminal', ...g.cmds, 'end']];
 
-  function taskHtml(t, i, ok) {
-    if (!t.quiz) return `<li class="${ok ? 'ok' : 'no'}"><span class="lab-mk">${ok ? '✓' : '○'}</span><div><div class="lab-tt">${esc(t.text)}</div><div class="lab-vf">Kiểm tra: <code>${esc(t.verify)}</code></div></div></li>`;
+  function taskHtml(t, i, ok, fresh) {
+    if (!t.quiz) return `<li class="${ok ? 'ok' : 'no'}${fresh ? ' new' : ''}"><span class="lab-mk">${ok ? '✓' : '○'}</span><div><div class="lab-tt">${esc(t.text)}</div><div class="lab-vf">Kiểm tra: <code>${esc(t.verify)}</code></div></div></li>`;
     const ans = s.answers[i];
     const picked = ans != null;
     const opts = t.quiz.options.map((o, j) => {
@@ -525,6 +552,9 @@ export function openLab(onRun) {
 
   function renderSide() {
     const res = checkLab(lab, s.net, s.answers);
+    const prev = s.results;
+    // nhiệm vụ vừa chuyển sang đạt (so với lần chấm trước) → nháy sáng
+    const fresh = res.map((x, i) => x && prev.length === res.length && !prev[i]);
     s.results = res;
     const ok = res.filter(Boolean).length;
     const all = ok === res.length;
@@ -536,7 +566,11 @@ export function openLab(onRun) {
     let html = `<div class="lab-side-h">${sandbox() ? 'Lộ trình gợi ý' : 'Nhiệm vụ'} <span class="lab-score${all ? ' all' : ''}">${ok}/${res.length}</span></div>` +
       `<div class="lab-bar"><div style="width:${pct}%"></div></div>`;
     if (all) html += `<div class="lab-win">🎉 ${sandbox() ? 'Bạn đã tự dựng được một mạng hoàn chỉnh!' : `Hoàn thành ${lab.id}! Mọi "Kết quả kiểm tra" đều đạt.`}</div>`;
-    html += `<ol class="lab-tasks">${lab.tasks.map((t, i) => taskHtml(t, i, res[i])).join('')}</ol>`;
+    if (s.gainMsg) {
+      const g = s.gainMsg;
+      html += `<div class="lab-gain${g.gained.length ? '' : ' none'}">${g.gained.length ? `✓ ${esc(g.title)} vừa làm đạt: ${g.gained.map((i) => `<b>#${i + 1}</b> ${esc(lab.tasks[i].text)}`).join(' · ')}` : `${esc(g.title)} chưa làm đạt nhiệm vụ mới — thường là bước chuẩn bị cho bước sau.`}</div>`;
+    }
+    html += `<ol class="lab-tasks">${lab.tasks.map((t, i) => taskHtml(t, i, res[i], fresh[i])).join('')}</ol>`;
     html += `<label class="lab-explain"><input type="checkbox" id="lab-exp"${explainOn() ? ' checked' : ''}> 🔍 Giải thích lý do khi gói bị rớt${lab.kind === 'ticket' ? ' (ticket: mặc định tắt — tự chẩn đoán bằng show)' : ''}</label>`;
     const hasSol = solutionOf(lab).length > 0;
     html += `<div class="lab-acts"><button id="lab-hint">💡 Gợi ý (${s.hintN}/${lab.hints.length})</button>${hasSol ? '<button id="lab-sol">🔑 Lời giải</button>' : ''}${sandbox() ? '' : '<button id="lab-reset">↺ Làm lại</button>'}</div>`;
@@ -547,7 +581,8 @@ export function openLab(onRun) {
         `<div class="lab-guide-note">Mỗi khối lệnh thiết bị mạng đã được bọc sẵn <code>enable → configure terminal … end</code> khi bấm "▶ Gõ".</div>` +
         groups.map((g, gi) => `<div class="lab-gstep"><div class="lab-gtitle">${esc(g.title)}</div>${g.why ? `<div class="lab-gwhy">${esc(g.why)}</div>` : ''}` +
           g.items.map((it) => `<div class="lab-sol-dev">${esc(devName(it.dev))}</div><pre>${esc(it.dev === '@link' ? it.cmds.map(linkText).join('\n') : it.cmds.join('\n'))}</pre>`).join('') +
-          `<button class="lab-grun" data-g="${gi}">▶ Gõ bước này vào console</button></div>`).join('') +
+          `<button class="lab-grun" data-g="${gi}">▶ Gõ bước này vào console</button>` +
+          (s.stepGain[gi] ? `<div class="lab-sgain">${s.stepGain[gi].length ? '✓ Bước này làm đạt nhiệm vụ ' + s.stepGain[gi].map((i) => '#' + (i + 1)).join(', ') : '• Bước chuẩn bị (chưa đạt nhiệm vụ mới)'}</div>` : '') + `</div>`).join('') +
         `</details>`;
     }
     if (s.showSol) {
@@ -573,7 +608,7 @@ export function openLab(onRun) {
         if (gd.open && !s.guideOpen && lab.kind !== 'config' && !confirm('Mở cách giải ngay? Thử tự làm/chẩn đoán trước sẽ học được nhiều hơn.')) { gd.open = false; return; }
         s.guideOpen = gd.open;
       };
-      gd.querySelectorAll('.lab-grun').forEach((b) => (b.onclick = () => runSteps(guideGroups()[+b.dataset.g].items.map(stepOf))));
+      gd.querySelectorAll('.lab-grun').forEach((b) => (b.onclick = () => runSteps(guideGroups()[+b.dataset.g].items.map(stepOf), +b.dataset.g)));
     }
     const sol = $('lab-sol');
     if (sol) sol.onclick = () => {
@@ -595,7 +630,8 @@ export function openLab(onRun) {
   }
 
   /** "Gõ lời giải": chạy applySolution trên mạng hiện tại rồi đổ từng lệnh + kết quả vào console. */
-  function typeSolution() {
+  function typeSolution() { withGain('Lời giải mẫu', typeSolutionRaw); renderAll(); }
+  function typeSolutionRaw() {
     const steps = solutionOf(lab);
     for (const [dev] of steps) if (dev !== '@link') toExec(dev);
     const before = new Set(s.net.links.map((l) => l.id));
@@ -608,7 +644,6 @@ export function openLab(onRun) {
       s.dev = o.dev;
     }
     s.password = false;
-    renderAll();
   }
 
   // Ticket sự cố: mặc định KHÔNG giải thích (như ngoài đời, phải tự show/ping để chẩn đoán)
