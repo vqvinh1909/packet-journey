@@ -1,5 +1,13 @@
 # Ghi chú làm tiếp — Packet Journey
 
+## 🧮 Luyện subnet vô hạn (2026-10-27, việc 2/11 — phiên "SAP PROMPT App Hoc Mang")
+- `lab/subnet.js` thuần logic: `generate(kind|'mix', level, rng)` → `{kind, level, text, fields:[[key,label]], ans, data}`;
+  `grade(q, input)` chuẩn hoá cách gõ (prefix "26" = "/26", "1.022" = 1022, có/không/khong/k/no…), VLSM chấm theo luật
+  (prefix tối thiểu, căn biên, không chồng lấn, trong khối) chứ không so phương án mẫu `vlsmPlan`; `explain(q)` trả các
+  dòng giải; `addStat`/`statRows` thống kê; `makeRun(level, seed)` bộ 10 câu đủ 6 dạng, xáo theo seed.
+- `ui/subnet.js`: modal, lưu `subnet-opt`, `subnet-stats` {kind:{n,ok,secs}}, `subnet-runs` (50 bộ gần nhất).
+  Việc 3 (điểm yếu) đọc `subnet-stats` để tính điểm chủ đề "Subnet".
+
 ## 🎲 Phá mạng ngẫu nhiên (2026-10-27, chức năng 1/3 cho người tự học — phiên "SAP PROMPT App Hoc Mang")
 - `lab/breaker.js`: `solvedNet(lab)` (build + applySolution, mọi nhiệm vụ cấu hình đạt) → `faultCandidates(net)` (thư viện
   lỗi: mỗi lỗi có `brk`/`fix` là lệnh CLI, `layer`/`detail` cho gợi ý) → `makeBreak(lab, n, seed)`: xáo theo `rng(seed)`
@@ -64,7 +72,7 @@
      trong test), quiet-mode access-class; `aaa new-model` thay "login local"; `security passwords min-length`;
      `ip http server` mở cổng 80; `exec-timeout`, `ip ssh version` lưu và hiện trong running-config.
 6. ⏳ Kịch bản tấn công byte-thật (ARP spoofing, DHCP giả/starvation, VLAN hopping) trong scenarios/.
-- Tổng hiện tại: 101 lab, `node --test` 223/223, `node tools/ui-smoke.cjs` 60/60; workspace tự dựng mạng kiểu EVE-NG + capture; phá mạng ngẫu nhiên.
+- Tổng hiện tại: 101 lab, `node --test` 233/233, `node tools/ui-smoke.cjs` 66/66; workspace tự dựng mạng kiểu EVE-NG + capture; phá mạng ngẫu nhiên; luyện subnet.
 
 
 ## ✅ ĐÃ XONG Lab CLI đợt 3 (session 2026-10-27/28) — 7 cải tiến

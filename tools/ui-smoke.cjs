@@ -236,6 +236,30 @@ server.listen(8799, '127.0.0.1', async () => {
   await p.click('#btn-progress');
   ok((await p.textContent('#pg-body')).includes('Phá mạng ngẫu nhiên: 1 lượt'), 'Tiến độ: tóm tắt phá mạng (lưu trong xuất/nhập tiến độ)');
   await p.click('.modal .modal-x');
+  // 11) 🧮 Luyện subnet: trả lời đúng (dạng N host), sai → giải từng bước, bộ 10 câu tính giờ, thống kê, tiến độ
+  await p.click('#btn-subnet');
+  await p.selectOption('#sn-kind', 'hosts');
+  const snTxt = await p.textContent('.sn-q');
+  const need = +snTxt.match(/ít nhất ([\d.]+) host/)[1].replace(/\./g, '');
+  let hb = 2; while (2 ** hb - 2 < need) hb++;
+  await p.fill('[data-k="prefix"]', '/' + (32 - hb));
+  await p.press('[data-k="prefix"]', 'Enter');
+  ok((await p.textContent('.sn-verdict')).includes('Đúng'), 'subnet: trả lời đúng dạng N host → ✅ (' + need + ' host → /' + (32 - hb) + ')');
+  await p.press('#sn-check', 'Enter');
+  await p.selectOption('#sn-kind', 'info');
+  await p.click('#sn-skip');
+  ok((await p.textContent('.sn-verdict')).includes('Chưa đúng') && (await p.textContent('.sn-steps pre')).includes('Bước nhảy'), 'subnet: bỏ trống → ❌ + giải từng bước (bước nhảy, nhị phân)');
+  await p.click('#sn-run');
+  await p.waitForTimeout(300);
+  ok((await p.textContent('#sn-clock')).startsWith('Câu 1/10'), 'subnet: chế độ 10 câu tính giờ có đồng hồ');
+  for (let i = 0; i < 10; i++) { await p.click('#sn-skip'); await p.click('#sn-check'); }
+  ok((await p.textContent('.sn-verdict')).includes('Hoàn thành 10 câu'), 'subnet: xong bộ 10 câu → bảng kết quả');
+  await p.click('#sn-stats-btn');
+  ok((await p.$$eval('.sn-tbl tr', (x) => x.length)) === 7, 'subnet: thống kê theo 6 dạng');
+  await p.click('.sn-modal .modal-x');
+  await p.click('#btn-progress');
+  ok((await p.textContent('#pg-body')).includes('Luyện subnet: 12 câu'), 'Tiến độ: tóm tắt luyện subnet');
+  await p.click('.modal .modal-x');
   ok(errs.length === 0, 'không có lỗi JS: ' + JSON.stringify(errs).slice(0, 300));
   await b.close();
   server.close();
