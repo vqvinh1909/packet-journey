@@ -260,6 +260,10 @@ export function createCli(net) {
     c('show ipv6 route', (x) => R(showIpv6Route(x.d, null))),
     c('show ipv6 route {ospf|static|connected|local}', (x) => R(showIpv6Route(x.d, x.a[0]))),
     c('show ipv6 ospf neighbor', (x) => R(showOspf6Nei(x.d))),
+    c('show zone security', (x) => R(showZones(x.d))),
+    c('show zone-pair security', (x) => R(showZonePairs(x.d))),
+    c('show class-map type inspect', (x) => R(showCmapI(x.d))),
+    c('show policy-map type inspect zone-pair sessions', (x) => R(showZbfSessions(x.d))),
     ...SHOW_ROUTING,
     c('show ip nat translations', (x) => R(showNatTr(x.d))),
     c('show ip nat statistics', (x) => R(showNatStat(x.d))),
@@ -441,6 +445,15 @@ export function createCli(net) {
     c('no ipv6 route <ip6p>', (x) => route6(x, x.a[0], null)),
     c('no ipv6 route <ip6p> <ip6>', (x) => route6(x, x.a[0], null)),
     c('ipv6 router ospf <num>', (x) => routerOspf6(x)),
+    // ---- Zone-Based Firewall ----
+    c('zone security <word>', (x) => { zbf(x.d).zones[x.a[0]] ||= { desc: '' }; x.s.mode = 'zone'; x.s.zone = x.a[0]; return R([]); }),
+    c('no zone security <word>', (x) => { const z = zbf(x.d); delete z.zones[x.a[0]]; for (const f of Object.values(x.d.ifaces)) if (f.zone === x.a[0]) f.zone = null; z.pairs = z.pairs.filter((p) => p.src !== x.a[0] && p.dst !== x.a[0]); return R([]); }),
+    c('class-map type inspect match-any <word>', (x) => cmapI(x, x.a[0], false)),
+    c('class-map type inspect match-all <word>', (x) => cmapI(x, x.a[0], true)),
+    c('class-map type inspect <word>', (x) => cmapI(x, x.a[0], true)),
+    c('policy-map type inspect <word>', (x) => { const z = zbf(x.d); z.policyMaps[x.a[0]] ||= [{ cls: 'class-default', action: 'drop' }]; x.s.mode = 'pmapi'; x.s.pm = x.a[0]; return R([]); }),
+    c('zone-pair security <word> source <word> destination <word>', (x) => zpair(x)),
+    c('no zone-pair security <word>', (x) => { const z = zbf(x.d); z.pairs = z.pairs.filter((p) => p.name !== x.a[0]); return R([]); }),
     c('no ipv6 router ospf <num>', (x) => { if (x.d.ospf6?.pid === x.a[0]) x.d.ospf6 = null; return R([]); }),
   ];
   const CFG_ROUTER = [
@@ -559,6 +572,8 @@ export function createCli(net) {
     c('no ipv6 address', (x) => ifAll(x, (f) => { f.ipv6 = []; f.ll = null; })),
     c('no ipv6 address <ip6p>', (x) => ifAll(x, (f) => { f.ipv6 = (f.ipv6 || []).filter((a) => !(a.ip === x.a[0].ip && a.prefix === x.a[0].prefix)); })),
     c('ipv6 enable', (x) => ifAll(x, (f) => { f.ipv6Enable = true; })),
+    c('zone-member security <word>', (x) => { if (!x.d.zbf?.zones[x.a[0]]) return R([`% Zone ${x.a[0]} chưa tồn tại — tạo bằng "zone security ${x.a[0]}" trước`]); return ifAll(x, (f) => { f.zone = x.a[0]; }); }),
+    c('no zone-member security <word>', (x) => ifAll(x, (f) => { if (f.zone === x.a[0]) f.zone = null; })),
     c('no ipv6 enable', (x) => ifAll(x, (f) => { f.ipv6Enable = false; })),
     c('ipv6 ospf <num> area <num>', (x) => ospf6If(x, x.a[0], x.a[1])),
     c('no ipv6 ospf <num> area <num>', (x) => ifAll(x, (f) => { f.ospf6 = null; })),
@@ -636,6 +651,27 @@ export function createCli(net) {
     c('exit', (x) => { x.s.mode = 'config'; return R([]); }),
     c('end', (x) => toPriv(x)),
     c('do <rest>', (x) => doExec(x)),
+  ];
+  const ZONE_MODE = [c('description <rest>', (x) => { x.d.zbf.zones[x.s.zone].desc = x.a[0]; return R([]); }), c('exit', (x) => { x.s.mode = 'config'; return R([]); })];
+  const CMAPI_MODE = [
+    c('match protocol <word>', (x) => { const m = x.d.zbf.classMaps[x.s.cm].matches; if (!m.some((e) => e.protocol === x.a[0].toLowerCase())) m.push({ protocol: x.a[0].toLowerCase() }); return R([]); }),
+    c('no match protocol <word>', (x) => { const cm = x.d.zbf.classMaps[x.s.cm]; cm.matches = cm.matches.filter((e) => e.protocol !== x.a[0].toLowerCase()); return R([]); }),
+    c('match access-group name <word>', (x) => { x.d.zbf.classMaps[x.s.cm].matches.push({ acl: x.a[0] }); return R([]); }),
+    c('match access-group <num>', (x) => { x.d.zbf.classMaps[x.s.cm].matches.push({ acl: String(x.a[0]) }); return R([]); }),
+    c('exit', (x) => { x.s.mode = 'config'; return R([]); }),
+  ];
+  const PMAPI_MODE = [
+    c('class type inspect <word>', (x) => { if (!x.d.zbf.classMaps[x.a[0]]) return R([`% class-map ${x.a[0]} chưa tồn tại`]); pmClass(x, x.a[0]); return R([]); }),
+    c('class class-default', (x) => { pmClass(x, 'class-default'); return R([]); }),
+    c('no class type inspect <word>', (x) => { const z = x.d.zbf; z.policyMaps[x.s.pm] = z.policyMaps[x.s.pm].filter((e) => e.cls !== x.a[0]); return R([]); }),
+    c('exit', (x) => { x.s.mode = 'config'; return R([]); }),
+  ];
+  const pmAct = (a) => (x) => { x.d.zbf.policyMaps[x.s.pm].find((e) => e.cls === x.s.pmc).action = a; return R([]); };
+  const PMAPIC_MODE = [c('inspect', pmAct('inspect')), c('pass', pmAct('pass')), c('drop', pmAct('drop')), c('drop log', pmAct('drop')), c('exit', (x) => { x.s.mode = 'pmapi'; return R([]); })];
+  const ZPAIR_MODE = [
+    c('service-policy type inspect <word>', (x) => { if (!x.d.zbf.policyMaps[x.a[0]]) return R([`% policy-map ${x.a[0]} chưa tồn tại`]); x.d.zbf.pairs.find((p) => p.name === x.s.zp).policy = x.a[0]; return R([]); }),
+    c('no service-policy type inspect <word>', (x) => { x.d.zbf.pairs.find((p) => p.name === x.s.zp).policy = null; return R([]); }),
+    c('exit', (x) => { x.s.mode = 'config'; return R([]); }),
   ];
   const OSPF6_MODE = [
     c('router-id <ip>', (x) => { x.d.ospf6.rid = x.a[0]; return R([]); }),
@@ -829,12 +865,17 @@ export function createCli(net) {
       case 'vamap': return VAMAP_MODE;
       case 'bgp': return BGP_MODE;
       case 'ospf6': return OSPF6_MODE;
+      case 'zone': return ZONE_MODE;
+      case 'cmapi': return CMAPI_MODE;
+      case 'pmapi': return PMAPI_MODE;
+      case 'pmapic': return PMAPIC_MODE;
+      case 'zpair': return ZPAIR_MODE;
       case 'mstcfg': return MST_MODE;
       default: return [];
     }
   }
   const cfgTable = (d) => (d.os === 'asa' ? ASA.cfgTable() : isRouter(d) ? CFG_ROUTER : CFG_SWITCH);
-  const SUB = new Set(['if', 'subif', 'range', 'vlan', 'router', 'pool', 'acl-std', 'acl-ext', 'line', 'isakmp', 'tset', 'cmap', 'vamap', 'bgp', 'mstcfg', 'ospf6', 'asaobj', 'pmap', 'pmapc']);
+  const SUB = new Set(['if', 'subif', 'range', 'vlan', 'router', 'pool', 'acl-std', 'acl-ext', 'line', 'isakmp', 'tset', 'cmap', 'vamap', 'bgp', 'mstcfg', 'ospf6', 'asaobj', 'pmap', 'pmapc', 'zone', 'cmapi', 'pmapi', 'pmapic', 'zpair']);
 
   // ================== Thực thi ==================
   function prompt(id) {
@@ -847,7 +888,7 @@ export function createCli(net) {
     if (s.loggedOut) return '';
     if (d.os === 'asa') return ASA.prompt(d, s);
     const h = d.name;
-    return ({ user: `${h}>`, priv: `${h}#`, config: `${h}(config)#`, if: `${h}(config-if)#`, subif: `${h}(config-subif)#`, range: `${h}(config-if-range)#`, vlan: `${h}(config-vlan)#`, router: `${h}(config-router)#`, pool: `${h}(dhcp-config)#`, 'acl-std': `${h}(config-std-nacl)#`, 'acl-ext': `${h}(config-ext-nacl)#`, line: `${h}(config-line)#`, isakmp: `${h}(config-isakmp)#`, tset: `${h}(cfg-crypto-trans)#`, cmap: `${h}(config-crypto-map)#`, vamap: `${h}(config-access-map)#`, bgp: `${h}(config-router)#`, mstcfg: `${h}(config-mst)#`, ospf6: `${h}(config-rtr)#` })[s.mode] || `${h}#`;
+    return ({ user: `${h}>`, priv: `${h}#`, config: `${h}(config)#`, if: `${h}(config-if)#`, subif: `${h}(config-subif)#`, range: `${h}(config-if-range)#`, vlan: `${h}(config-vlan)#`, router: `${h}(config-router)#`, pool: `${h}(dhcp-config)#`, 'acl-std': `${h}(config-std-nacl)#`, 'acl-ext': `${h}(config-ext-nacl)#`, line: `${h}(config-line)#`, isakmp: `${h}(config-isakmp)#`, tset: `${h}(cfg-crypto-trans)#`, cmap: `${h}(config-crypto-map)#`, vamap: `${h}(config-access-map)#`, bgp: `${h}(config-router)#`, mstcfg: `${h}(config-mst)#`, ospf6: `${h}(config-rtr)#`, zone: `${h}(config-sec-zone)#`, cmapi: `${h}(config-cmap)#`, pmapi: `${h}(config-pmap)#`, pmapic: `${h}(config-pmap-c)#`, zpair: `${h}(config-sec-zone-pair)#` })[s.mode] || `${h}#`;
   }
 
   function exec(id, raw) {
@@ -1053,6 +1094,65 @@ export function createCli(net) {
       f.ipv6 = (f.ipv6 || []).filter((a) => a.ip !== ip);
       f.ipv6.push({ ip, prefix: p.prefix, ...(eui ? { eui: true } : {}) });
     });
+  }
+  // ---------- Zone-Based Firewall ----------
+  function zbf(d) {
+    d.zbf ||= { zones: {}, classMaps: {}, policyMaps: {}, pairs: [] };
+    d.fw ||= { kind: 'zbf', conns: [] };
+    return d.zbf;
+  }
+  function cmapI(x, name, all) {
+    const z = zbf(x.d);
+    z.classMaps[name] ||= { all, matches: [] };
+    z.classMaps[name].all = all;
+    x.s.mode = 'cmapi'; x.s.cm = name;
+    return R([]);
+  }
+  function pmClass(x, cls) {
+    const pm = x.d.zbf.policyMaps[x.s.pm];
+    if (!pm.some((e) => e.cls === cls)) pm.splice(pm.findIndex((e) => e.cls === 'class-default'), 0, { cls, action: null }); // class-default luôn đứng cuối
+    x.s.mode = 'pmapic'; x.s.pmc = cls;
+  }
+  function zpair(x) {
+    const z = zbf(x.d);
+    const [name, src, dst] = x.a;
+    for (const zn of [src, dst]) if (zn !== 'self' && !z.zones[zn]) return R([`% Zone ${zn} chưa tồn tại`]);
+    z.pairs = z.pairs.filter((p) => p.name !== name);
+    z.pairs.push({ name, src, dst, policy: null });
+    x.s.mode = 'zpair'; x.s.zp = name;
+    return R([]);
+  }
+  function showZones(d) {
+    const z = d.zbf;
+    const L = ['zone self', '  Description: System Defined Zone', ''];
+    for (const [n, o] of Object.entries(z?.zones || {})) {
+      L.push(`zone ${n}`, ...(o.desc ? [`  Description: ${o.desc}`] : []));
+      const mem = Object.keys(d.ifaces).filter((i) => d.ifaces[i].zone === n);
+      L.push(mem.length ? '  Member Interfaces:' : '  (Lab: chưa có cổng nào — interface ... → zone-member security ' + n + ')', ...mem.map((i) => `    ${longIf(i)}`), '');
+    }
+    return L;
+  }
+  function showZonePairs(d) {
+    const L = [];
+    for (const p of d.zbf?.pairs || []) L.push(`Zone-pair name ${p.name}`, `    Source-Zone ${p.src}  Destination-Zone ${p.dst}`, `    service-policy ${p.policy || '(chưa có — mọi gói bị DROP)'}`);
+    return L.length ? L : ['(Lab: chưa có zone-pair nào)'];
+  }
+  function showCmapI(d) {
+    const L = [];
+    for (const [n, c0] of Object.entries(d.zbf?.classMaps || {})) L.push(` Class Map type inspect ${c0.all ? 'match-all' : 'match-any'} ${n} (id 1)`, ...c0.matches.map((m) => (m.protocol ? `   Match protocol ${m.protocol}` : `   Match access-group name ${m.acl}`)), '');
+    return L;
+  }
+  function showZbfSessions(d) {
+    const L = ['', 'policy exists on zp'];
+    const zp = (c0) => (d.zbf?.pairs || []).find((p) => p.src === d.ifaces[c0.inIf]?.zone && p.dst === d.ifaces[c0.outIf]?.zone);
+    for (const p of d.zbf?.pairs || []) {
+      const ss = (d.fw?.conns || []).filter((c0) => zp(c0) === p);
+      L.push(`  Zone-pair: ${p.name}`, '', `  Service-policy inspect : ${p.policy || '-'}`, '', '    Inspect', '', '      Established Sessions');
+      ss.forEach((c0, i) => L.push(`       Session ${i + 1} (${c0.src}:${c0.sport ?? 8})=>(${c0.dst}:${c0.dport ?? 0}) ${c0.proto}:${c0.proto} SIS_OPEN`, '        Created 00:00:0' + (i % 9 + 1) + ', Last heard 00:00:00'));
+      if (!ss.length) L.push('       (không có)');
+      L.push('');
+    }
+    return L;
   }
   function routerOspf6(x) {
     if (!x.d.ipv6Routing) return R(['% IPv6 routing not enabled']);
@@ -2613,6 +2713,7 @@ export function createCli(net) {
     for (const a of f.ipv6 || []) L.push(a.eui ? ` ipv6 address ${A6.net6(a.ip, 64)}/64 eui-64` : ` ipv6 address ${a.ip}/${a.prefix}`);
     if (f.ipv6Enable) L.push(' ipv6 enable');
     if (f.ospf6) L.push(` ipv6 ospf ${f.ospf6.pid} area ${f.ospf6.area}`);
+    if (f.zone) L.push(` zone-member security ${f.zone}`);
     if (f.bw != null) L.push(` bandwidth ${f.bw}`);
     if (n.startsWith('s') && f.l2enc === 'ppp') L.push(' encapsulation ppp');
     if (f.pppAuth) L.push(` ppp authentication ${f.pppAuth}`);
@@ -2681,6 +2782,14 @@ export function createCli(net) {
       for (const [ip, k] of Object.entries(d.crypto.keys)) L.push(`crypto isakmp key ${k} address ${ip}`);
       for (const [n, t] of Object.entries(d.crypto.tsets)) L.push(`crypto ipsec transform-set ${n} ${t.join(' ')}`, ' mode tunnel');
       for (const [m, seqs] of Object.entries(d.crypto.maps)) for (const [seq, e] of Object.entries(seqs)) L.push(`crypto map ${m} ${seq} ipsec-isakmp`, ...(e.peer ? [` set peer ${e.peer}`] : []), ...(e.tset ? [` set transform-set ${e.tset}`] : []), ...(e.acl ? [` match address ${e.acl}`] : []), '!');
+      if (d.zbf) {
+        const z = d.zbf;
+        for (const [n, c0] of Object.entries(z.classMaps)) L.push(`class-map type inspect ${c0.all ? 'match-all' : 'match-any'} ${n}`, ...c0.matches.map((m) => (m.protocol ? ` match protocol ${m.protocol}` : ` match access-group name ${m.acl}`)), '!');
+        for (const [n, pm] of Object.entries(z.policyMaps)) L.push(`policy-map type inspect ${n}`, ...pm.flatMap((e) => [e.cls === 'class-default' ? ' class class-default' : ` class type inspect ${e.cls}`, ...(e.action ? [`  ${e.action}`] : [])]), '!');
+        for (const [n, o] of Object.entries(z.zones)) L.push(`zone security ${n}`, ...(o.desc ? [` description ${o.desc}`] : []));
+        for (const p of z.pairs) L.push(`zone-pair security ${p.name} source ${p.src} destination ${p.dst}`, ...(p.policy ? [` service-policy type inspect ${p.policy}`] : []));
+        L.push('!');
+      }
       for (const n of ifOrder(d)) L.push(...runIfRouter(d, n));
       L.push(...routingBlock(d));
       for (const r of d.nat.dyn) L.push(r.iface ? `ip nat inside source list ${r.acl} interface ${longIf(r.iface)} overload` : `ip nat inside source list ${r.acl} pool ${r.pool}${r.overload ? ' overload' : ''}`);

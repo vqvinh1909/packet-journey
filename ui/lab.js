@@ -395,8 +395,8 @@ export function openLab(onRun) {
   }
   function glyph(g, d) {
     const { x, y } = d;
-    if (d.fw) {
-      // firewall: bức tường gạch
+    if (d.fw && d.os) {
+      // firewall: bức tường gạch (router chạy Zone-Based Firewall vẫn vẽ như router)
       g.appendChild(el('rect', { x: x - 24, y: y - 18, width: 48, height: 36, rx: 4, class: 'lab-g fw' }));
       g.appendChild(el('path', { d: `M${x - 24} ${y - 6}h48 M${x - 24} ${y + 6}h48 M${x - 8} ${y - 18}v12 M${x + 10} ${y - 18}v12 M${x} ${y - 6}v12 M${x - 16} ${y - 6}v12 M${x + 16} ${y - 6}v12 M${x - 8} ${y + 6}v12 M${x + 10} ${y + 6}v12`, class: 'lab-gl fwl' }));
     } else if (d.type === 'router') {
@@ -424,7 +424,7 @@ export function openLab(onRun) {
   // ---------------------------------------------------------------- tab thiết bị + console
   function renderTabs() {
     const ico = { router: '⛁', switch: '⇄', pc: '🖥', server: '🗄' };
-    $('lab-tabs').innerHTML = Object.values(s.net.devices).map((d) => `<button class="lab-tab${d.id === s.dev ? ' active' : ''}" data-id="${d.id}"><span class="lab-ti">${d.fw ? '🛡' : ico[d.type]}</span>${esc(d.name)}</button>`).join('');
+    $('lab-tabs').innerHTML = Object.values(s.net.devices).map((d) => `<button class="lab-tab${d.id === s.dev ? ' active' : ''}" data-id="${d.id}"><span class="lab-ti">${d.fw && d.os ? '🛡' : ico[d.type]}</span>${esc(d.name)}</button>`).join('');
     $('lab-tabs').querySelectorAll('.lab-tab').forEach((b) => (b.onclick = () => pickDev(b.dataset.id)));
   }
   function pickDev(id) {

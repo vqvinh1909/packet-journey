@@ -1426,13 +1426,14 @@ function walk(ctx, R, pkt, start, opts = {}) {
           if (a.action === 'deny') return fail(node.dev, 'acl', `${d.name}: ACL "${fi.aclIn}" (chiều IN trên ${longIf(inIf)}) chặn gói — ${a.implicit ? 'không khớp dòng permit nào → "deny any" NGẦM ĐỊNH cuối ACL' : 'khớp dòng: ' + aceText(d.acls[fi.aclIn].type, a.entry)}.`, d.fw ? '.' : 'U', fi.ip);
           return null;
         };
-        if (!d.fw) { const x = aclIn(); if (x) return x; }
+        const aclAfterNat = !!d.fw && d.fw.kind !== 'zbf'; // ZBF chạy trên router IOS → ACL vẫn xét trước NAT
+        if (!aclAfterNat) { const x = aclIn(); if (x) return x; }
         if (fi.nat === 'outside' || d.fw) {
           const before = pkt.dst;
           const t = natOut2In(ctx, d, pkt);
           if (t) { changed = ['ip.dst', 'ip.checksum']; R.proc(node.dev, { l: 3, side: 'forward', title: `${d.name} NAT: đích ${before} → ${pkt.dst}`, ex: `Gói vào cổng "ip nat outside" mang địa chỉ inside global ${before}; tra bảng NAT${t.stat ? ' (NAT tĩnh)' : ''} → đổi về inside local ${pkt.dst} rồi mới định tuyến.`, tables: natRows(ctx, d) }); }
         }
-        if (d.fw) { const x = aclIn(); if (x) return x; }
+        if (aclAfterNat) { const x = aclIn(); if (x) return x; }
         if (ownsIp(net, d, pkt.dst)) return { ok: true, at: { dev: node.dev, ifn: inIf }, hops };
         pkt.ttl -= 1;
         hops.push({ dev: node.dev, ip: fi.ip });
