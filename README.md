@@ -5,9 +5,10 @@ sâu** một gói tin đi qua từng tầng OSI/TCP-IP và từng thiết bị �
 mô phỏng + giáo trình". Gói tin được dựng thành **byte thật**, checksum **tính thật**,
 và **xuất được `.pcap`** để mở bằng Wireshark đối chiếu.
 
-> Trạng thái: **Mốc M1** — nền tảng dựng gói (Ethernet/ARP/IPv4/ICMP) + 2 kịch bản
-> ping + giao diện học cốt lõi. Các mốc sau (UDP/TCP/DNS/DHCP, VLAN/NAT/ACL,
-> chế độ đoán/quiz, PWA offline, tự tạo kịch bản) xem phần [Lộ trình](#lộ-trình).
+> Trạng thái: **đã phủ CCNA + CCNP** — 30 kịch bản byte-thật (23 giao thức, quiz đủ 30 bài),
+> chế độ học chủ động (đoán bước, thử thách sửa lỗi, từ điển, lưu tiến độ, PWA offline),
+> Builder + Canvas vẽ mạng, và **🧪 Lab CLI Cisco IOS với 72 lab** (27 lab giáo trình, 41 lab
+> CCNA trực quan, 4 lab tổng hợp doanh nghiệp) + chế độ tự dựng mạng. Chi tiết xem [Lộ trình](#lộ-trình).
 
 ## Chạy app
 

@@ -44,7 +44,6 @@
 - **Giao diện giống site tham khảo** (hainguyenit.site course_id=8): trang đó CÓ PHÍ, chỉ xem được
   trang bán khoá (mô tả + review), KHÔNG xem được UI mô phỏng thật → không copy trực tiếp được.
   Nếu muốn giống, cần user mô tả/đưa ảnh UI bài học của họ, hoặc tự thiết kế đẹp hơn.
-- Các batch CCNA/CCNP còn lại + tính năng học chủ động (xem cuối file).
 
 ---
 
@@ -207,9 +206,10 @@ lấy bài từ giáo trình Infrastructure Administrator. Nút header **🧪 La
 - Thêm lab mới: thêm object vào `LABS` (build/init/tasks/hints/solution) — test tự kiểm lời giải.
 
 ## Các nhánh còn lại (rất tùy chọn)
-- Lab CLI: IPv6 (ipv6 address / OSPFv3), VPN, WLC/Wireless, ASA, AAA/TACACS, Ansible chưa mô phỏng (GreenMart
-  task 2, 12–20 phần lớn). Có thể thêm: port-security violation khi cắm máy lạ, STP blocking thật trong forwarding.
-1. DHCPv6 Prefix Delegation, QoS hierarchical (HQoS), EVPN control-plane cho VXLAN, SR-MPLS.
+1. Lab CLI: IPv6 (ipv6 address / OSPFv3), VPN nâng cao, WLC/Wireless, ASA, AAA/TACACS, Ansible chưa mô phỏng
+   (GreenMart task 2, 12–20 phần lớn); STP blocking thật trong forwarding. (Port-security vi phạm khi cắm máy lạ
+   ĐÃ CÓ — xem lab B07.)
+2. DHCPv6 Prefix Delegation, QoS hierarchical (HQoS), EVPN control-plane cho VXLAN, SR-MPLS.
    → Nhưng về cơ bản app đã HOÀN TẤT: phủ trọn CCNA + CCNP + SP(MPLS) + DC(VXLAN) + IPv6.
 3. **Giao diện giống site tham khảo** (hainguyenit.site) — trang đó có phí, chỉ xem được trang bán khoá.
 
