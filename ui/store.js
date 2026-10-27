@@ -18,6 +18,10 @@ export function save(key, value) {
   }
 }
 
+export function remove(key) {
+  try { localStorage.removeItem(PREFIX + key); } catch { /* bỏ qua */ }
+}
+
 // ----- Tiến độ học -----
 
 /** Đánh dấu một kịch bản đã xem hết. */

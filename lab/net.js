@@ -124,8 +124,13 @@ export function server(id, name, x, y, o = {}) {
   const d = pc(id, name, x, y, o);
   d.type = 'server';
   d.services = o.services || [80, 443];
+  // cloud: chỉ đổi HÌNH VẼ thành đám mây (vẫn là server giả lập) — mặc định bật cho tên chứa "INTERNET"
+  d.cloud = !!(o.cloud ?? CLOUD_NAME.test(name));
   return d;
 }
+const CLOUD_NAME = /internet/i;
+/** Thiết bị vẽ thành đám mây "Internet"? (file JSON cũ chưa có cờ "cloud" → nhận theo tên) */
+export function isCloud(d) { return d?.type === 'server' && (d.cloud ?? CLOUD_NAME.test(d.name || '')); }
 export function newPort() {
   // modeSet=false: chưa gõ "switchport mode" → cổng DTP "dynamic auto" (mặc định của switch Cisco)
   return { mode: 'access', modeSet: false, dyn: 'auto', vlan: 1, allowed: null, native: 1, shutdown: false, errdis: false, desc: '', group: null, chMode: null, portfast: false, bpduguard: false, ps: null, trust: false, daiTrust: false, ipsg: false, dhcpRate: null, nonegotiate: false, protected: false, cdp: true, pv: null };
@@ -1234,7 +1239,7 @@ export function topologyOf(net) {
     viewBox: `${x0} ${y0} ${x1 - x0} ${y1 - y0}`,
     devices: ds.map((d) => ({
       id: d.id,
-      type: d.type === 'pc' || d.type === 'server' ? 'host' : d.type,
+      type: isCloud(d) ? 'cloud' : d.type === 'pc' || d.type === 'server' ? 'host' : d.type,
       name: d.name, x: d.x, y: d.y,
       lines: d.type === 'pc' || d.type === 'server' ? [d.ip ? `${d.ip}/${d.prefix}` : (d.dhcp ? 'DHCP' : '(chưa IP)')] : [],
     })),

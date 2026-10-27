@@ -139,8 +139,10 @@ server.listen(8799, '127.0.0.1', async () => {
   await type('show bogus');
   ok((await p.$$eval('.lab-ln.err', (x) => x.length)) > 0, 'lệnh sai trên ASA hiện lỗi');
   ok(!!(await p.$('.lab-g.fw')), 'topology vẽ biểu tượng firewall');
+  ok((await p.$$eval('.lab-topo .lab-g.cloud', (x) => x.length)) === 1 && (await p.$$eval('.lab-topo .lab-name', (x) => x.map((e) => e.textContent))).includes('INTERNET 8.8.8.8'), 'Internet vẽ thành đám mây (kèm tên)');
   await p.click('#lab-sbx-open');
-  for (const k of ['asa', 'fortios', 'pfsense']) { await p.click(`.ws-pi[data-kind="${k}"]`); await p.click('#ad-ok'); }
+  for (const k of ['asa', 'fortios', 'pfsense', 'cloud']) { await p.click(`.ws-pi[data-kind="${k}"]`); await p.click('#ad-ok'); }
+  ok(!!(await p.$('.ws-node[data-id="internet1"] .lab-g.cloud')), 'workspace: mẫu Cloud / Internet (nhóm Network) vẽ đám mây');
   ok((await p.$$eval('.ws-node', (x) => x.map((e) => e.getAttribute('aria-label')))).includes('ASA1'), 'workspace: thêm firewall ASA');
   await p.click('#ws-start');
   await wsMenu('fgt1', 'Console');
@@ -210,6 +212,30 @@ server.listen(8799, '127.0.0.1', async () => {
   ok((await p.getAttribute('#lab-in', 'type')) === 'password' && (await p.textContent('#lab-prompt')).includes('Password'), 'SSH từ PC hỏi mật khẩu (ô nhập ẩn)');
   await type('sai');
   ok((await p.$$eval('.lab-ln', (x) => x.map((e) => e.textContent))).some((l) => l.includes('Authentication failed')), 'SSH sai mật khẩu → Authentication failed');
+  // 10) 🎲 Phá mạng ngẫu nhiên: gài lỗi theo seed → nhiệm vụ trượt → gợi ý → đáp án → sửa → ghi lịch sử
+  await p.click('#lab-brk-open');
+  await p.selectOption('#brk-lab', 'L13');
+  await p.check('input[name="brk-n"][value="2"]');
+  await p.fill('#brk-seed', '4242');
+  await p.click('#brk-go');
+  await p.waitForSelector('.lab-brk');
+  await p.waitForTimeout(100);
+  const brkScore = await p.textContent('.lab-score');
+  ok((await p.textContent('.lab-brk')).includes('seed 4242') && brkScore.split('/')[0] !== brkScore.split('/')[1], 'phá mạng: đề có seed, có nhiệm vụ trượt (' + brkScore + ')');
+  await p.click('#lab-hint');
+  ok((await p.textContent('.lab-hints')).includes('Lỗi 1: nằm ở Lớp'), 'phá mạng: gợi ý mức 1 (lớp nào)');
+  await p.click('#lab-sol');
+  ok((await p.$$eval('.lab-sol .lab-sol-dev', (x) => x.length)) >= 1, 'phá mạng: xem đáp án liệt kê lỗi + lệnh sửa');
+  await p.click('#lab-runsol');
+  await p.waitForTimeout(100);
+  ok((await p.textContent('.lab-win')).includes('Đã sửa xong'), 'phá mạng: gõ lệnh sửa → mọi nhiệm vụ đạt lại');
+  await p.click('#lab-brk-open');
+  ok((await p.textContent('.brk-hist')).includes('4242'), 'phá mạng: lịch sử lưu lượt vừa chơi');
+  await p.click('#brk-x');
+  await p.click('.lab-modal .modal-x');
+  await p.click('#btn-progress');
+  ok((await p.textContent('#pg-body')).includes('Phá mạng ngẫu nhiên: 1 lượt'), 'Tiến độ: tóm tắt phá mạng (lưu trong xuất/nhập tiến độ)');
+  await p.click('.modal .modal-x');
   ok(errs.length === 0, 'không có lỗi JS: ' + JSON.stringify(errs).slice(0, 300));
   await b.close();
   server.close();

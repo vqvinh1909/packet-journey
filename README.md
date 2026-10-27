@@ -28,6 +28,10 @@ Hoặc bấm đúp **`Mở-Packet-Journey.bat`** (tự bật server và mở đ�
 > UTF-8 nên hết lỗi. Link "📖 Đọc thêm" trong app trỏ sang **file HTML giáo trình đã build**
 > (`Infrastructure-Administrator-Giao-trinh.html#bNN-s0`) để render đẹp.
 
+> Server phải **đa luồng**: app nạp hơn 100 module ES cùng lúc, server 1 luồng (`socketserver.TCPServer`)
+> làm Chrome báo `ERR_CONNECTION_REFUSED` giữa chừng. `serve.py` nên dựng bằng `http.server.ThreadingHTTPServer`;
+> nếu chỉ cần chạy app, `python -m http.server 8000` cũng được (đa luồng sẵn từ Python 3.7).
+
 > Vì sao cần server mà không mở thẳng `index.html`? App dùng ES modules (`import`),
 > trình duyệt chặn `import` khi mở bằng `file://`. Server HTTP là bắt buộc.
 
@@ -49,6 +53,7 @@ cấu hình chưa đạt; chạy lời giải (`applySolution` — `solution` ho
 không sinh lỗi CLI `% Invalid/Incomplete/Ambiguous/Unknown`; sau đó `checkLab(lab, net, quizAnswers(lab))`
 đạt toàn bộ. `tests/sandbox.test.js` kiểm chế độ tự dựng mạng (thêm/xoá/nối dây, đổi tên, nhân bản, hoàn tác,
 mạng mẫu, xuất-nhập JSON kể cả file cũ, nhiệm vụ, mẫu theo hãng + Add node, Start/Stop/Wipe + link down);
+`tests/breaker.test.js` kiểm phá mạng ngẫu nhiên (mọi lab có lời giải: gài lỗi → có nhiệm vụ trượt, áp lệnh sửa → đạt hết; tất định theo seed);
 `tests/capture.test.js` kiểm capture trên dây (gói đúng dây, ping lặp, ARP lần đầu, tag 802.1Q, gói định kỳ, bộ lọc, .pcap); `tests/ip6.test.js` + `tests/net6.test.js` kiểm IPv6 (địa chỉ, SLAAC, OSPFv3, ping);
 `tests/fw.test.js` + `tests/guifw.test.js` kiểm firewall; `tests/l2sec.test.js` kiểm DHCP snooping/DHCP giả, DAI,
 IP Source Guard, login block-for, AAA.
@@ -99,6 +104,7 @@ node tools/ui-smoke.cjs   # tự bật server tĩnh, in PASS/FAIL từng mục
     X05 dual-stack IPv6 (ipv6 unicast-routing, OSPFv3 area 0/1, default ::/0, PC tĩnh + SLAAC, IPv4 vẫn chạy).
   - Nhiệm vụ dạng **❓ trắc nghiệm** hiện thành nút chọn đáp án (lưu ở `pj_labans:<id>`), chấm cùng các nhiệm vụ cấu hình.
   - **🧭 Cách giải chi tiết** cho lab có `guide`: từng bước có tiêu đề, lý do và khối lệnh, nút "▶ Gõ bước này vào console" — sau mỗi bước báo bước đó vừa làm đạt nhiệm vụ nào (nhiệm vụ mới đạt nháy sáng).
+  - **🎲 Phá mạng ngẫu nhiên** (lab xử lý sự cố vô hạn, `lab/breaker.js`): chọn lab (mặc định ngẫu nhiên, ưu tiên lab đã xong), 1/2/3 lỗi và seed (cùng seed → cùng đề). App chạy lời giải để có mạng chạy tốt rồi gài lỗi ngẫu nhiên từ thư viện: cổng shutdown, sai VLAN access, trunk thiếu VLAN trong allowed list, lệch native VLAN, PC sai IP/mask/gateway, OSPF thiếu network/sai area, mất route tĩnh, ACL chặn nhầm (deny chèn lên đầu), thiếu `ip nat inside/outside`, sai IP ảo HSRP, port-security err-disabled, sai `encapsulation dot1Q`. Chỉ gài lỗi hợp với thiết bị/tính năng trong lab và mỗi lỗi phải làm hỏng ít nhất 1 nhiệm vụ (kiểm bằng `checkLab`). Nhiệm vụ = các nhiệm vụ gốc của lab; 💡 Gợi ý mở dần (lớp nào → thiết bị nào → cổng/lệnh nào), 🔑 Xem đáp án liệt kê lỗi kèm lệnh sửa. Chấm theo thời gian và số gợi ý, lưu lịch sử (có trong xuất/nhập tiến độ).
   - **⏱ Thi thử**: làm lại lab từ đầu có đếm giờ (theo độ khó), ẩn gợi ý / lời giải / kết quả từng nhiệm vụ; nộp bài (hoặc hết giờ) → chấm thang 1000, đạt từ 800, lưu kỷ lục.
   - **🔎 Tìm lab** không dấu nhiều từ khoá (ví dụ "ospf nat"), lọc Chưa xong / Đã xong, mỗi nhóm hiện đã xong/tổng.
   - Topology đánh dấu cổng đang **STP BLOCKING** (✕, rê chuột xem VLAN).
@@ -109,6 +115,7 @@ node tools/ui-smoke.cjs   # tự bật server tĩnh, in PASS/FAIL từng mục
     - **Trạng thái thiết bị**: mới thêm thì **tắt** (icon xám); **Start** → log khởi động trong console rồi mới gõ lệnh (icon xanh); **Stop** → mọi cổng down, dây nối tới nó down, mất kết nối (cấu hình đang chạy được giữ). Có ▶ Start all / ■ Stop all.
     - **Chuột phải** vào thiết bị: Start, Stop, Wipe (về cấu hình trống), Console, Nối dây từ đây, Đổi tên, Nhân bản, Xoá; vào dây: Xoá dây; vào nền: Add node….
     - **Nhiều cửa sổ console cùng lúc** (nháy đúp thiết bị): kéo, đổi kích thước, thu nhỏ xuống thanh dưới, đóng; mỗi console giữ lịch sử ↑/↓, Tab, `?`, dán nhiều dòng. Sophos / Check Point / pfSense mở trang quản trị web trong cửa sổ.
+    - **☁️ Cloud / Internet** (nhóm *Network*): thiết bị "Internet" vẽ thành đám mây SVG tự vẽ (đầu dây cắm vào mép đám mây, dưới hiện tên + IP) nhưng vẫn là server giả lập 1 cổng — đặt IP/gateway, ping, telnet như server. Cờ `cloud` lưu trong JSON; server tên chứa "INTERNET" (kể cả trong các lab có sẵn và file JSON cũ) tự vẽ thành đám mây ở sơ đồ Lab CLI, workspace và sơ đồ "Xem gói tin".
     - **📡 Capture trên dây kiểu Wireshark** (`lab/capture.js`): chuột phải vào dây → *Start capture* / *Stop capture*; dây đang bắt có dải sáng chạy dọc dây + kính lúp; bắt được nhiều dây cùng lúc, mỗi dây một cửa sổ nổi. Bảng gói No. / Time / Source / Destination / Protocol / Length / Info (vd `Echo (ping) request id=0x0001, seq=1`, `Who has 10.0.0.1? Tell 10.0.0.2`, `Hello Packet`) tô màu theo giao thức, tag VLAN của trunk 802.1Q; bấm 1 gói → cây trường từng lớp + hex dump (rê chuột nối hai bên); bộ lọc hiển thị `icmp`, `arp`, `tcp`, `udp`, `ospf`, `stp`, `dhcp`, `ip.addr == x.x.x.x`, `tcp.port == 80`, `vlan.id == 10` (ghép `&&` / `||` / `!`); tải `.pcap` mở được bằng Wireshark. Gói lấy từ chính engine (ping lặp 4/5 lượt, ARP chỉ khi bảng ARP chưa có, DHCP, telnet/SSH, traceroute) + gói định kỳ theo cấu hình đang chạy: BPDU 2 s, HSRP Hello 3 s, EIGRP Hello 5 s, OSPF Hello 10 s.
     - 🔗 Nối dây, ↶ hoàn tác / ↷ làm lại (Ctrl+Z/Ctrl+Y ngoài console), Delete xoá thiết bị đang chọn, 📐 5 mạng mẫu; tự lưu trong trình duyệt (`pj_sandbox-net`, khung nhìn `pj_sandbox-view`), ⬇ xuất / ⬆ nhập JSON (file cũ chưa có trạng thái bật/tắt vẫn mở được — thiết bị coi như đang chạy); 🧭 6 nhiệm vụ gợi ý lộ trình (LAN → VLAN → định tuyến → DHCP → OSPF/EIGRP).
   - Tiến độ + cấu hình đã gõ được lưu, mở lại vẫn còn; có gợi ý từng bước và lời giải mẫu (nút "▶ Gõ lời giải" chạy `applySolution` ngay trong console).
@@ -150,7 +157,8 @@ lab/        net (máy mô phỏng mạng tính từ cấu hình), net6 + ip6 (IP
             ios (CLI Cisco IOS + PC + Zone-Based Firewall), asa (CLI Cisco ASA), fortios, panos,
             guifw (Sophos/Check Point/pfSense — ui/guifw.js vẽ trang web), labs-sec (lab firewall), labs-l2sec (lab bảo mật L2),
             labs (27 lab + chấm điểm), labs-ccna (41 lab), labs-adv (5 lab chuyên đề), labs-capstone (5 lab tổng hợp),
-            kit (helper soạn lab), sandbox (tự dựng mạng), capture (bắt gói trên dây, lọc, .pcap)
+            kit (helper soạn lab), sandbox (tự dựng mạng), capture (bắt gói trên dây, lọc, .pcap),
+            breaker (phá mạng ngẫu nhiên: thư viện lỗi, seed, gợi ý, đáp án)
 tools/      ui-smoke.cjs (kiểm tra giao diện bằng Playwright, tuỳ chọn)
 scenarios/  s01..s08 (xem danh sách dưới)
 ui/         topology, controls, layerstack, fieldtree, hexview, explain, i18n, store, app,

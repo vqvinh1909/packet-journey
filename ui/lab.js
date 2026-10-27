@@ -11,18 +11,22 @@ import { SANDBOX_LAB, freePorts, connect, disconnect } from '../lab/sandbox.js';
 import { openWorkspace } from './workspace.js';
 import { GUI_VENDORS } from '../lab/guifw.js';
 import { renderGuiFw } from './guifw.js';
-import { load, save } from './store.js';
+import { load, save, remove } from './store.js';
+import { isBreakId, breakLab, breakId, randomSeed, addBreakResult, breakScore } from '../lab/breaker.js';
+import { openBreakDialog } from './breakui.js';
 import { lessonHref } from './i18n.js';
-import { SVG, el, esc, isHost, drawGlyph, adminUp, classifyLine, stpBlocked } from './topo.js';
+import { SVG, el, esc, isHost, drawGlyph, adminUp, classifyLine, stpBlocked, linkEnd } from './topo.js';
 
 const live = new Map(); // labId -> phiên đang làm (giữ nguyên khi đóng/mở lại modal)
 const MAX_LINES = 800;
 const SBX = SANDBOX_LAB.id;
+/** Lab theo id — kể cả đề "🎲 Phá mạng" (id "RB:<lab>:<số lỗi>:<seed>", dựng lại tất định). */
+const anyLab = (id) => (isBreakId(id) ? breakLab(id) : getLab(id));
 const IOS_MODES_OK = ['user', 'priv'];
 
 export function openLab(onRun) {
   document.querySelector('.modal-backdrop')?.remove();
-  let lab = getLab(load('lab-cur', 'L01')) || LABS[0];
+  let lab = anyLab(load('lab-cur', 'L01')) || LABS[0];
   let s = null;
 
   const back = document.createElement('div');
@@ -31,7 +35,7 @@ export function openLab(onRun) {
   modal.className = 'modal lab-modal';
   back.appendChild(modal);
   modal.innerHTML =
-    `<div class="modal-h"><span>🧪 Lab thực hành CLI — Cisco IOS <span class="lab-count" id="lab-count"></span></span><span class="lab-hbtns"><button class="lab-sbx-btn" id="lab-sbx-open" title="Tự thêm thiết bị, nối dây, cấu hình tự do">🧱 Tự dựng mạng riêng</button><button class="modal-x" title="Đóng (lab vẫn được giữ nguyên)">✕</button></span></div>` +
+    `<div class="modal-h"><span>🧪 Lab thực hành CLI — Cisco IOS <span class="lab-count" id="lab-count"></span></span><span class="lab-hbtns"><button class="lab-sbx-btn" id="lab-brk-open" title="Lab xử lý sự cố vô hạn: gài lỗi ngẫu nhiên vào mạng đang chạy tốt">🎲 Phá mạng ngẫu nhiên</button><button class="lab-sbx-btn" id="lab-sbx-open" title="Tự thêm thiết bị, nối dây, cấu hình tự do">🧱 Tự dựng mạng riêng</button><button class="modal-x" title="Đóng (lab vẫn được giữ nguyên)">✕</button></span></div>` +
     `<div class="lab-body">` +
     `<aside class="lab-list" id="lab-list"><div class="lab-find"><input type="search" id="lab-q" placeholder="🔎 Tìm lab: ospf, nat, vlan, X0…" aria-label="Tìm lab">` +
     `<div class="lab-filt" id="lab-filt"><button data-f="all">Tất cả</button><button data-f="todo">Chưa xong</button><button data-f="done">Đã xong</button></div></div><div id="lab-items"></div></aside>` +
@@ -56,6 +60,17 @@ export function openLab(onRun) {
   // Tự dựng mạng: workspace toàn màn hình đè lên modal lab; "▶ Xem gói tin" trong đó đóng cả hai
   const openWs = () => openWorkspace({ onRun: (sim, label) => { back.remove(); onRun(sim, label); } });
   $('lab-sbx-open').onclick = openWs;
+  const openBreak = (o = {}) => openBreakDialog(modal, { labId: lab.breakInfo?.src ?? (load('labs-done', {})[lab.id] ? lab.id : ''), n: lab.breakInfo?.n, ...o, onStart: startBreak });
+  $('lab-brk-open').onclick = () => openBreak();
+  /** Bắt đầu một đề phá mạng: dọn nhật ký đề cũ, bấm giờ lại từ đầu. */
+  function startBreak(id) {
+    const old = load('break-cur', null);
+    if (old && old.id !== id) remove('lablog:' + old.id);
+    live.delete(id);
+    remove('lablog:' + id);
+    save('break-cur', { id, t0: Date.now(), hints: 0, revealed: false, done: false });
+    selectLab(id);
+  }
   $('lab-q').oninput = (e) => { query = e.target.value; renderList(); };
   $('lab-filt').onclick = (e) => { const f = e.target.dataset?.f; if (!f) return; filt = f; save('lab-filter', f); renderList(); };
 
@@ -93,7 +108,7 @@ export function openLab(onRun) {
 
   function selectLab(id) {
     if (id === SBX) { $('lab-select').value = lab.id; openWs(); return; }
-    lab = getLab(id) || LABS[0];
+    lab = anyLab(id) || LABS[0];
     save('lab-cur', lab.id);
     s = session(lab);
     renderList();
@@ -111,6 +126,14 @@ export function openLab(onRun) {
     const cli = createCli(net);
     const first = solutionOf(l).find(([d]) => net.devices[d]);
     x = { lab: l, net, cli, dev: first?.[0] || Object.keys(net.devices)[0] || null, term: {}, hist: {}, hpos: -1, log: [], hintN: 0, showSol: false, guideOpen: false, results: [], password: false, answers: load('labans:' + l.id, {}), tool: null, pick: [], drag: null, stepGain: {}, gainMsg: null, exam: null, examRes: null }; // hist = lịch sử lệnh ↑/↓
+    if (l.breakInfo) {
+      // đề phá mạng: thời gian / số gợi ý / đã xem đáp án giữ qua lần đóng-mở (không "reset" để né tính điểm)
+      const cur = load('break-cur', null);
+      x.brk = cur?.id === l.id ? cur : { id: l.id, t0: Date.now(), hints: 0, revealed: false, done: false };
+      x.hintN = x.brk.hints;
+      x.showSol = x.brk.revealed;
+      save('break-cur', x.brk);
+    }
     const old = load('lablog:' + l.id, null);
     if (Array.isArray(old) && old.length) {
       for (const [dev, cmd] of old) {
@@ -145,7 +168,7 @@ export function openLab(onRun) {
     const best = load('labexam-best', {})[lab.id];
     const meta = [kind, lab.lesson ? esc(lab.lesson) : '', `Độ khó ${'●'.repeat(lab.level)}${'○'.repeat(3 - lab.level)}`, lab.lessonPath ? `<a href="${lessonHref(lab.lessonPath)}" target="_blank" rel="noopener">📖 Đọc bài trong giáo trình</a>` : '', best ? `<span class="lab-best${best.score >= 800 ? ' pass' : ''}">🏅 Thi thử tốt nhất: ${best.score}/1000 (${fmtTime(best.secs)})</span>` : ''].filter(Boolean).join(' · ');
     $('lab-head').innerHTML =
-      `<div class="lab-title"><span class="lab-badge">${lab.id}</span> ${esc(lab.title)}</div>` +
+      `<div class="lab-title"><span class="lab-badge">${lab.breakInfo ? '🎲' : lab.id}</span> ${esc(lab.title)}</div>` +
       `<div class="lab-meta">${meta}</div>` +
       `<div class="lab-story${lab.kind === 'ticket' ? ' ticket' : ''}">${esc(lab.story)}</div>`;
   }
@@ -224,10 +247,12 @@ export function openLab(onRun) {
       const off = (i - (pairN[k] - 1) / 2) * 16;
       const dx = B.x - A.x, dy = B.y - A.y, len = Math.hypot(dx, dy) || 1;
       const ox = (-dy / len) * off, oy = (dx / len) * off;
+      // đám mây "Internet": đầu dây cắm vào mép đám mây thay vì tâm
+      const PA = linkEnd(A, B.x, B.y), PB = linkEnd(B, A.x, A.y), ex = PB.x - PA.x, ey = PB.y - PA.y;
       const upA = N.lineUp(net, l.a, l.ap), upB = N.lineUp(net, l.b, l.bp);
       const adminDown = !adminUp(net, l.a, l.ap) || !adminUp(net, l.b, l.bp);
       const cls = upA && upB ? 'up' : adminDown ? 'admin' : 'down';
-      const geo = { x1: A.x + ox, y1: A.y + oy, x2: B.x + ox, y2: B.y + oy };
+      const geo = { x1: PA.x + ox, y1: PA.y + oy, x2: PB.x + ox, y2: PB.y + oy };
       layerLinks.appendChild(el('line', { ...geo, class: 'lab-link ' + cls }));
       if (s.tool === 'cut') {
         const hit = el('line', { ...geo, class: 'lab-link-hit' });
@@ -238,7 +263,7 @@ export function openLab(onRun) {
         layerLinks.appendChild(hit);
       }
       for (const [D, port, t] of [[A, l.ap, 0.24], [B, l.bp, 0.76]]) {
-        const px = A.x + dx * t + ox, py = A.y + dy * t + oy;
+        const px = PA.x + ex * t + ox, py = PA.y + ey * t + oy;
         const bv = blk.get(D.id + '|' + port);
         const label = (isHost(D) ? 'Fa0' : N.shortIf(port)) + (bv ? ' ✕' : '');
         const w = label.length * 6.6 + 8;
@@ -260,7 +285,7 @@ export function openLab(onRun) {
       g.appendChild(nm);
       if (isHost(d)) {
         const ip = el('text', { x: d.x, y: d.y + 58, 'text-anchor': 'middle', class: 'lab-ip' });
-        ip.textContent = d.ip ? `${d.ip}/${d.prefix}` : d.dhcp ? 'DHCP (chưa có IP)' : '(chưa có IP)';
+        ip.textContent = d.ip ? `${d.ip}/${d.prefix}` : d.ip6 ? `${d.ip6}/${d.prefix6}` : d.dhcp ? 'DHCP (chưa có IP)' : '(chưa có IP)';
         g.appendChild(ip);
       }
       g.onclick = () => nodeClicked(d.id);
@@ -476,11 +501,12 @@ export function openLab(onRun) {
     const ok = res.filter(Boolean).length;
     const all = ok === res.length;
     const done = load('labs-done', {});
-    if (all && !done[lab.id]) { done[lab.id] = true; save('labs-done', done); renderList(); }
+    if (all && !lab.breakInfo && !done[lab.id]) { done[lab.id] = true; save('labs-done', done); renderList(); }
+    if (all && s.brk && !s.brk.done) finishBreak();
     const pct = Math.round((ok / res.length) * 100);
-    let html = examResHtml() + `<div class="lab-side-h">Nhiệm vụ <span class="lab-score${all ? ' all' : ''}">${ok}/${res.length}</span></div>` +
+    let html = examResHtml() + breakHead() + `<div class="lab-side-h">Nhiệm vụ <span class="lab-score${all ? ' all' : ''}">${ok}/${res.length}</span></div>` +
       `<div class="lab-bar"><div style="width:${pct}%"></div></div>`;
-    if (all) html += `<div class="lab-win">🎉 Hoàn thành ${lab.id}! Mọi "Kết quả kiểm tra" đều đạt.</div>`;
+    if (all) html += s.brk ? breakWin() : `<div class="lab-win">🎉 Hoàn thành ${lab.id}! Mọi "Kết quả kiểm tra" đều đạt.</div>`;
     if (s.gainMsg) {
       const g = s.gainMsg;
       html += `<div class="lab-gain${g.gained.length ? '' : ' none'}">${g.gained.length ? `✓ ${esc(g.title)} vừa làm đạt: ${g.gained.map((i) => `<b>#${i + 1}</b> ${esc(lab.tasks[i].text)}`).join(' · ')}` : `${esc(g.title)} chưa làm đạt nhiệm vụ mới — thường là bước chuẩn bị cho bước sau.`}</div>`;
@@ -488,7 +514,7 @@ export function openLab(onRun) {
     html += `<ol class="lab-tasks">${lab.tasks.map((t, i) => taskHtml(t, i, res[i], fresh[i])).join('')}</ol>`;
     html += `<label class="lab-explain"><input type="checkbox" id="lab-exp"${explainOn() ? ' checked' : ''}> 🔍 Giải thích lý do khi gói bị rớt${lab.kind === 'ticket' ? ' (ticket: mặc định tắt — tự chẩn đoán bằng show)' : ''}</label>`;
     const hasSol = solutionOf(lab).length > 0;
-    html += `<div class="lab-acts"><button id="lab-hint">💡 Gợi ý (${s.hintN}/${lab.hints.length})</button>${hasSol ? '<button id="lab-sol">🔑 Lời giải</button>' : ''}<button id="lab-reset">↺ Làm lại</button><button id="lab-exam" title="Làm lại từ đầu, có giờ, không gợi ý — chấm thang 1000">⏱ Thi thử</button></div>`;
+    html += `<div class="lab-acts"><button id="lab-hint">💡 Gợi ý (${s.hintN}/${lab.hints.length})</button>${hasSol ? `<button id="lab-sol">🔑 ${s.brk ? 'Xem đáp án' : 'Lời giải'}</button>` : ''}<button id="lab-reset">↺ Làm lại</button>${s.brk ? '<button id="lab-brk-new" title="Đề mới, cùng lab, cùng số lỗi">🎲 Phá tiếp</button>' : '<button id="lab-exam" title="Làm lại từ đầu, có giờ, không gợi ý — chấm thang 1000">⏱ Thi thử</button>'}</div>`;
     if (s.hintN) html += `<ul class="lab-hints">${lab.hints.slice(0, s.hintN).map((h) => `<li>${esc(h)}</li>`).join('')}</ul>`;
     if (lab.guide?.length) {
       const groups = guideGroups();
@@ -500,7 +526,11 @@ export function openLab(onRun) {
           (s.stepGain[gi] ? `<div class="lab-sgain">${s.stepGain[gi].length ? '✓ Bước này làm đạt nhiệm vụ ' + s.stepGain[gi].map((i) => '#' + (i + 1)).join(', ') : '• Bước chuẩn bị (chưa đạt nhiệm vụ mới)'}</div>` : '') + `</div>`).join('') +
         `</details>`;
     }
-    if (s.showSol) {
+    if (s.showSol && s.brk) {
+      html += `<div class="lab-sol"><div class="lab-sol-h">Đáp án — ${lab.breakInfo.faults.length} lỗi đã gài</div>` +
+        lab.breakInfo.faults.map((f, i) => `<div class="lab-sol-dev">${i + 1}. ${esc(f.title)}</div><div class="lab-brk-det">${esc(f.detail)}</div><pre>${esc(f.fix.join('\n'))}</pre>`).join('') +
+        `<button id="lab-runsol" class="btn-accent">▶ Gõ lệnh sửa vào console</button></div>`;
+    } else if (s.showSol) {
       const qs = lab.tasks.map((t, i) => [t, i]).filter(([t]) => t.quiz);
       html += `<div class="lab-sol"><div class="lab-sol-h">Lời giải mẫu (một cách làm đúng)</div>` +
         solutionOf(lab).map(([dev, cmds]) => `<div class="lab-sol-dev">${esc(devName(dev))}</div><pre>${esc(dev === '@link' ? cmds.map(linkText).join('\n') : cmds.join('\n'))}</pre>`).join('') +
@@ -511,7 +541,7 @@ export function openLab(onRun) {
     $('lab-side').innerHTML = html;
     $('lab-side').scrollTop = scroll;
     $('lab-exp').onchange = (e) => save(explainKey(), e.target.checked);
-    $('lab-hint').onclick = () => { if (s.hintN < lab.hints.length) s.hintN += 1; renderSide(); };
+    $('lab-hint').onclick = () => { if (s.hintN < lab.hints.length) s.hintN += 1; if (s.brk && !s.brk.done) { s.brk.hints = s.hintN; save('break-cur', s.brk); } renderSide(); };
     $('lab-side').querySelectorAll('.lab-qopt').forEach((b) => (b.onclick = () => {
       s.answers[+b.dataset.q] = +b.dataset.o;
       save('labans:' + lab.id, s.answers);
@@ -527,12 +557,18 @@ export function openLab(onRun) {
     }
     const sol = $('lab-sol');
     if (sol) sol.onclick = () => {
-      if (!s.showSol && lab.kind !== 'config' && !confirm('Xem lời giải ticket/dự án ngay? Thử tự chẩn đoán bằng lệnh show trước sẽ học được nhiều hơn.')) return;
+      if (!s.showSol && lab.kind !== 'config' && !confirm(s.brk ? 'Xem đáp án? Lượt này sẽ không được tính điểm.' : 'Xem lời giải ticket/dự án ngay? Thử tự chẩn đoán bằng lệnh show trước sẽ học được nhiều hơn.')) return;
       s.showSol = !s.showSol;
+      if (s.brk && s.showSol && !s.brk.done) { s.brk.revealed = true; save('break-cur', s.brk); }
       renderSide();
     };
+    const bn = $('lab-brk-new');
+    if (bn) bn.onclick = () => startBreak(breakId(lab.breakInfo.src, lab.breakInfo.n, randomSeed()));
+    const bd = $('lab-brk-other');
+    if (bd) bd.onclick = () => openBreak({ labId: '' });
     const rst = $('lab-reset');
-    if (rst) rst.onclick = () => {
+    if (rst && s.brk) rst.onclick = () => { if (confirm('Làm lại đề này từ đầu (cùng lỗi)? Cấu hình đã gõ bị xoá, đồng hồ chạy lại.')) startBreak(lab.id); };
+    else if (rst) rst.onclick = () => {
       if (!confirm(`Làm lại ${lab.id} từ đầu? Mọi cấu hình bạn đã gõ và đáp án trắc nghiệm trong lab này sẽ bị xoá.`)) return;
       live.delete(lab.id);
       save('lablog:' + lab.id, []);
@@ -546,6 +582,26 @@ export function openLab(onRun) {
     if (ex) ex.onclick = startExam;
     const exx = $('lab-exres-x');
     if (exx) exx.onclick = () => { s.examRes = null; renderSide(); };
+  }
+
+  // ---------------------------------------------------------------- đề "🎲 Phá mạng ngẫu nhiên"
+  const breakSecs = () => Math.round(((s.brk.done ? s.brk.end : Date.now()) - s.brk.t0) / 1000);
+  function breakHead() {
+    if (!s.brk) return '';
+    const b = lab.breakInfo;
+    return `<div class="lab-brk"><span>🎲 Lab gốc <b>${esc(b.src)}</b> · ${b.n} lỗi · seed ${b.seed}</span><span class="lab-timer" id="lab-brk-timer">${fmtTime(breakSecs())}</span></div>`;
+  }
+  function finishBreak() {
+    const b = lab.breakInfo;
+    Object.assign(s.brk, { done: true, end: Date.now(), hints: s.hintN });
+    save('break-cur', s.brk);
+    const rec = { id: lab.id, src: b.src, n: b.n, seed: b.seed, secs: breakSecs(), hints: s.brk.hints, revealed: !!s.brk.revealed, at: Date.now() };
+    save('break-history', addBreakResult(load('break-history', []), rec));
+  }
+  function breakWin() {
+    const h = { n: lab.breakInfo.n, secs: breakSecs(), hints: s.brk.hints, revealed: s.brk.revealed };
+    return `<div class="lab-win">🎉 Đã sửa xong ${h.n} lỗi trong ${fmtTime(h.secs)} · ${h.hints} gợi ý${h.revealed ? ' · đã xem đáp án (không tính điểm)' : ` · điểm ${breakScore(h)}/1000`}` +
+      `<div class="lab-brk-acts"><button id="lab-brk-other">🎲 Đề khác…</button></div></div>`;
   }
 
   // ---------------------------------------------------------------- chế độ thi thử
@@ -601,6 +657,7 @@ export function openLab(onRun) {
   // đồng hồ thi: cập nhật mỗi giây, hết giờ thì tự nộp; dừng khi đóng modal
   const timer = setInterval(() => {
     if (!document.body.contains(back)) { clearInterval(timer); return; }
+    if (s?.brk && !s.brk.done) { const bt = $('lab-brk-timer'); if (bt) bt.textContent = fmtTime(breakSecs()); }
     if (!s?.exam) return;
     const left = Math.round((s.exam.end - Date.now()) / 1000);
     if (left <= 0) { submitExam(true); return; }

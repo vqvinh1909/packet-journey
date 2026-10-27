@@ -20,6 +20,7 @@ export const SANDBOX_KINDS = {
   sophos: { vendor: 'sophos', label: 'Sophos Firewall', prefix: 'XG', ports: { def: 4, min: 2, max: 8, unit: 'cổng (Port1…)', names: (n) => range(n, (i) => `port${i + 1}`) }, make: (id, name, x, y, ps) => N.firewall(id, name, x, y, ps, 'sophos') },
   checkpoint: { vendor: 'checkpoint', label: 'Check Point Gateway', prefix: 'CP', ports: { def: 4, min: 2, max: 8, unit: 'cổng (eth1…)', names: (n) => range(n, (i) => `eth${i + 1}`) }, make: (id, name, x, y, ps) => N.firewall(id, name, x, y, ps, 'checkpoint') },
   pfsense: { vendor: 'pfsense', label: 'pfSense', prefix: 'PFS', ports: { def: 4, min: 2, max: 8, unit: 'cổng (em0…)', names: (n) => range(n, (i) => `em${i}`) }, make: (id, name, x, y, ps) => N.firewall(id, name, x, y, ps, 'pfsense') },
+  cloud: { vendor: 'network', label: 'Cloud / Internet', prefix: 'INTERNET', ports: null, make: (id, name, x, y) => N.server(id, name, x, y, { cloud: true }) },
   pc: { vendor: 'host', label: 'PC', prefix: 'PC', ports: null, make: (id, name, x, y) => N.pc(id, name, x, y) },
   server: { vendor: 'host', label: 'Server', prefix: 'SRV', ports: null, make: (id, name, x, y) => N.server(id, name, x, y) },
 };
@@ -31,6 +32,7 @@ export const SANDBOX_VENDORS = [
   { id: 'sophos', name: 'Sophos', kinds: ['sophos'] },
   { id: 'checkpoint', name: 'Check Point', kinds: ['checkpoint'] },
   { id: 'pfsense', name: 'pfSense', kinds: ['pfsense'] },
+  { id: 'network', name: 'Network', kinds: ['cloud'] },
   { id: 'host', name: 'Host', kinds: ['pc', 'server'] },
 ];
 const TYPES = ['pc', 'server', 'switch', 'router'];
@@ -53,6 +55,7 @@ export function portCountOf(d) { const k = kindOf(d), n = physPorts(d).length; r
 export function kindOf(d) {
   if (d.kind && SANDBOX_KINDS[d.kind]) return d.kind;
   if (d.type === 'switch') return d.model === '3560' ? 'sw3560' : 'sw2960';
+  if (N.isCloud(d)) return 'cloud';
   return SANDBOX_KINDS[d.os] ? d.os : d.type;
 }
 

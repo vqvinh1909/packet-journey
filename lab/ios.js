@@ -663,6 +663,7 @@ export function createCli(net) {
     c('no switchport port-security', (x) => ports(x, (p) => { p.ps = null; })),
     c('switchport port-security maximum <num>', (x) => psSet(x, (ps) => { ps.max = x.a[0]; }, true)),
     c('switchport port-security mac-address sticky', (x) => psSet(x, (ps) => { ps.sticky = true; }, true)),
+    c('switchport port-security mac-address <word>', (x) => { const m = N.parseCiscoMac(x.a[0]); if (!m) return R(['% Invalid MAC address (dạng aaaa.bbbb.cccc)']); return psSet(x, (ps) => { if (!ps.macs.includes(m)) ps.macs.push(m); }, true); }),
     c('switchport port-security violation {protect|restrict|shutdown}', (x) => psSet(x, (ps) => { ps.violation = x.a[0]; }, true)),
     c('spanning-tree portfast', (x) => ports(x, (p) => { p.portfast = true; }, ['%Warning: portfast should only be enabled on ports connected to a single', ' host. Connecting hubs, concentrators, switches, bridges, etc... to this', ' interface  when portfast is enabled, can cause temporary bridging loops.', ' Use with CAUTION'])),
     c('no spanning-tree portfast', (x) => ports(x, (p) => { p.portfast = false; })),
@@ -2913,6 +2914,7 @@ export function createCli(net) {
       if (p.ps.enabled) L.push(' switchport port-security');
       if (p.ps.max !== 1) L.push(` switchport port-security maximum ${p.ps.max}`);
       if (p.ps.sticky) { L.push(' switchport port-security mac-address sticky'); for (const m of p.ps.macs) L.push(` switchport port-security mac-address sticky ${N.ciscoMac(m)}`); }
+      else for (const m of p.ps.macs) L.push(` switchport port-security mac-address ${N.ciscoMac(m)}`);
       if (p.ps.violation !== 'shutdown') L.push(` switchport port-security violation ${p.ps.violation}`);
     }
     if (p.trust) L.push(' ip dhcp snooping trust');

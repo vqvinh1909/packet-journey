@@ -130,7 +130,7 @@ test('sandbox: thêm firewall các hãng (CLI + web), nhân bản đúng loại,
 
 test('workspace: mẫu thiết bị theo hãng, Add node (số lượng, tiền tố, số cổng, tên cổng theo mẫu)', () => {
   for (const v of S.SANDBOX_VENDORS) for (const k of v.kinds) assert.equal(S.SANDBOX_KINDS[k].vendor, v.id, k);
-  assert.deepEqual(S.SANDBOX_VENDORS.map((v) => v.name), ['Cisco', 'Fortinet', 'Palo Alto', 'Sophos', 'Check Point', 'pfSense', 'Host']);
+  assert.deepEqual(S.SANDBOX_VENDORS.map((v) => v.name), ['Cisco', 'Fortinet', 'Palo Alto', 'Sophos', 'Check Point', 'pfSense', 'Network', 'Host']);
   assert.deepEqual(S.portNames('router', 2), ['g0/0', 'g0/1', 's0/0/0', 's0/0/1']);
   assert.deepEqual(S.portNames('fortios', 3), ['port1', 'port2', 'port3']);
   assert.deepEqual(S.portNames('panos', 2), ['e1/1', 'e1/2']);
@@ -203,4 +203,36 @@ test('workspace: nhập JSON cũ (chưa có "kind"/"off") — thiết bị coi n
   // trạng thái tắt được lưu qua xuất / nhập
   S.stopDevice(back, 'r1');
   assert.ok(S.isOff(S.importSandbox(JSON.parse(JSON.stringify(S.exportSandbox(back)))).devices.r1));
+});
+
+test('Cloud / Internet: vẽ đám mây nhưng vẫn là server; tự nhận theo tên; JSON giữ cờ cloud (JSON cũ nhận theo tên)', () => {
+  assert.equal(N.server('a', 'INTERNET 8.8.8.8', 0, 0).cloud, true);
+  assert.equal(N.server('b', 'SRV-WEB', 0, 0).cloud, false);
+  assert.equal(N.server('c', 'TFTP', 0, 0, { cloud: true }).cloud, true, 'cờ cloud đặt tay');
+  assert.equal(N.isCloud(N.server('d', 'Internet-GW', 0, 0, { cloud: false })), false, 'cờ false thắng tên');
+  assert.equal(N.isCloud(N.pc('e', 'INTERNET-PC', 0, 0)), false, 'chỉ server mới thành đám mây');
+  const net = S.emptySandbox();
+  const [cl] = S.addNodes(net, 'cloud', {}, 100, 100).ids;
+  const [sw] = S.addNodes(net, 'sw2960', {}, 300, 100).ids;
+  const [pc] = S.addNodes(net, 'pc', {}, 500, 100).ids;
+  const d = net.devices[cl];
+  assert.ok(d.type === 'server' && d.cloud && d.name === 'INTERNET1' && S.kindOf(d) === 'cloud');
+  assert.deepEqual(S.physPorts(d), ['fa0'], 'đám mây có sẵn 1 cổng');
+  assert.equal(N.topologyOf(net).devices.find((x) => x.id === cl).type, 'cloud', 'sơ đồ "Xem gói tin" vẽ đám mây');
+  S.connect(net, cl, 'fa0', sw, 'fa0/1');
+  S.connect(net, pc, 'fa0', sw, 'fa0/2');
+  S.powerAll(net, true);
+  const cli = createCli(net);
+  runScript(cli, cl, ['ipconfig 8.8.8.8 255.255.255.0 8.8.8.1']);
+  runScript(cli, pc, ['ipconfig 8.8.8.20 255.255.255.0 8.8.8.1']);
+  assert.ok(N.sendPacket(net, { src: pc, dst: '8.8.8.8' }).ok, 'đặt IP/gateway và ping như server');
+  assert.ok(N.sendPacket(net, { src: pc, dst: '8.8.8.8', proto: 'tcp', dport: 80 }).ok, 'vẫn mở dịch vụ web như server');
+  const back = S.importSandbox(JSON.parse(JSON.stringify(S.exportSandbox(net))));
+  assert.equal(back.devices[cl].cloud, true, 'JSON giữ cờ cloud');
+  assert.equal(back.devices[pc].cloud, undefined);
+  const old = JSON.parse(JSON.stringify(S.exportSandbox(net)));
+  delete old.net.devices[cl].cloud;
+  assert.ok(N.isCloud(S.importSandbox(old).devices[cl]), 'JSON cũ (chưa có cờ): tên chứa INTERNET → đám mây');
+  S.wipeDevice(net, cl);
+  assert.ok(net.devices[cl].cloud && !net.devices[cl].ip, 'Wipe giữ hình đám mây');
 });
