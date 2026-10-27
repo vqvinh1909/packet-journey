@@ -1,9 +1,11 @@
-// tests/sandbox.test.js — chế độ "Tự dựng mạng riêng": thêm/xoá/nối dây, xuất-nhập JSON, nhiệm vụ hướng dẫn.
+// tests/sandbox.test.js — chế độ "Tự dựng mạng riêng": thêm/xoá/nối dây, xuất-nhập JSON, nhiệm vụ hướng dẫn,
+// workspace kiểu EVE-NG (mẫu theo hãng, Add node, Start/Stop/Wipe, JSON cũ).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createCli, runScript } from '../lab/ios.js';
 import { checkLab } from '../lab/labs.js';
 import * as S from '../lab/sandbox.js';
+import * as N from '../lab/net.js';
 
 const cfg = (...l) => ['enable', 'configure terminal', ...l, 'end'];
 
@@ -124,4 +126,81 @@ test('sandbox: thêm firewall các hãng (CLI + web), nhân bản đúng loại,
   assert.equal(net.devices[dup].os, 'pfsense');
   assert.equal(net.devices[dup].gfw, undefined, 'bản sao firewall web không chép cấu hình (tránh trùng IP)');
   assert.equal(net.devices[S.duplicateDevice(net, 'asa1')].name, 'ASA2');
+});
+
+test('workspace: mẫu thiết bị theo hãng, Add node (số lượng, tiền tố, số cổng, tên cổng theo mẫu)', () => {
+  for (const v of S.SANDBOX_VENDORS) for (const k of v.kinds) assert.equal(S.SANDBOX_KINDS[k].vendor, v.id, k);
+  assert.deepEqual(S.SANDBOX_VENDORS.map((v) => v.name), ['Cisco', 'Fortinet', 'Palo Alto', 'Sophos', 'Check Point', 'pfSense', 'Host']);
+  assert.deepEqual(S.portNames('router', 2), ['g0/0', 'g0/1', 's0/0/0', 's0/0/1']);
+  assert.deepEqual(S.portNames('fortios', 3), ['port1', 'port2', 'port3']);
+  assert.deepEqual(S.portNames('panos', 2), ['e1/1', 'e1/2']);
+  assert.deepEqual(S.portNames('pfsense', 2), ['em0', 'em1']);
+  assert.deepEqual(S.portNames('checkpoint', 2), ['eth1', 'eth2']);
+  assert.equal(S.portNames('sw2960', 8).length, 10, '8 FastEthernet + 2 uplink');
+  assert.equal(S.portCount('sw2960', 13), 24, 'switch chỉ nhận 8/16/24/48');
+  assert.equal(S.portCount('asa', 99), 8, 'kẹp trong min–max');
+  const net = S.emptySandbox();
+  const r = S.addNodes(net, 'router', { count: 3, prefix: 'HN-R', ports: 2 }, 100, 100);
+  assert.deepEqual(r.ids, ['hn-r1', 'hn-r2', 'hn-r3']);
+  assert.deepEqual(r.ids.map((id) => net.devices[id].name), ['HN-R1', 'HN-R2', 'HN-R3']);
+  assert.deepEqual(Object.keys(net.devices['hn-r1'].ifaces), ['g0/0', 'g0/1', 's0/0/0', 's0/0/1']);
+  assert.ok(r.ids.every((id) => S.isOff(net.devices[id]) && net.devices[id].kind === 'router'), 'node mới thêm ở trạng thái TẮT');
+  assert.equal(S.addNodes(net, 'router', { count: 1, prefix: 'HN-R' }).ids[0], 'hn-r4', 'không trùng tên');
+  assert.match(S.addNodes(net, 'pc', { count: 0 }).error, /1 đến 20/);
+  assert.match(S.addNodes(net, 'pc', { prefix: '1abc' }).error, /Tiền tố/);
+  assert.match(S.addNodes(net, 'nope').error, /mẫu/);
+  const fg = S.addNodes(net, 'fortios', { ports: 6 }).ids[0];
+  assert.deepEqual(Object.keys(net.devices[fg].ifaces), ['port1', 'port2', 'port3', 'port4', 'port5', 'port6']);
+  const dup = S.duplicateDevice(net, 'hn-r1');
+  assert.equal(net.devices[dup].kind, 'router');
+  assert.deepEqual(Object.keys(net.devices[dup].ifaces), ['g0/0', 'g0/1', 's0/0/0', 's0/0/1'], 'nhân bản giữ số cổng');
+});
+
+test('workspace: Start / Stop / Wipe — thiết bị tắt thì link down, không gõ được lệnh; bật lại vẫn giữ cấu hình', () => {
+  const net = S.emptySandbox();
+  const [r1] = S.addNodes(net, 'router', {}).ids;
+  const [pc] = S.addNodes(net, 'pc', {}).ids;
+  S.connect(net, pc, 'fa0', r1, 'g0/0');
+  const cli = createCli(net);
+  assert.match(cli.exec(r1, 'enable').out.join('\n'), /TẮT/, 'thiết bị tắt không nhận lệnh');
+  assert.equal(cli.complete(r1, 'conf'), null);
+  assert.ok(!N.lineUp(net, pc, 'fa0'), 'đầu kia tắt → link down');
+  const boot = S.startDevice(net, r1);
+  assert.ok(boot.length >= 3 && boot.some((l) => /RESTART|Press RETURN/.test(l)), 'có log khởi động');
+  assert.ok(!N.lineUp(net, r1, 'g0/0'), 'PC vẫn tắt → link vẫn down');
+  assert.deepEqual(S.powerAll(net, true), [pc], 'Start all chỉ bật máy đang tắt');
+  runScript(cli, r1, cfg('interface g0/0', 'ip address 10.0.0.1 255.255.255.0', 'no shutdown'));
+  runScript(cli, pc, ['ipconfig 10.0.0.10 255.255.255.0 10.0.0.1']);
+  assert.ok(N.lineUp(net, pc, 'fa0') && N.sendPacket(net, { src: pc, dst: '10.0.0.1' }).ok);
+  S.stopDevice(net, r1);
+  assert.ok(!N.lineUp(net, pc, 'fa0'), 'Stop → link xuống');
+  assert.ok(!N.sendPacket(net, { src: pc, dst: '10.0.0.1' }).ok, 'Stop → mất kết nối');
+  S.startDevice(net, r1);
+  assert.ok(N.sendPacket(net, { src: pc, dst: '10.0.0.1' }).ok, 'Start lại: cấu hình đang chạy được giữ');
+  assert.deepEqual(S.powerAll(net, false).sort(), [pc, r1].sort(), 'Stop all');
+  assert.ok(S.wipeDevice(net, r1));
+  const w = net.devices[r1];
+  assert.ok(S.isOff(w) && w.name === 'R1' && w.ifaces['g0/0'].ip === null, 'Wipe: cấu hình trống, giữ tên, để tắt');
+  assert.ok(N.linkAt(net, r1, 'g0/0'), 'Wipe giữ dây');
+  S.powerAll(net, true);
+  assert.ok(!N.sendPacket(net, { src: pc, dst: '10.0.0.1' }).ok, 'sau Wipe phải cấu hình lại');
+});
+
+test('workspace: nhập JSON cũ (chưa có "kind"/"off") — thiết bị coi như đang chạy, dùng được ngay', () => {
+  const net = S.emptySandbox();
+  S.addDevice(net, 'router', 100, 100);
+  S.addDevice(net, 'pc', 200, 100);
+  S.connect(net, 'pc1', 'fa0', 'r1', 'g0/0');
+  const old = JSON.parse(JSON.stringify(S.exportSandbox(net)));
+  for (const d of Object.values(old.net.devices)) { delete d.kind; delete d.off; }
+  const back = S.importSandbox(old);
+  assert.ok(Object.values(back.devices).every((d) => !S.isOff(d)));
+  assert.equal(S.kindOf(back.devices.r1), 'router');
+  const cli = createCli(back);
+  runScript(cli, 'r1', cfg('interface g0/0', 'ip address 10.0.0.1 255.255.255.0', 'no shutdown'));
+  runScript(cli, 'pc1', ['ipconfig 10.0.0.10 255.255.255.0 10.0.0.1']);
+  assert.ok(N.sendPacket(back, { src: 'pc1', dst: '10.0.0.1' }).ok);
+  // trạng thái tắt được lưu qua xuất / nhập
+  S.stopDevice(back, 'r1');
+  assert.ok(S.isOff(S.importSandbox(JSON.parse(JSON.stringify(S.exportSandbox(back)))).devices.r1));
 });

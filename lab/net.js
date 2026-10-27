@@ -249,7 +249,7 @@ export function errDisabled(net, d, port) {
 }
 function physAdminUp(net, devId, port) {
   const d = net.devices[devId];
-  if (!d) return false;
+  if (!d || d.off) return false; // thiết bị đang tắt (sandbox: Stop) → mọi cổng xuống
   if (d.type === 'pc' || d.type === 'server') return true;
   if (d.type === 'switch') { const p = d.ports[port]; return !!p && !p.shutdown && !errDisabled(net, d, port); }
   const f = d.ifaces[port];
@@ -350,7 +350,7 @@ export function portCarries(net, d, p, v) {
 /** Interface L3 (router: cổng/subif/loopback; switch: SVI) có up/up không. */
 export function ifUp(net, devId, ifn) {
   const d = net.devices[devId];
-  if (!d) return false;
+  if (!d || d.off) return false;
   if (d.type === 'pc' || d.type === 'server') return true;
   if (d.type === 'switch') {
     const s = d.svis[ifn];
@@ -448,7 +448,7 @@ export function flood(net, src, diag) {
     const it = q.shift();
     const d = net.devices[it.dev];
     if (it.k === 'arr') {
-      if (!physAdminUp(net, it.dev, it.port)) { note(`${d.name} ${longIf(it.port)} đang ${d.type === 'switch' && errDisabled(net, d, it.port) ? 'ERR-DISABLED' : 'shutdown'}`); continue; }
+      if (!physAdminUp(net, it.dev, it.port)) { note(d.off ? `${d.name} đang TẮT (Stop) — thiết bị chưa được Start nên mọi cổng down` : `${d.name} ${longIf(it.port)} đang ${d.type === 'switch' && errDisabled(net, d, it.port) ? 'ERR-DISABLED' : 'shutdown'}`); continue; }
       if (d.type === 'pc' || d.type === 'server') {
         if (it.tag == null) add(it.dev, 'fa0', it.hops);
         else note(`${d.name} nhận frame có tag VLAN ${it.tag} (máy trạm không hiểu 802.1Q) → bỏ`);

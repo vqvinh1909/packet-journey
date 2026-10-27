@@ -1,5 +1,18 @@
 # Ghi chú làm tiếp — Packet Journey
 
+## 🧱 Workspace tự dựng mạng kiểu EVE-NG (2026-10-27, yêu cầu từ phiên "SAP PROMPT App Hoc Mang")
+- `ui/workspace.js`: overlay `.ws` toàn màn hình đè lên modal Lab CLI (nút "🧱 Tự dựng mạng riêng" / mục SBX trong danh sách).
+  Trạng thái module-level `W` (net, cli, undo, term/hist/gui theo thiết bị, cửa sổ console, view, boot) giữ khi đóng/mở lại.
+  Canvas SVG `#ws-world` có transform translate/scale (`W.view`), giấy vẽ = `SANDBOX_VIEW` 2400×1600.
+- `lab/sandbox.js`: `SANDBOX_KINDS` = mẫu theo hãng (`vendor`, `prefix`, `ports {def,min,max|choices,names(n)}`, `make(id,name,x,y,cổng[])`),
+  `SANDBOX_VENDORS`, `addDevice(net,kind,x,y,{prefix,ports,off})`, `addNodes` (hộp thoại Add node), `freeSpotNear`,
+  `portNames/portCount/portCountOf/kindOf`, `startDevice` (trả log khởi động) / `stopDevice` (xoá bảng động, giữ cấu hình) /
+  `powerAll` / `wipeDevice` (giữ id/tên/vị trí/cổng → dây còn, để TẮT). File JSON cũ không có `off`/`kind` → đang chạy.
+- Engine: `d.off` → `physAdminUp`/`ifUp` false (link down); ios.js `exec` từ chối lệnh, `complete` null khi tắt.
+- `ui/topo.js`: `drawGlyph`, `stpBlocked`, `adminUp`, `classifyLine`, `el`, `esc` dùng chung lab.js + workspace.js.
+  ui/lab.js không còn code sandbox (lab thường giữ nguyên).
+- Test: tests/sandbox.test.js (+3 test workspace), tools/ui-smoke.cjs mục 4 + 6 viết lại cho workspace.
+
 ## 🛡️ ĐANG LÀM: Bảo mật & Firewall (đợt 4, 2026-10-27) — kế hoạch 6 giai đoạn user đã duyệt
 1. ✅ Lõi firewall stateful `lab/fw.js` (kind asa / zbf / policy; phiên stateful theo ctx; firewall xét ACL in SAU NAT;
    `firewall(id,name,x,y,ifs,os)` trong net.js; tests/fw.test.js).
@@ -20,7 +33,7 @@
      trong test), quiet-mode access-class; `aaa new-model` thay "login local"; `security passwords min-length`;
      `ip http server` mở cổng 80; `exec-timeout`, `ip ssh version` lưu và hiện trong running-config.
 6. ⏳ Kịch bản tấn công byte-thật (ARP spoofing, DHCP giả/starvation, VLAN hopping) trong scenarios/.
-- Tổng hiện tại: 101 lab, `node --test` 206/206, `node tools/ui-smoke.cjs` 33/33; sandbox thêm được 6 loại firewall.
+- Tổng hiện tại: 101 lab, `node --test` 212/212, `node tools/ui-smoke.cjs` 47/47; workspace tự dựng mạng kiểu EVE-NG.
 
 
 ## ✅ ĐÃ XONG Lab CLI đợt 3 (session 2026-10-27/28) — 7 cải tiến
