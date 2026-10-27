@@ -18,6 +18,8 @@ import { load, save } from './store.js';
 import { el, esc, isHost, drawGlyph, adminUp, classifyLine, stpBlocked, linkEnd } from './topo.js';
 import { clockStep, afterCommand, pullLogs as pullClockLogs, renderClockBar, TICK_MS } from './clock.js';
 import * as IO from '../lab/configio.js';
+import * as LIB from '../lab/labstore.js';
+import * as UNL from '../lab/unl.js';
 import * as C from '../lab/capture.js';
 import { flattenFields } from '../packet/serialize.js';
 import { renderFieldTree, highlightFieldRow, clearFieldHighlight } from './fieldtree.js';
@@ -33,7 +35,7 @@ let W = null; // trạng thái workspace — giữ nguyên khi đóng / mở l�
 function freshState() {
   let net;
   try { net = S.importSandbox(load('sandbox-net', null)); } catch { net = S.emptySandbox(); }
-  return { net, cli: createCli(net), undo: S.createHistory(), term: {}, hist: {}, gui: {}, wins: [], z: 20, view: load('sandbox-view', null), sel: null, tool: null, pick: [], boot: {}, side: false, hintN: 0, cap: C.createCapture(), capUi: {}, pal: typeof window === 'undefined' || window.innerWidth > 760 };
+  return { net, cli: createCli(net), undo: S.createHistory(), term: {}, hist: {}, gui: {}, wins: [], z: 20, view: load('sandbox-view', null), sel: null, tool: null, pick: [], boot: {}, side: false, hintN: 0, cap: C.createCapture(), capUi: {}, pal: typeof window === 'undefined' || window.innerWidth > 760, noPorts: load('sandbox-noports', false), selNote: null };
 }
 
 export function openWorkspace({ onRun }) {
@@ -51,16 +53,19 @@ export function openWorkspace({ onRun }) {
     `<button id="ws-start" class="ws-go" title="Bật mọi thiết bị đang tắt">▶ Start all</button><button id="ws-stop" class="ws-halt" title="Tắt mọi thiết bị">■ Stop all</button><span class="ws-sep"></span>` +
     `<button id="ws-undo" title="Hoàn tác (Ctrl+Z khi không gõ console)">↶</button><button id="ws-redo" title="Làm lại (Ctrl+Y)">↷</button>` +
     `<select id="ws-tpl" title="Nạp mạng mẫu (chỉ thiết bị + dây, bạn tự cấu hình)"><option value="">📐 Mạng mẫu…</option>${S.SANDBOX_TEMPLATES.map((t) => `<option value="${t.id}" title="${esc(t.desc)}">${esc(t.title)}</option>`).join('')}</select>` +
+    `<select id="ws-note" title="Thêm chú thích lên sơ đồ (hoặc chuột phải vào nền)"><option value="">✎ Chú thích…</option>${Object.entries(S.NOTE_TYPES).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join('')}</select>` +
     `<select id="ws-cfg" title="Lưu / nạp cả mạng (JSON) hoặc cấu hình dạng văn bản của mọi thiết bị"><option value="">📁 Lưu / Nạp…</option>` +
     `<optgroup label="Cả mạng (thiết bị + dây + cấu hình)"><option value="json-exp">⬇ Xuất mạng (.json)</option><option value="json-imp">⬆ Nhập mạng (.json, kể cả file cũ)…</option></optgroup>` +
-    `<optgroup label="Cấu hình dạng văn bản"><option value="exp">⬇ Xuất tất cả cấu hình (.txt)</option><option value="imp">⬆ Nạp cấu hình (dán / file)…</option><option value="save">💾 Đặt làm startup-config (mọi thiết bị)</option></optgroup></select>` +
+    `<optgroup label="Cấu hình dạng văn bản"><option value="exp">⬇ Xuất tất cả cấu hình (.txt)</option><option value="imp">⬆ Nạp cấu hình (dán / file)…</option><option value="save">💾 Đặt làm startup-config (mọi thiết bị)</option></optgroup>` +
+    `<optgroup label="EVE-NG"><option value="unl-exp">⬇ Xuất file .unl (EVE-NG)</option><option value="unl-imp">⬆ Nhập file .unl (EVE-NG)…</option></optgroup></select>` +
+    `<button id="ws-lib" title="Thư viện lab: lưu nhiều mạng có tên, xếp theo thư mục, mở nhanh lab gần đây">📚 Thư viện</button>` +
     `<button id="ws-clr" title="Bắt đầu lại từ mạng trống">🧹 Xoá hết</button>` +
     `<span class="ws-grow"></span><button id="ws-side-t" title="Nhiệm vụ gợi ý lộ trình"></button><button id="ws-close" title="Đóng workspace (mạng vẫn được lưu)">✕ Đóng</button>` +
-    `<input type="file" id="ws-file" accept=".json,application/json" hidden></div>` +
+    `<input type="file" id="ws-file" accept=".json,application/json" hidden><input type="file" id="ws-unl" accept=".unl,.xml" hidden></div>` +
     `<div class="ws-body"><aside class="ws-pal" id="ws-pal"></aside>` +
     `<div class="ws-stage" id="ws-stage"><svg class="ws-svg" id="ws-svg" role="img" aria-label="topology"><defs><pattern id="ws-grid" width="40" height="40" patternUnits="userSpaceOnUse"><path d="M40 0H0V40" class="ws-gridl"/></pattern></defs><g id="ws-world"></g></svg>` +
     `<div class="ws-empty" id="ws-empty">Kéo thiết bị từ bảng bên trái vào đây — hoặc chuột phải vào nền → <b>Add node</b>.<br>Thiết bị mới ở trạng thái <b>tắt</b>: chuột phải → <b>Start</b> (hoặc ▶ Start all). Nháy đúp để mở console.</div>` +
-    `<div class="ws-zoom"><button data-z="-" title="Thu nhỏ">−</button><span id="ws-zl"></span><button data-z="+" title="Phóng to">+</button><button data-z="fit" title="Vừa khung">⤢</button></div>` +
+    `<div class="ws-zoom"><button data-z="-" title="Thu nhỏ">−</button><span id="ws-zl"></span><button data-z="+" title="Phóng to">+</button><button data-z="fit" title="Vừa khung">⤢</button><button data-z="lbl" id="ws-lbl" title="Ẩn/hiện nhãn cổng trên dây">🏷</button></div>` +
     `<div class="ws-stat" id="ws-stat"></div><div class="ws-clock lab-clock" id="ws-clock"></div></div>` +
     `<aside class="ws-side" id="ws-side" hidden></aside></div>` +
     `<div class="ws-dock" id="ws-dock"></div>`;
@@ -147,6 +152,7 @@ export function openWorkspace({ onRun }) {
     const z = e.target.dataset?.z;
     if (!z) return;
     const r = stage.getBoundingClientRect();
+    if (z === 'lbl') { W.noPorts = !W.noPorts; save('sandbox-noports', W.noPorts); draw(); return; }
     if (z === 'fit') fit(); else zoomAt(z === '+' ? 1.2 : 1 / 1.2, r.width / 2, r.height / 2);
   };
   stage.addEventListener('wheel', (e) => {
@@ -169,8 +175,9 @@ export function openWorkspace({ onRun }) {
     const pairN = {}, pairI = {};
     for (const l of n.links) { const k = [l.a, l.b].sort().join('|'); pairN[k] = (pairN[k] || 0) + 1; }
     const blk = ds.length ? stpBlocked(n) : new Map();
-    const gL = el('g', {}), gT = el('g', {}), gN = el('g', {});
-    world.append(gL, gT, gN);
+    const gS = el('g', {}), gL = el('g', {}), gA = el('g', {}), gT = el('g', {}), gN = el('g', {});
+    world.append(gS, gL, gA, gT, gN);
+    drawNotes(gS, gA);
     for (const l of n.links) {
       const A = n.devices[l.a], B = n.devices[l.b];
       const k = [l.a, l.b].sort().join('|');
@@ -181,7 +188,8 @@ export function openWorkspace({ onRun }) {
       // đám mây "Internet": đầu dây cắm vào mép đám mây thay vì tâm
       const PA = linkEnd(A, B.x, B.y), PB = linkEnd(B, A.x, A.y), ex = PB.x - PA.x, ey = PB.y - PA.y;
       const up = N.lineUp(n, l.a, l.ap) && N.lineUp(n, l.b, l.bp);
-      const cls = up ? 'up' : S.isOff(A) || S.isOff(B) ? 'down' : !adminUp(n, l.a, l.ap) || !adminUp(n, l.b, l.bp) ? 'admin' : 'down';
+      // dây: lên = xanh; thiết bị tắt = xám; cổng shutdown = đỏ đứt nét; đã cắm nhưng chưa lên (sai encap, err-disabled…) = đỏ
+      const cls = (up ? 'up' : S.isOff(A) || S.isOff(B) ? 'off' : !adminUp(n, l.a, l.ap) || !adminUp(n, l.b, l.bp) ? 'admin' : 'down') + (/^s/.test(l.ap) ? ' serial' : '');
       const geo = { x1: PA.x + ox, y1: PA.y + oy, x2: PB.x + ox, y2: PB.y + oy };
       gL.appendChild(el('line', { ...geo, class: 'lab-link ' + cls }));
       if (C.isCapturing(W.cap, l.id)) {
@@ -200,7 +208,7 @@ export function openWorkspace({ onRun }) {
       tt.textContent = `${A.name} ${N.shortIf(l.ap)} ↔ ${B.name} ${N.shortIf(l.bp)} — chuột phải để xoá dây`;
       hit.appendChild(tt);
       gL.appendChild(hit);
-      for (const [D, port, t] of [[A, l.ap, 0.24], [B, l.bp, 0.76]]) {
+      for (const [D, port, t] of W.noPorts ? [] : [[A, l.ap, 0.24], [B, l.bp, 0.76]]) {
         const px = PA.x + ex * t + ox, py = PA.y + ey * t + oy;
         const bv = blk.get(D.id + '|' + port);
         const tr = bv && bv.sts !== 'BLK';
@@ -235,6 +243,95 @@ export function openWorkspace({ onRun }) {
     renderStat();
     renderTopBtns();
   }
+  // ---------------------------------------------------------------- chú thích: hộp chữ, khung, mũi tên (lab/sandbox.js)
+  function drawNotes(gBack, gFront) {
+    for (const n of net().notes || []) {
+      const sel = n.id === W.selNote;
+      const g = el('g', { class: `ws-note c-${n.color}${sel ? ' sel' : ''}`, 'data-note': n.id });
+      const label = (x, y, anchor = 'start') => {
+        if (!n.text) return;
+        const t = el('text', { x, y, 'text-anchor': anchor, class: 'ws-nt-label' });
+        n.text.split('\n').forEach((ln, i) => { const ts = el('tspan', { x, dy: i ? 16 : 0 }); ts.textContent = ln; t.appendChild(ts); });
+        g.appendChild(t);
+      };
+      if (n.t === 'rect') { g.appendChild(el('rect', { x: n.x, y: n.y, width: n.w, height: n.h, rx: 12, class: 'ws-nt-shape' })); label(n.x + 12, n.y + 20); }
+      else if (n.t === 'ellipse') { g.appendChild(el('ellipse', { cx: n.x + n.w / 2, cy: n.y + n.h / 2, rx: n.w / 2, ry: n.h / 2, class: 'ws-nt-shape' })); label(n.x + n.w / 2, n.y + 22, 'middle'); }
+      else if (n.t === 'text') { g.appendChild(el('rect', { x: n.x, y: n.y, width: n.w, height: n.h, rx: 6, class: 'ws-nt-textbg' })); label(n.x + 9, n.y + 22); }
+      else {
+        const dx = n.x2 - n.x, dy = n.y2 - n.y, len = Math.hypot(dx, dy) || 1, ux = dx / len, uy = dy / len;
+        g.appendChild(el('line', { x1: n.x, y1: n.y, x2: n.x2 - ux * 10, y2: n.y2 - uy * 10, class: 'ws-nt-arrow' }));
+        g.appendChild(el('path', { d: `M${n.x2} ${n.y2} L${n.x2 - ux * 14 - uy * 7} ${n.y2 - uy * 14 + ux * 7} L${n.x2 - ux * 14 + uy * 7} ${n.y2 - uy * 14 - ux * 7}Z`, class: 'ws-nt-head' }));
+        g.appendChild(el('line', { x1: n.x, y1: n.y, x2: n.x2, y2: n.y2, class: 'ws-nt-hit' }));
+        label((n.x + n.x2) / 2, (n.y + n.y2) / 2 - 8, 'middle');
+      }
+      if (sel) {
+        const hs = n.t === 'arrow' ? [['p1', n.x, n.y], ['p2', n.x2, n.y2]] : [['se', n.x + n.w, n.y + n.h]];
+        for (const [h, x, y] of hs) g.appendChild(el('rect', { x: x - 5, y: y - 5, width: 10, height: 10, class: 'ws-nt-handle', 'data-h': h }));
+      }
+      const tt = el('title', {});
+      tt.textContent = 'Kéo để di chuyển · nháy đúp: sửa chữ · chuột phải: màu / xoá · Delete: xoá';
+      g.appendChild(tt);
+      (n.t === 'rect' || n.t === 'ellipse' ? gBack : gFront).appendChild(g);
+    }
+  }
+  function noteDown(e, id, handle) {
+    W.selNote = id;
+    setSel(null);
+    const n0 = net().notes.find((x) => x.id === id);
+    if (!n0) return;
+    const p0 = toWorld(e), o = { ...n0 }, before = W.undo.snapshot(W.net);
+    let moved = false, raf = 0;
+    const move = (ev) => {
+      const p = toWorld(ev), dx = p.x - p0.x, dy = p.y - p0.y;
+      if (!moved && Math.hypot(dx, dy) < 3) return;
+      moved = true;
+      const patch = handle === 'se' ? { w: Math.max(30, o.w + dx), h: Math.max(20, o.h + dy) } : handle === 'p1' ? { x: o.x + dx, y: o.y + dy } : handle === 'p2' ? { x2: o.x2 + dx, y2: o.y2 + dy } : { x: o.x + dx, y: o.y + dy, x2: o.x2 + dx, y2: o.y2 + dy };
+      S.updateNote(W.net, id, patch);
+      if (!raf) raf = requestAnimationFrame(() => { raf = 0; draw(); });
+    };
+    const up = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      if (moved) { W.undo.commit(W.net, before); persist(); }
+      draw();
+      const now = Date.now();
+      if (!moved && lastClick.id === 'note:' + id && now - lastClick.t < 400) { lastClick = { id: null, t: 0 }; editNote(id); }
+      else if (!moved) lastClick = { id: 'note:' + id, t: now };
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  }
+  function addNoteAt(t, at) {
+    const id = mut(() => S.addNote(W.net, t, at.x, at.y));
+    W.selNote = id;
+    persist();
+    draw();
+    if (t !== 'arrow') editNote(id);
+  }
+  function editNote(id) {
+    const n = net().notes.find((x) => x.id === id);
+    if (!n) return;
+    const v = prompt('Nội dung chú thích (gõ \\n để xuống dòng):', n.text.replace(/\n/g, '\\n'));
+    if (v == null) return;
+    mut(() => S.updateNote(W.net, id, { text: v.replace(/\\n/g, '\n') }));
+    persist();
+    draw();
+  }
+  function noteMenu(id, e) {
+    const n = net().notes.find((x) => x.id === id);
+    W.selNote = id;
+    draw();
+    const NAMES = { blue: 'Xanh dương', green: 'Xanh lá', orange: 'Cam', red: 'Đỏ', purple: 'Tím', gray: 'Xám' };
+    showMenu([
+      { head: S.NOTE_TYPES[n.t] },
+      { label: '✏ Sửa chữ', act: () => editNote(id) },
+      ...S.NOTE_COLORS.map((c) => ({ label: `${c === n.color ? '●' : '○'} Màu ${NAMES[c]}`, act: () => { mut(() => S.updateNote(W.net, id, { color: c })); persist(); draw(); } })),
+      '-',
+      { label: '🗑 Xoá chú thích', act: () => deleteNote(id), danger: true },
+    ], e);
+  }
+  function deleteNote(id) { mut(() => S.removeNote(W.net, id)); W.selNote = null; persist(); draw(); }
+
   function renderStat() {
     const ds = Object.values(net().devices);
     const on = ds.filter((d) => !S.isOff(d)).length;
@@ -257,8 +354,11 @@ export function openWorkspace({ onRun }) {
     closeMenu();
     if (e.target.closest('.ws-zoom, .ws-empty b')) return;
     const node = e.target.closest('.ws-node');
+    const note = e.target.closest('.ws-note');
     if (e.button === 2) return;
-    if (node && e.button === 0) { nodeDown(e, node.dataset.id); return; }
+    if (node && e.button === 0) { W.selNote = null; nodeDown(e, node.dataset.id); return; }
+    if (note && e.button === 0 && W.tool !== 'wire') { noteDown(e, note.dataset.note, e.target.dataset?.h); return; }
+    if (W.selNote) { W.selNote = null; draw(); }
     if (e.button === 0 || e.button === 1) panStart(e);
   });
   function panStart(e) {
@@ -307,7 +407,9 @@ export function openWorkspace({ onRun }) {
     e.preventDefault();
     const node = e.target.closest('.ws-node');
     const link = e.target.closest('[data-link]');
+    const note = e.target.closest('.ws-note');
     if (node) { setSel(node.dataset.id); nodeMenu(node.dataset.id, e); }
+    else if (note) noteMenu(note.dataset.note, e);
     else if (link) linkMenu(link.dataset.link, e);
     else bgMenu(e);
   });
@@ -370,6 +472,7 @@ export function openWorkspace({ onRun }) {
     const at = toWorld(e);
     showMenu([
       { label: '＋ Add node…', act: () => openAddDialog(null, at) },
+      ...Object.entries(S.NOTE_TYPES).map(([t, v]) => ({ label: `✎ ${v}`, act: () => addNoteAt(t, at) })),
       { label: '▶ Start all', act: () => powerAll(true) },
       { label: '■ Stop all', act: () => powerAll(false) },
       '-',
@@ -858,7 +961,8 @@ export function openWorkspace({ onRun }) {
 
   // ---------------------------------------------------------------- thanh công cụ
   function replaceNet(n) {
-    mut(() => { W.net.devices = n.devices; W.net.links = n.links; });
+    mut(() => { W.net.devices = n.devices; W.net.links = n.links; W.net.notes = n.notes || []; });
+    W.selNote = null;
     W.term = {}; W.hist = {}; W.gui = {}; W.boot = {}; W.pick = []; W.sel = null;
     W.cap = C.createCapture(); W.capUi = {};
     for (const w of [...W.wins]) if (w.cap) closeWin(w.id);
@@ -875,6 +979,7 @@ export function openWorkspace({ onRun }) {
   $('ws-redo').onclick = () => undoRedo(true);
   $('ws-side-t').onclick = () => { W.side = !W.side; renderSide(); };
   $('ws-close').onclick = () => root.remove();
+  $('ws-note').onchange = (e) => { const t = e.target.value; e.target.value = ''; if (t) addNoteAt(t, viewCenter()); };
   $('ws-tpl').onchange = (e) => {
     const t = S.SANDBOX_TEMPLATES.find((x) => x.id === e.target.value);
     e.target.value = '';
@@ -911,6 +1016,12 @@ export function openWorkspace({ onRun }) {
       setTimeout(() => URL.revokeObjectURL(a.href), 1000);
       if (skipped.length) alert(`Đã xuất cấu hình. ${skipped.join(', ')}: hãng này chưa hỗ trợ dạng văn bản — dùng ⬇ Xuất JSON để lưu cả mạng.`);
     } else if (v === 'imp') openCfgImport();
+    else if (v === 'unl-exp') {
+      const nm = (W.libId && getLib().labs[W.libId]?.name) || 'Packet Journey lab';
+      const xml = UNL.sandboxToUnl(W.net, (id) => IO.deviceConfig(W.net, W.cli, id), nm);
+      download(xml, (nm.replace(/[^\p{L}\p{N}_-]+/gu, '-') || 'lab') + '.unl', 'application/xml');
+      alert('Đã xuất .unl. Khi mở trong EVE-NG: image của từng node là tên phổ biến (vios, viosl2, vpcs…) — đổi cho khớp image có trên máy EVE-NG của bạn (Edit node → Image).');
+    } else if (v === 'unl-imp') $('ws-unl').click();
     else if (v === 'save') {
       const n = mut(() => IO.saveAllStartup(W.net, W.cli));
       persist();
@@ -937,7 +1048,84 @@ export function openWorkspace({ onRun }) {
       };
     });
   }
-  $('ws-clr').onclick = () => { if (confirm('Xoá toàn bộ mạng đang dựng? (Có thể ↶ Hoàn tác)')) replaceNet(S.emptySandbox()); };
+  function download(text, name, type) {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([text], { type }));
+    a.download = name;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  }
+  $('ws-unl').onchange = async (e) => {
+    const f = e.target.files?.[0];
+    e.target.value = '';
+    if (!f) return;
+    let r;
+    try { r = UNL.unlToSandbox(await f.text()); } catch (err) { alert('Không nhập được file .unl: ' + err.message); return; }
+    if (Object.keys(W.net.devices).length && !confirm(`Thay mạng hiện tại bằng lab "${r.name}" (${Object.keys(r.net.devices).length} thiết bị) từ EVE-NG? (Có thể ↶ Hoàn tác)`)) return;
+    const rep = UNL.applyUnlConfigs(r.net, createCli(r.net), r.configText);
+    W.libId = null;
+    replaceNet(r.net);
+    const lines = [...r.report, ...rep.filter((x) => !x.ok).map((x) => `Cấu hình ${x.name}: ${x.note || 'lỗi ở ' + x.errors.join(' | ')}`)];
+    dialog(`<h3>⬆ Đã nhập lab EVE-NG "${esc(r.name)}"</h3><p class="ws-note">${Object.keys(r.net.devices).length} thiết bị, ${r.net.links.length} dây${rep.length ? `, cấu hình của ${rep.filter((x) => x.ok).length} thiết bị đã thành startup-config` : ''}. Thiết bị đang <b>tắt</b> như khi mở lab trong EVE-NG — bấm <b>▶ Start all</b>.</p>` +
+      (lines.length ? `<div class="ws-cf-rep"><ul>${lines.map((x) => `<li>${esc(x)}</li>`).join('')}</ul></div>` : '') +
+      `<div class="ws-dlg-b"><button id="un-ok" class="btn-accent">OK</button></div>`, (dlg, close) => { dlg.querySelector('#un-ok').onclick = close; });
+  };
+
+  // 📚 thư viện lab theo thư mục (lab/labstore.js) — lưu trong localStorage "sandbox-lib"
+  const getLib = () => LIB.normLib(load('sandbox-lib', null));
+  const putLib = (lib) => save('sandbox-lib', lib);
+  W.libId ??= load('sandbox-libcur', null);
+  function openLibrary(msg = '') {
+    const lib = getLib();
+    if (W.libId && !lib.labs[W.libId]) W.libId = null;
+    const cur = W.libId ? lib.labs[W.libId] : null;
+    const fmtD = (t) => new Date(t).toLocaleString('vi-VN', { dateStyle: 'short', timeStyle: 'short' });
+    const folderOpts = (sel) => lib.folders.map((f) => `<option${f === sel ? ' selected' : ''}>${esc(f)}</option>`).join('');
+    dialog(`<h3>📚 Thư viện lab</h3>` +
+      `<div class="ws-lib-save"><div class="ws-row"><label>Tên lab <input id="lb-name" maxlength="60" value="${esc(cur?.name || '')}" placeholder="vd: OSPF 3 router"></label><label>Thư mục <select id="lb-folder">${folderOpts(cur?.folder || LIB.ROOT)}</select></label></div>` +
+      `<div class="ws-dlg-b ws-lib-acts">${cur ? `<button id="lb-over" class="btn-accent" title="Ghi đè lab đang mở">💾 Lưu (ghi đè "${esc(cur.name)}")</button><button id="lb-new">＋ Lưu thành lab mới</button>` : '<button id="lb-new" class="btn-accent">💾 Lưu mạng hiện tại</button>'}<button id="lb-fold">📁 Thư mục mới</button></div>` +
+      `<div class="ws-err" id="lb-err">${esc(msg)}</div></div>` +
+      (lib.recent.length ? `<div class="ws-lib-h">🕘 Gần đây</div><div class="ws-lib-recent">${lib.recent.map((id) => `<button data-open="${id}" title="${esc(lib.labs[id].folder)}">${esc(lib.labs[id].name)}</button>`).join('')}</div>` : '') +
+      `<div class="ws-lib-tree">${LIB.tree(lib).map(({ folder, labs }) => `<details open><summary><b>📁 ${esc(folder)}</b> <small>(${labs.length})</small>${folder === LIB.ROOT ? '' : ` <button data-fren="${esc(folder)}" title="Đổi tên thư mục">✏</button><button data-fdel="${esc(folder)}" title="Xoá thư mục (lab bên trong về ${esc(LIB.ROOT)})">🗑</button>`}</summary>` +
+        (labs.length ? `<ul>${labs.map((l) => `<li class="${l.id === W.libId ? 'cur' : ''}"><button class="ws-lib-open" data-open="${l.id}">${esc(l.name)}</button><small>${l.devices} thiết bị · ${fmtD(l.updated)}</small>` +
+          `<span class="ws-lib-ops"><select data-move="${l.id}" title="Chuyển thư mục"><option value="">↦</option>${lib.folders.filter((f) => f !== folder).map((f) => `<option>${esc(f)}</option>`).join('')}</select><button data-ren="${l.id}" title="Đổi tên">✏</button><button data-del="${l.id}" title="Xoá lab">🗑</button></span></li>`).join('')}</ul>` : '<div class="ws-note">Trống</div>') + `</details>`).join('')}</div>` +
+      `<div class="ws-dlg-b"><button id="lb-x">Đóng</button></div>`, (dlg, close) => {
+      const q = (id) => dlg.querySelector('#' + id);
+      const done = (r, okMsg) => { if (r.error) { q('lb-err').textContent = r.error; return false; } putLib(r.lib); close(); openLibrary(okMsg || ''); return true; };
+      const doSave = (id) => {
+        const r = LIB.saveLab(getLib(), { id, name: q('lb-name').value, folder: q('lb-folder').value, data: S.exportSandbox(W.net) });
+        if (r.error) { q('lb-err').textContent = r.error; return; }
+        W.libId = r.id;
+        save('sandbox-libcur', r.id);
+        done(r, `✓ Đã lưu "${r.lib.labs[r.id].name}"`);
+      };
+      q('lb-x').onclick = close;
+      if (q('lb-over')) q('lb-over').onclick = () => doSave(W.libId);
+      q('lb-new').onclick = () => doSave(null);
+      q('lb-fold').onclick = () => { const nm = prompt('Tên thư mục mới:'); if (nm != null) done(LIB.addFolder(getLib(), nm)); };
+      dlg.querySelectorAll('[data-open]').forEach((b) => (b.onclick = () => {
+        const l = getLib().labs[b.dataset.open];
+        if (!l) return;
+        if (Object.keys(W.net.devices).length && b.dataset.open !== W.libId && !confirm(`Mở "${l.name}"? Mạng đang dựng sẽ được thay (hãy 💾 Lưu trước nếu cần; có thể ↶ Hoàn tác).`)) return;
+        let n;
+        try { n = S.importSandbox(l.data); } catch (err) { q('lb-err').textContent = 'Lab hỏng: ' + err.message; return; }
+        putLib(LIB.openedLab(getLib(), b.dataset.open));
+        W.libId = b.dataset.open;
+        save('sandbox-libcur', W.libId);
+        close();
+        replaceNet(n);
+      }));
+      dlg.querySelectorAll('[data-ren]').forEach((b) => (b.onclick = () => { const l = getLib().labs[b.dataset.ren]; const nm = prompt('Tên mới:', l.name); if (nm != null) done(LIB.renameLab(getLib(), b.dataset.ren, nm)); }));
+      dlg.querySelectorAll('[data-del]').forEach((b) => (b.onclick = () => { const l = getLib().labs[b.dataset.del]; if (confirm(`Xoá lab "${l.name}" khỏi thư viện? (Không hoàn tác được)`)) { if (W.libId === b.dataset.del) W.libId = null; done(LIB.deleteLab(getLib(), b.dataset.del)); } }));
+      dlg.querySelectorAll('[data-move]').forEach((s2) => (s2.onchange = () => { if (s2.value) done(LIB.moveLab(getLib(), s2.dataset.move, s2.value)); }));
+      dlg.querySelectorAll('[data-fren]').forEach((b) => (b.onclick = (ev) => { ev.preventDefault(); const nm = prompt('Tên mới cho thư mục:', b.dataset.fren); if (nm != null) done(LIB.renameFolder(getLib(), b.dataset.fren, nm)); }));
+      dlg.querySelectorAll('[data-fdel]').forEach((b) => (b.onclick = (ev) => { ev.preventDefault(); if (confirm(`Xoá thư mục "${b.dataset.fren || b.dataset.fdel}"? Các lab bên trong chuyển về "${LIB.ROOT}".`)) done(LIB.deleteFolder(getLib(), b.dataset.fdel)); }));
+      q('lb-name').focus();
+    });
+  }
+  $('ws-lib').onclick = () => openLibrary();
+
+  $('ws-clr').onclick = () => { if (confirm('Xoá toàn bộ mạng đang dựng? (Có thể ↶ Hoàn tác)')) { W.libId = null; save('sandbox-libcur', null); replaceNet(S.emptySandbox()); } };
 
   // phím tắt: Esc thoát công cụ / menu, Delete xoá thiết bị đang chọn, Ctrl+Z / Ctrl+Y hoàn tác (khi không gõ console)
   const onKey = (e) => {
@@ -950,6 +1138,7 @@ export function openWorkspace({ onRun }) {
       return;
     }
     if (typing) return;
+    if (e.key === 'Delete' && W.selNote) { e.preventDefault(); deleteNote(W.selNote); return; }
     if (e.key === 'Delete' && W.sel) { e.preventDefault(); deleteDev(W.sel); return; }
     if (e.ctrlKey || e.metaKey) {
       const k = e.key.toLowerCase();

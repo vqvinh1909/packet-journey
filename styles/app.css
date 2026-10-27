@@ -330,7 +330,10 @@ html, body {
 .lab-topo { width: 100%; height: 215px; flex: 0 0 auto; background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; }
 .lab-link { stroke-width: 3; }
 .lab-link.up { stroke: var(--ok); }
-.lab-link.down { stroke: var(--muted); stroke-dasharray: 6 5; opacity: 0.7; }
+.lab-link.down { stroke: #e74c3c; stroke-dasharray: 2 5; stroke-linecap: round; }
+.lab-link.off { stroke: var(--muted); stroke-dasharray: 6 5; opacity: 0.7; }
+.lab-link.serial { stroke-dasharray: 16 4 3 4; }
+.lab-link.serial.up { stroke: #e67e22; }
 .lab-link.admin { stroke: #c0392b; stroke-dasharray: 6 5; }
 .lab-port-bg { fill: var(--panel); stroke: var(--border); }
 .lab-port { font-family: var(--mono); font-size: 10px; fill: var(--muted); }
@@ -799,3 +802,135 @@ html, body {
 .ws-cf-rep li.bad { color: var(--warn); }
 .ws-cf-rep code, .ws-note code { font-family: var(--mono); font-size: 11.5px; }
 #ws-cfg { max-width: 160px; }
+
+/* ---------- 📚 Thư viện lab (workspace) ---------- */
+.ws-dlg:has(.ws-lib-tree) { width: min(640px, 100%); max-height: calc(100vh - 120px); overflow: auto; }
+.ws-lib-save { border: 1px solid var(--border); border-radius: 8px; padding: 10px; display: grid; gap: 8px; }
+.ws-lib-acts { flex-wrap: wrap; justify-content: flex-start; }
+.ws-lib-h { font-weight: 700; font-size: 12.5px; color: var(--muted); }
+.ws-lib-recent { display: flex; flex-wrap: wrap; gap: 6px; }
+.ws-lib-recent button { font-size: 12.5px; }
+.ws-lib-tree details { border-top: 1px solid var(--border); padding: 6px 0; }
+.ws-lib-tree summary { cursor: pointer; display: flex; align-items: center; gap: 6px; }
+.ws-lib-tree summary button { padding: 0 6px; font-size: 12px; }
+.ws-lib-tree ul { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 4px; }
+.ws-lib-tree li { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 3px 6px; border-radius: 6px; }
+.ws-lib-tree li.cur { background: var(--accent-soft, rgba(46, 125, 50, 0.12)); }
+.ws-lib-tree li small { color: var(--muted); font-size: 11.5px; }
+.ws-lib-open { font-weight: 600; }
+.ws-lib-ops { margin-left: auto; display: flex; gap: 4px; }
+.ws-lib-ops select, .ws-lib-ops button { padding: 1px 6px; font-size: 12px; }
+
+/* ---------- ✎ Chú thích trên sơ đồ (workspace) ---------- */
+.ws-note { cursor: move; --nc: #2f6fde; }
+.ws-note.c-green { --nc: #2e9e57; } .ws-note.c-orange { --nc: #e67e22; } .ws-note.c-red { --nc: #d64545; }
+.ws-note.c-purple { --nc: #8e5bd8; } .ws-note.c-gray { --nc: #7d8792; }
+.ws-nt-shape { fill: var(--nc); fill-opacity: 0.07; stroke: var(--nc); stroke-width: 2; stroke-dasharray: 8 5; }
+.ws-nt-textbg { fill: var(--panel); stroke: var(--nc); stroke-width: 1.5; }
+.ws-nt-label { fill: var(--nc); font-weight: 700; font-size: 14px; pointer-events: none; }
+.ws-nt-arrow { stroke: var(--nc); stroke-width: 3; }
+.ws-nt-head { fill: var(--nc); }
+.ws-nt-hit { stroke: transparent; stroke-width: 14; }
+.ws-note.sel .ws-nt-shape, .ws-note.sel .ws-nt-textbg { stroke-width: 3; stroke-dasharray: none; }
+.ws-nt-handle { fill: var(--panel); stroke: var(--nc); stroke-width: 2; cursor: nwse-resize; }
+#ws-note { max-width: 140px; }
+
+/* ---------- 📝 Ghi chú lab + 📋 Cheat sheet ---------- */
+.lab-note { margin-top: 10px; border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px; }
+.lab-note summary { cursor: pointer; font-weight: 600; }
+.lab-note textarea { width: 100%; box-sizing: border-box; margin-top: 6px; font: 12.5px var(--mono); resize: vertical; background: var(--bg); color: var(--fg); border: 1px solid var(--border); border-radius: 6px; padding: 6px; }
+.lab-note-md { font-size: 12.5px; margin-top: 4px; }
+.lab-note-md p { margin: 2px 0; } .lab-note-md ul { margin: 2px 0; padding-left: 18px; }
+.lab-note-md code { font-family: var(--mono); font-size: 11.5px; background: var(--bg); padding: 0 3px; border-radius: 3px; }
+.lab-star { display: flex; gap: 6px; align-items: center; font-size: 12.5px; margin-top: 6px; }
+.cs-modal { width: min(860px, 100%); }
+.cs-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 8px 16px; border-bottom: 1px solid var(--border); }
+.cs-bar input#cs-q { flex: 1; min-width: 140px; }
+.cs-ex { display: flex; gap: 4px; align-items: center; font-size: 12.5px; }
+.cs-body { max-height: calc(100vh - 220px); overflow: auto; }
+.cs-note { font-size: 12.5px; color: var(--muted); margin: 0 0 8px; }
+.cs-empty { padding: 24px; text-align: center; color: var(--muted); }
+.cs-topic h4 { margin: 14px 0 4px; border-bottom: 2px solid var(--accent, #2e7d32); padding-bottom: 2px; }
+.cs-mode { margin: 8px 0 2px; font-size: 12.5px; font-weight: 700; color: var(--muted); }
+.cs-pr { font-family: var(--mono); font-size: 11.5px; font-weight: 400; }
+.cs-tbl { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.cs-tbl td { border-bottom: 1px solid var(--border); padding: 3px 6px; vertical-align: top; }
+.cs-tbl td:first-child { width: 48%; }
+.cs-tbl code { font-family: var(--mono); font-size: 12px; }
+.cs-eg { color: var(--muted); font-size: 11.5px; }
+.cs-n { color: var(--muted); text-align: right; white-space: nowrap; width: 40px; }
+@media print {
+  body.cs-printing > *:not(.cs-back) { display: none !important; }
+  body.cs-printing .cs-back { position: static; background: none; display: block; padding: 0; }
+  body.cs-printing .cs-modal { width: 100%; box-shadow: none; border: 0; max-height: none; }
+  body.cs-printing .cs-bar, body.cs-printing .modal-x { display: none; }
+  body.cs-printing .cs-body { max-height: none; overflow: visible; }
+}
+
+/* ---------- 🩺 Vì sao không ping được? + 🔍 So sánh với lời giải ---------- */
+.lab-dg, .lab-diff { margin-top: 10px; border: 1px solid var(--border); border-radius: 8px; padding: 8px; font-size: 12.5px; }
+.lab-dg-h { font-weight: 700; margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center; }
+.lab-dg-h button { padding: 0 6px; }
+.dg-form { display: flex; flex-wrap: wrap; gap: 6px; align-items: flex-end; }
+.dg-form label { display: flex; flex-direction: column; gap: 2px; font-size: 12px; }
+.dg-form input { width: 130px; }
+.dg-steps { list-style: none; margin: 8px 0 4px; padding: 0; display: grid; gap: 2px; }
+.dg-steps li.ok { color: var(--ok); }
+.dg-ok { color: var(--ok); font-weight: 600; margin: 6px 0; }
+.dg-bad { color: #d64545; font-weight: 600; margin: 6px 0; }
+.dg-hints { margin: 4px 0 6px; padding-left: 20px; display: grid; gap: 4px; }
+.df-dev { border-top: 1px dashed var(--border); padding-top: 6px; margin-top: 6px; }
+.df-l { font-size: 11.5px; color: var(--muted); margin-top: 4px; }
+.df-mine, .df-sol { margin: 2px 0; padding: 4px 6px; border-radius: 4px; font: 11.5px var(--mono); white-space: pre-wrap; }
+.df-mine { background: rgba(214, 69, 69, 0.1); color: #b03a3a; }
+.df-sol { background: rgba(46, 158, 87, 0.12); color: #237a43; }
+.df-note { margin-top: 4px; }
+.df-same { margin-top: 6px; color: var(--muted); }
+
+/* ---------- 🎓 Thi thử CCNA ---------- */
+.ex-modal { width: min(1100px, 100%); max-height: calc(100vh - 40px); display: flex; flex-direction: column; }
+.ex-home, .ex-res { overflow: auto; }
+.ex-dom, .ex-hist { border-collapse: collapse; font-size: 13px; margin: 6px 0 10px; }
+.ex-dom td, .ex-dom th, .ex-hist td, .ex-hist th { border-bottom: 1px solid var(--border); padding: 3px 10px 3px 0; text-align: left; }
+.ex-hist td.ok { color: var(--ok); font-weight: 700; } .ex-hist td.bad { color: #d64545; font-weight: 700; }
+.ex-start { display: flex; flex-wrap: wrap; gap: 10px; margin: 12px 0; }
+.ex-resume { margin: 10px 0; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; }
+.ex-h { gap: 12px; }
+.ex-clock { margin-left: auto; font: 700 15px var(--mono); }
+.ex-clock.low { color: #d64545; }
+.ex-body { display: grid; grid-template-columns: 200px 1fr; gap: 12px; padding: 12px 16px; overflow: hidden; min-height: 0; flex: 1; }
+.ex-nav { overflow: auto; }
+.ex-nav-h { font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+.ex-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; }
+.ex-grid button { padding: 3px 0; font-size: 11.5px; }
+.ex-grid button.done { background: rgba(46, 158, 87, 0.18); }
+.ex-grid button.flag { outline: 2px solid #e67e22; }
+.ex-grid button.cur { outline: 2px solid var(--accent, #2f6fde); font-weight: 700; }
+.ex-q { overflow: auto; }
+.ex-qh { font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+.ex-text { font-size: 15px; font-weight: 600; margin-bottom: 10px; }
+.ex-opts { display: grid; gap: 6px; }
+.ex-opt { display: flex; gap: 8px; align-items: flex-start; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; cursor: pointer; }
+.ex-opt:has(input:checked) { border-color: var(--accent, #2f6fde); background: rgba(47, 111, 222, 0.08); }
+.ex-match td { padding: 4px 8px 4px 0; }
+.ex-story { font-size: 13px; margin-bottom: 8px; }
+.ex-tasks { font-size: 13px; } .ex-tasks ol { margin: 4px 0 8px; padding-left: 20px; }
+.ex-devs { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 4px; }
+.ex-devs button.on { background: var(--accent, #2f6fde); color: #fff; }
+.ex-term { background: #0d1117; color: #c9d1d9; font: 12px var(--mono); height: 220px; overflow: auto; margin: 0; padding: 8px; border-radius: 6px 6px 0 0; white-space: pre-wrap; }
+.ex-term .cmd { color: #7ee787; }
+.ex-in { display: flex; align-items: center; gap: 4px; background: #0d1117; padding: 4px 8px; border-radius: 0 0 6px 6px; }
+.ex-in span { color: #7ee787; font: 12px var(--mono); }
+.ex-in input { flex: 1; background: transparent; border: 0; color: #fff; font: 12px var(--mono); outline: none; }
+.ex-foot { display: flex; justify-content: space-between; gap: 8px; padding: 8px 16px; border-top: 1px solid var(--border); }
+#ex-flag.on { background: #e67e22; color: #fff; }
+.ex-score { font-size: 20px; margin-bottom: 10px; } .ex-score.ok { color: var(--ok); } .ex-score.bad { color: #d64545; }
+.ex-score b { font-size: 32px; }
+.ex-bars { display: grid; gap: 6px; margin-bottom: 12px; }
+.ex-bar { display: grid; grid-template-columns: 230px 1fr 48px; gap: 8px; align-items: center; font-size: 13px; }
+.ex-track { height: 10px; background: var(--border); border-radius: 5px; overflow: hidden; }
+.ex-track div { height: 100%; } .ex-track .ok { background: var(--ok); } .ex-track .mid { background: #e6a23c; } .ex-track .bad { background: #d64545; }
+.ex-review { display: grid; gap: 10px; padding-left: 26px; }
+.ex-review .ex-text { font-size: 13.5px; margin: 0 0 2px; }
+.ex-ra { color: #d64545; font-size: 13px; } .ex-rr { color: var(--ok); font-size: 13px; } .ex-re { font-size: 12.5px; color: var(--muted); }
+@media (max-width: 760px) { .ex-body { grid-template-columns: 1fr; } .ex-nav { max-height: 120px; } .ex-bar { grid-template-columns: 1fr 1fr 40px; } }

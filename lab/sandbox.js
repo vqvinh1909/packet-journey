@@ -197,7 +197,8 @@ export function physPorts(d) {
   if (!d) return [];
   if (d.type === 'pc' || d.type === 'server') return ['fa0'];
   const all = Object.keys(d.type === 'switch' ? d.ports : d.ifaces);
-  return all.filter((p) => !/^(po|lo|tu)/.test(p) && !p.includes('.')).sort(N.ifSort);
+  // bỏ Port-channel / Loopback / Tunnel (po1, lo0, tu0) — nhưng giữ "port1" của FortiGate / Sophos
+  return all.filter((p) => !/^(po|lo|tu)\d/.test(p) && !p.includes('.')).sort(N.ifSort);
 }
 export function freePorts(net, id) { return physPorts(net.devices[id]).filter((p) => !N.linkAt(net, id, p)); }
 
@@ -252,8 +253,8 @@ const isHostLike = (d) => d.type === 'pc' || d.type === 'server';
 /** Lịch sử hoàn tác / làm lại: lưu ảnh chụp JSON của mạng trước mỗi thay đổi. */
 export function createHistory(limit = 60) {
   const undo = [], redo = [];
-  const snap = (net) => JSON.stringify({ devices: net.devices, links: net.links });
-  const restore = (net, str) => { const o = JSON.parse(str); net.devices = o.devices; net.links = o.links; };
+  const snap = (net) => JSON.stringify({ devices: net.devices, links: net.links, notes: net.notes || [] });
+  const restore = (net, str) => { const o = JSON.parse(str); net.devices = o.devices; net.links = o.links; net.notes = o.notes || []; };
   return {
     /** Chạy fn (thay đổi mạng); nếu mạng thật sự đổi thì ghi lại để hoàn tác được. Trả giá trị của fn. */
     track(net, fn) {
@@ -314,8 +315,42 @@ export function importSandbox(obj) {
   for (const l of net.links) {
     if (!net.devices[l.a] || !net.devices[l.b]) throw new Error(`Dây "${l.id}" nối tới thiết bị không tồn tại`);
   }
-  return N.cloneNet({ devices: net.devices, links: net.links.map((l) => N.mkLink(l.a, l.ap, l.b, l.bp)) });
+  return N.cloneNet({ devices: net.devices, links: net.links.map((l) => N.mkLink(l.a, l.ap, l.b, l.bp)), notes: normNotes(net.notes) });
 }
+
+// ---------------------------------------------------------------- chú thích trên sơ đồ (hộp chữ, khung, mũi tên)
+export const NOTE_TYPES = { text: 'Hộp chữ', rect: 'Khung chữ nhật', ellipse: 'Khung elip', arrow: 'Mũi tên' };
+export const NOTE_COLORS = ['blue', 'green', 'orange', 'red', 'purple', 'gray'];
+const num = (v, d) => (Number.isFinite(+v) ? +v : d);
+/** Làm sạch danh sách chú thích (file JSON cũ không có → []). */
+export function normNotes(arr) {
+  if (!Array.isArray(arr)) return [];
+  return arr.filter((n) => n && NOTE_TYPES[n.t]).map((n, i) => ({
+    id: String(n.id || 'n' + (i + 1)), t: n.t,
+    x: clamp(num(n.x, 100), -200, SANDBOX_VIEW.w), y: clamp(num(n.y, 100), -200, SANDBOX_VIEW.h),
+    w: clamp(num(n.w, 160), 20, 2000), h: clamp(num(n.h, 90), 16, 2000),
+    x2: num(n.x2, num(n.x, 100) + 120), y2: num(n.y2, num(n.y, 100)),
+    text: String(n.text ?? '').slice(0, 300), color: NOTE_COLORS.includes(n.color) ? n.color : 'blue',
+  }));
+}
+/** Thêm chú thích loại t tại (x, y). Trả id. */
+export function addNote(net, t, x, y, o = {}) {
+  if (!NOTE_TYPES[t]) throw new Error('Loại chú thích không hợp lệ: ' + t);
+  net.notes ||= [];
+  let i = net.notes.length + 1;
+  while (net.notes.some((n) => n.id === 'n' + i)) i++;
+  const def = { text: { w: 170, h: 40, text: 'Ghi chú' }, rect: { w: 260, h: 160, text: 'DMZ' }, ellipse: { w: 240, h: 150, text: 'Vùng' }, arrow: { x2: x + 140, y2: y, text: '' } }[t];
+  const n = normNotes([{ id: 'n' + i, t, x, y, color: t === 'text' ? 'gray' : 'blue', ...def, ...o }])[0];
+  net.notes.push(n);
+  return n.id;
+}
+export function updateNote(net, id, patch) {
+  const i = (net.notes || []).findIndex((n) => n.id === id);
+  if (i < 0) return false;
+  net.notes[i] = normNotes([{ ...net.notes[i], ...patch, id, t: net.notes[i].t }])[0];
+  return true;
+}
+export function removeNote(net, id) { net.notes = (net.notes || []).filter((n) => n.id !== id); }
 
 // ---------------------------------------------------------------- nhiệm vụ hướng dẫn
 const hostsOf = (net) => Object.values(net.devices).filter((d) => (d.type === 'pc' || d.type === 'server') && d.ip && !d.ip.startsWith('169.254')).slice(0, 12);
