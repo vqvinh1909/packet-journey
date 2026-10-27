@@ -17,6 +17,7 @@ import * as V6 from './net6.js';
 import { makeAsa } from './asa.js';
 import { makeForti } from './fortios.js';
 import { makePan } from './panos.js';
+import { makeGuiFw } from './guifw.js';
 
 const { longIf, shortIf, normIf, isIp, maskToPrefix, prefixToMask, netOf, ifSort } = N;
 
@@ -848,7 +849,8 @@ export function createCli(net) {
     doIn: (x, table) => { const words = x.a[0].split(/\s+/); const p = parse(table, words); return p.hit ? p.hit.fn({ ...x, a: p.args, words }) : errOut(p, { mode: 'config' }, x.a[0], words, 'do '); },
   });
   // Firewall các hãng có cú pháp riêng (không dùng bảng lệnh IOS): xử lý cả dòng lệnh
-  const VENDOR = { fortios: makeForti({ net, R }), panos: makePan({ net, R }) };
+  const GUIFW = makeGuiFw({ R });
+  const VENDOR = { fortios: makeForti({ net, R }), panos: makePan({ net, R }), sophos: GUIFW, checkpoint: GUIFW, pfsense: GUIFW };
   function tableFor(d, s) {
     if (d.os === 'asa') return ASA.tableFor(d, s);
     switch (s.mode) {

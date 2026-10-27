@@ -31,6 +31,7 @@ server.listen(8799, '127.0.0.1', async () => {
   await p.press('#lab-in', 'ArrowUp');
   ok(await p.inputValue('#lab-in') === 'ipconfig 192.168.10.1 255.255.255.192 192.168.10.62', 'lịch sử ↑ trong console');
   await p.fill('#lab-in', '');
+  await p.waitForFunction(() => document.querySelector('.lab-score')?.textContent === '1/4', null, { timeout: 2000 }).catch(() => {});
   ok((await p.textContent('.lab-score')) === '1/4', 'gõ tay làm đạt nhiệm vụ (L01 1/4)');
   // 2) bước guide + gain
   await p.click('.lab-item[data-id="X05"]');
@@ -99,6 +100,38 @@ server.listen(8799, '127.0.0.1', async () => {
   ok((await p.textContent('#lab-prompt')).trim().endsWith('#'), 'Palo Alto: vào configure');
   await type('commit');
   ok((await p.$$eval('.lab-ln', (x) => x.map((e) => e.textContent))).some((l) => l.includes('Configuration committed successfully')), 'Palo Alto: commit');
+  // 8) Firewall giao diện web (pfSense / Check Point / Sophos): làm PF01 hoàn toàn bằng click
+  await p.click('.lab-item[data-id="PF01"]');
+  await p.click('.lab-tab[data-id="fw"]');
+  ok(await p.isVisible('#lab-gui') && !(await p.isVisible('#lab-term')), 'pfSense: hiện trang quản trị web thay terminal');
+  await p.click('#lab-gui [data-tab="Firewall Rules"]');
+  await p.click('#lab-gui details.gf-add summary');
+  await p.fill('#gf-rn', 'Web-DNS-Ping');
+  await p.selectOption('#gf-rsrc', ['LAN net']);
+  await p.selectOption('#gf-rsvc', ['HTTP', 'HTTPS', 'DNS', 'PING']);
+  await p.click('#gf-radd');
+  await p.click('#lab-gui [data-del="Default allow LAN to any"]');
+  ok(await p.isVisible('#gf-commit'), 'pfSense: có nút Apply Changes khi còn thay đổi');
+  await p.click('#gf-commit');
+  await p.click('.lab-qopt[data-o="0"]');
+  await p.waitForTimeout(100);
+  ok((await p.textContent('.lab-score')) === '5/5', 'PF01: thêm rule + xoá rule mặc định + Apply qua GUI → 5/5');
+  await p.click('.lab-item[data-id="CP01"]');
+  await p.click('.lab-guide summary');
+  for (let g = 0; g < 3; g++) await p.click(`.lab-grun[data-g="${g}"]`);
+  await p.click('.lab-tab[data-id="fw"]');
+  await p.click('.lab-qopt[data-o="0"]');
+  await p.waitForTimeout(100);
+  ok((await p.textContent('.lab-score')) !== '5/5' && (await p.textContent('#lab-gui')).includes('Install'), 'Check Point: chưa Install Policy thì chưa đạt');
+  await p.click('#gf-commit');
+  await p.waitForTimeout(100);
+  ok((await p.textContent('.lab-score')) === '5/5', 'CP01: Install Policy → 5/5');
+  await p.click('.lab-item[data-id="SP01"]');
+  await p.click('.lab-tab[data-id="fw"]');
+  await p.click('#lab-gui [data-tab="Hosts & services"]');
+  await p.fill('#gf-on', 'X'); await p.fill('#gf-oa', 'abc'); await p.click('#gf-oadd');
+  ok((await p.textContent('#lab-gui')).includes('ERROR'), 'Sophos: thao tác sai hiện ERROR');
+  await p.screenshot({ path: process.env.SHOT || '/dev/null' }).catch(() => {});
   ok(errs.length === 0, 'không có lỗi JS: ' + JSON.stringify(errs).slice(0, 300));
   await b.close();
   server.close();

@@ -46,7 +46,7 @@ const fwNet = (os, [wan, lan, dmz]) => makeNet([
   server('inet', 'INTERNET 8.8.8.8', 930, 70, { ip: '8.8.8.8', gw: '8.8.8.1', services: [80, 443, 23, 53] }),
   pc('ext', 'KHACH-NGOAI', 930, 240, { ip: '198.51.100.66', gw: '198.51.100.1' }),
   router('isp', 'ISP', 720, 140, ['g0/0', 'g0/1', 'g0/2']),
-  firewall('fw', { fortios: 'FortiGate', panos: 'PA-VM' }[os] || 'FW', 480, 140, [wan, lan, dmz], os),
+  firewall('fw', { fortios: 'FortiGate', panos: 'PA-VM', sophos: 'SOPHOS-XG', checkpoint: 'CP-GW', pfsense: 'pfSense' }[os] || 'FW', 480, 140, [wan, lan, dmz], os),
   server('web', 'WEB-DMZ', 480, 330, { ip: '172.16.1.10', gw: '172.16.1.1', services: [80, 443, 22] }),
   sw('swin', 'SW-IN', 240, 140, ['fa0/1', 'fa0/2', 'g0/1']),
   pc('pin', 'PC-IN', 90, 260, { ip: '10.1.1.10', gw: '10.1.1.1', services: [445] }),
@@ -337,5 +337,134 @@ export const SEC_LABS = [
       quiz('Security rule cho khách vào server publish bằng DNAT trên Palo Alto ghi gì?', ['Destination = IP public (trước NAT), zone đích = zone của server (sau NAT)', 'Destination = IP thật, zone đích = untrust', 'Destination = IP thật, zone đích = dmz', 'Destination = IP public, zone đích = untrust'], 0, '"Pre-NAT IP, post-NAT zone" — câu thần chú khi làm DNAT trên Palo Alto.'),
     ],
     hints: ['Lệnh "set" trên rule có sẵn chỉ đổi thuộc tính ghi trong lệnh — đừng quên commit.', 'test security-policy-match from untrust to dmz ... destination 203.0.113.10 → rule nào khớp?', 'Nhớ quy tắc: địa chỉ trước NAT, zone sau NAT.'],
+  },
+  // =====================================================================
+  // SP01–SP02 — Sophos Firewall (giao diện web)
+  // =====================================================================
+  {
+    id: 'SP01', group: 'sec', lesson: 'Firewall — Sophos (web admin)', level: 2, kind: 'config',
+    title: 'Sophos Firewall: rule theo zone LAN/WAN/DMZ + Linked NAT (MASQ)',
+    story: 'Văn phòng Mai Linh dùng Sophos Firewall (cấu hình bằng trang quản trị web — chọn tab thiết bị "SOPHOS-XG" để mở). Cổng đã qua wizard: Port1 = LAN (10.1.1.1/24), Port2 = WAN (203.0.113.2/24, gateway 203.0.113.1), Port3 = DMZ (172.16.1.1/24). Sophos chặn mọi thứ chưa có rule. Yêu cầu: tạo IP host LAN_NET (10.1.1.0/24); rule "LAN-ra-Internet" LAN → WAN chỉ HTTP/HTTPS/DNS/PING kèm Linked NAT MASQ; rule "LAN-vao-DMZ" LAN → DMZ mọi dịch vụ (không NAT).',
+    build: () => fwNet('sophos', ['port2', 'port1', 'port3']),
+    init: [ISP, ['fw', ['if port1 ip=10.1.1.1/24 zone=LAN', 'if port2 ip=203.0.113.2/24 zone=WAN', 'if port3 ip=172.16.1.1/24 zone=DMZ', 'gw 203.0.113.1']]],
+    guide: [
+      { dev: 'fw', raw: true, title: '1. Hosts and services → IP host LAN_NET', why: 'Đặt tên cho dải LAN để dùng trong rule (tab "Hosts & services" → Thêm).', cmds: ['obj LAN_NET 10.1.1.0/24'] },
+      { dev: 'fw', raw: true, title: '2. Rules and policies → Add firewall rule (LAN → WAN, MASQ)', why: 'Rule Sophos chọn theo ZONE nguồn/đích. Tích "Linked NAT: MASQ" để đổi IP nguồn sang IP cổng WAN (ISP không biết đường về 10.1.1.0/24). Sophos stateful nên không cần rule chiều về.', cmds: ['rule add LAN-ra-Internet from=LAN to=WAN src=LAN_NET dst=any svc=HTTP,HTTPS,DNS,PING action=accept nat=masq'] },
+      { dev: 'fw', raw: true, title: '3. Rule LAN → DMZ', why: 'Không tích MASQ: traffic nội bộ giữ nguyên IP nguồn (server DMZ thấy IP thật của nhân viên).', cmds: ['rule add LAN-vao-DMZ from=LAN to=DMZ src=LAN_NET dst=any svc=any action=accept'] },
+    ],
+    tasks: [
+      { text: 'IP host LAN_NET = 10.1.1.0/24', verify: 'Hosts & services', check: (a) => { const o = a.d('fw').gfw?.cand.objs.LAN_NET; return o?.ip === '10.1.1.0' && o.prefix === 24; } },
+      { text: 'Nhân viên ra Internet: web 80/443 + ping (có MASQ — ISP không có route về LAN)', verify: 'PC-IN: telnet 8.8.8.8 80 ; ping 8.8.8.8', check: (a) => a.d('isp').routes.length === 0 && tcp(a, 'pin', '8.8.8.8', 80) && tcp(a, 'pin2', '8.8.8.8', 443) && a.ping('pin', '8.8.8.8') },
+      { text: 'Telnet ra Internet bị chặn (không rule nào khớp)', verify: 'telnet 8.8.8.8', check: (a) => !tcp(a, 'pin', '8.8.8.8', 23) },
+      { text: 'LAN vào DMZ mọi dịch vụ; DMZ KHÔNG vào được LAN', verify: 'PC-IN: telnet 172.16.1.10 22', check: (a) => tcp(a, 'pin', '172.16.1.10', 22) && !tcp(a, 'web', '10.1.1.10', 445) },
+      quiz('Linked NAT "MASQ" trên rule LAN → WAN làm gì?', ['Đổi IP nguồn của nhân viên sang IP cổng WAN (masquerade/PAT)', 'Mã hoá traffic', 'Đổi IP đích', 'Chặn traffic không có NAT'], 0),
+    ],
+    hints: ['Chọn tab thiết bị "SOPHOS-XG" để mở trang quản trị web.', 'Xem "🧭 Cách giải chi tiết" — mỗi bước là 1 thao tác trên giao diện.', 'Thao tác sai: dòng ERROR màu đỏ hiện ngay trên trang.'],
+  },
+  {
+    id: 'SP02', group: 'sec', lesson: 'Firewall — Sophos publish server', level: 3, kind: 'config',
+    title: 'Sophos: publish web DMZ (DNAT) — rule phải trỏ tới IP THẬT của server',
+    story: 'Sophos đã chạy như SP01. Cần đưa WEB-DMZ (172.16.1.10) ra Internet bằng IP 203.0.113.10 — chỉ HTTP/HTTPS. Trên Sophos: tạo IP host WEB, NAT rule DNAT (203.0.113.10 → WEB) và firewall rule WAN → DMZ. Lưu ý: firewall rule xét SAU khi DNAT nên đích của rule là WEB (IP thật), không phải IP public.',
+    build: () => fwNet('sophos', ['port2', 'port1', 'port3']),
+    init: [ISP, ['fw', ['if port1 ip=10.1.1.1/24 zone=LAN', 'if port2 ip=203.0.113.2/24 zone=WAN', 'if port3 ip=172.16.1.1/24 zone=DMZ', 'gw 203.0.113.1', 'obj LAN_NET 10.1.1.0/24', 'rule add LAN-ra-Internet from=LAN to=WAN src=LAN_NET svc=HTTP,HTTPS,DNS,PING action=accept nat=masq', 'rule add LAN-vao-DMZ from=LAN to=DMZ src=LAN_NET action=accept']]],
+    guide: [
+      { dev: 'fw', raw: true, title: '1. IP host WEB + NAT rule DNAT', why: 'DNAT đổi đích 203.0.113.10 → 172.16.1.10. Sophos tự trả ARP cho IP public trên cổng WAN.', cmds: ['obj WEB 172.16.1.10', 'nat add WEB-PUBLISH type=dnat ext=203.0.113.10 int=WEB'] },
+      { dev: 'fw', raw: true, title: '2. Firewall rule WAN → DMZ tới WEB', why: 'Đích = WEB (IP thật) vì DNAT đã đổi đích trước khi xét rule. Chỉ HTTP + HTTPS.', cmds: ['rule add WAN-vao-WEB from=WAN to=DMZ src=any dst=WEB svc=HTTP,HTTPS action=accept'] },
+    ],
+    tasks: [
+      { text: 'Khách ngoài mở được http/https://203.0.113.10', verify: 'KHACH-NGOAI: telnet 203.0.113.10 80', check: (a) => tcp(a, 'ext', '203.0.113.10', 80) && tcp(a, 'ext', '203.0.113.10', 443) },
+      { text: 'SSH vào WEB từ Internet bị chặn', verify: 'telnet 203.0.113.10 22', check: (a) => !tcp(a, 'ext', '203.0.113.10', 22) },
+      { text: 'Rule WAN → DMZ dùng đích WEB (IP thật), không dùng "any"', verify: 'Rules and policies', check: (a) => (a.d('fw').gfw?.cand.rules || []).some((r) => r.from.includes('WAN') && r.action === 'accept' && r.dst.includes('WEB')) && !(a.d('fw').gfw?.cand.rules || []).some((r) => r.from.includes('WAN') && r.action === 'accept' && r.dst.includes('any')) },
+      { text: 'Nhân viên vẫn ra Internet và vào WEB', verify: 'PC-IN: telnet 8.8.8.8 80', check: (a) => tcp(a, 'pin', '8.8.8.8', 80) && tcp(a, 'pin', '172.16.1.10', 80) },
+      quiz('Rule cho khách vào web sau DNAT trên Sophos đặt đích là gì?', ['WEB (172.16.1.10) — rule xét sau DNAT', '203.0.113.10', 'any', 'IP cổng WAN'], 0),
+    ],
+    hints: ['Tab "NAT" → DNAT: IP ngoài 203.0.113.10 → máy trong WEB.', 'Tab "Rules and policies": Source zone WAN, Destination zone DMZ, Destination WEB.'],
+  },
+
+  // =====================================================================
+  // CP01–CP02 — Check Point (SmartConsole)
+  // =====================================================================
+  {
+    id: 'CP01', group: 'sec', lesson: 'Firewall — Check Point (SmartConsole)', level: 2, kind: 'config',
+    title: 'Check Point: rulebase, Hide NAT và Install Policy',
+    story: 'Ngân hàng Phương Nam dùng Check Point (quản trị bằng SmartConsole). Gateway đã có topology: eth1 = external (203.0.113.2/24, gateway 203.0.113.1), eth2 = internal (10.1.1.0/24), eth3 = dmz (172.16.1.0/24). Rulebase hiện trống (chỉ có Cleanup rule chặn tất). Yêu cầu: network object LAN_NET; rule "LAN-ra-Internet" (LAN_NET → Any, HTTP/HTTPS/DNS/PING, Accept); rule "LAN-vao-DMZ" (LAN_NET → DMZ_NET, Any, Accept); Hide NAT cho LAN_NET sau IP gateway; và quan trọng: INSTALL POLICY.',
+    build: () => fwNet('checkpoint', ['eth1', 'eth2', 'eth3']),
+    init: [ISP, ['fw', ['if eth1 ip=203.0.113.2/24 zone=external', 'if eth2 ip=10.1.1.1/24 zone=internal', 'if eth3 ip=172.16.1.1/24 zone=dmz', 'gw 203.0.113.1', 'install']]],
+    guide: [
+      { dev: 'fw', raw: true, title: '1. Objects: LAN_NET, DMZ_NET', why: 'Check Point làm việc với OBJECT: mọi rule tham chiếu object (dễ tái dùng, đổi một chỗ).', cmds: ['obj LAN_NET 10.1.1.0/24', 'obj DMZ_NET 172.16.1.0/24'] },
+      { dev: 'fw', raw: true, title: '2. Access Control: thêm rule', why: 'Rulebase Check Point xét từ trên xuống, khớp là dừng; cuối cùng là Cleanup rule (Any → Any → Drop). Không cần zone: rule theo nguồn/đích/dịch vụ.', cmds: ['rule add LAN-ra-Internet src=LAN_NET dst=any svc=HTTP,HTTPS,DNS,PING action=accept', 'rule add LAN-vao-DMZ src=LAN_NET dst=DMZ_NET svc=any action=accept'] },
+      { dev: 'fw', raw: true, title: '3. NAT: Hide NAT cho LAN_NET', why: 'Hide NAT = nhiều IP nội bộ "núp" sau IP gateway khi ra external (tương đương PAT).', cmds: ['nat add HIDE-LAN type=snat from=any to=external src=LAN_NET'] },
+      { dev: 'fw', raw: true, title: '4. Install Policy', why: 'Mọi thay đổi trong SmartConsole chỉ là bản nháp trên Management Server cho tới khi "Install Policy" đẩy xuống gateway.', cmds: ['install'] },
+    ],
+    tasks: [
+      { text: 'Đã Install Policy (không còn thay đổi treo)', verify: 'Nút "Install Policy" không còn nháy', check: (a) => a.d('fw').gfw && JSON.stringify(a.d('fw').gfw.cand) === JSON.stringify(a.d('fw').gfw.live) && a.d('fw').gfw.live.rules.length >= 2 },
+      { text: 'Nhân viên ra Internet: web + ping (Hide NAT)', verify: 'PC-IN: telnet 8.8.8.8 80 ; ping 8.8.8.8', check: (a) => a.d('isp').routes.length === 0 && tcp(a, 'pin', '8.8.8.8', 80) && a.ping('pin', '8.8.8.8') },
+      { text: 'Telnet ra Internet bị Cleanup rule chặn', verify: 'telnet 8.8.8.8', check: (a) => !tcp(a, 'pin', '8.8.8.8', 23) },
+      { text: 'LAN vào DMZ được; DMZ không vào được LAN', verify: 'PC-IN: telnet 172.16.1.10 22', check: (a) => tcp(a, 'pin', '172.16.1.10', 22) && !tcp(a, 'web', '10.1.1.10', 445) },
+      quiz('Sửa rule trong SmartConsole mà chưa Install Policy thì gateway…', ['Vẫn chạy policy cũ — thay đổi chỉ nằm trên Management Server', 'Áp dụng ngay', 'Ngừng chuyển gói', 'Tự Install sau 5 phút'], 0),
+    ],
+    hints: ['Chọn tab thiết bị "CP-GW" để mở SmartConsole giả lập.', 'Sau khi thêm rule/NAT, nút "⬆ Install Policy" nháy cam — bấm để áp dụng.'],
+  },
+  {
+    id: 'CP02', group: 'sec', lesson: 'Firewall — Xử lý sự cố Check Point', level: 3, kind: 'ticket',
+    title: 'Ticket Check Point: "đã sửa rồi mà không ăn" và web công ty không vào được',
+    story: '🎫 Thiết kế đúng: nhân viên ra Internet bằng web/DNS/ping (Hide NAT sau IP gateway); WEB 172.16.1.10 publish bằng Static NAT 203.0.113.10, khách chỉ vào HTTP/HTTPS. Hiện tại: nhân viên không ra được Internet, khách không vào được web. Admin ca trước còn để lại thay đổi chưa cài. Dùng tab Access Control / NAT / Logs để tìm và sửa (nhớ Install Policy).',
+    build: () => fwNet('checkpoint', ['eth1', 'eth2', 'eth3']),
+    init: [ISP, ['fw', ['if eth1 ip=203.0.113.2/24 zone=external', 'if eth2 ip=10.1.1.1/24 zone=internal', 'if eth3 ip=172.16.1.1/24 zone=dmz', 'gw 203.0.113.1', 'obj LAN_NET 10.1.1.0/24', 'obj WEB 172.16.1.10',
+      'rule add Test-chan-tam src=LAN_NET dst=any svc=any action=drop', 'rule add LAN-ra-Internet src=LAN_NET dst=any svc=HTTP,HTTPS,DNS,PING action=accept', 'rule add WEB-IN src=any dst=WEB svc=HTTP,HTTPS action=accept', 'install', 'nat add HIDE-LAN type=snat from=any to=external src=LAN_NET']]],
+    guide: [
+      { dev: 'fw', raw: true, title: '1. Rule "Test-chan-tam" (Drop) đứng trên cùng', why: 'Rule 1 chặn mọi traffic từ LAN_NET nên rule 2 không bao giờ được xét. Xoá (hoặc tắt) rule thử nghiệm.', cmds: ['rule del Test-chan-tam'] },
+      { dev: 'fw', raw: true, title: '2. Thiếu Static NAT cho WEB', why: 'Rule WEB-IN có nhưng không có NAT tĩnh 203.0.113.10 → 172.16.1.10 → khách gõ IP public không tới được server.', cmds: ['nat add WEB-STATIC type=dnat ext=203.0.113.10 int=WEB'] },
+      { dev: 'fw', raw: true, title: '3. Install Policy', why: 'Hide NAT ca trước thêm chưa cài + các sửa đổi vừa rồi → chỉ có tác dụng sau Install Policy.', cmds: ['install'] },
+    ],
+    tasks: [
+      { text: 'Nhân viên ra Internet (web, ping)', verify: 'PC-IN: telnet 8.8.8.8 80', check: (a) => tcp(a, 'pin', '8.8.8.8', 80) && a.ping('pin', '8.8.8.8') },
+      { text: 'Khách ngoài vào được http/https://203.0.113.10; SSH vẫn bị chặn', verify: 'KHACH-NGOAI: telnet 203.0.113.10 80', check: (a) => tcp(a, 'ext', '203.0.113.10', 80) && tcp(a, 'ext', '203.0.113.10', 443) && !tcp(a, 'ext', '203.0.113.10', 22) },
+      { text: 'Không còn thay đổi chưa Install Policy', verify: 'banner ⚠ không còn', check: (a) => JSON.stringify(a.d('fw').gfw?.cand) === JSON.stringify(a.d('fw').gfw?.live) },
+      { text: 'Ràng buộc: không thêm rule Any → Any → Accept', verify: 'Access Control', check: (a) => !(a.d('fw').gfw?.live.rules || []).some((r) => r.action === 'accept' && r.src.includes('any') && r.dst.includes('any') && r.svc.includes('any')) },
+    ],
+    hints: ['Có 3 vấn đề: thứ tự rule, thiếu NAT, chưa Install.', 'Tab Logs → phiên đang mở; banner ⚠ cho biết còn thay đổi chưa cài.'],
+  },
+
+  // =====================================================================
+  // PF01–PF02 — pfSense
+  // =====================================================================
+  {
+    id: 'PF01', group: 'sec', lesson: 'Firewall — pfSense', level: 2, kind: 'config',
+    title: 'pfSense: siết rule "Default allow LAN to any" — rule xét trên cổng NHẬN gói',
+    story: 'Trường THPT Lê Lợi cài pfSense. Mặc định pfSense có rule "Default allow LAN to any" — học sinh dùng được mọi dịch vụ (kể cả Telnet, game...). Yêu cầu: chỉ cho LAN dùng HTTP, HTTPS, DNS và ping (tới bất kỳ đâu, kể cả DMZ/OPT1); xoá rule mặc định; DMZ không được vào LAN. Cổng đã cấu hình: em0 = WAN (203.0.113.2/24, gateway .1), em1 = LAN (10.1.1.1/24), em2 = OPT1/DMZ (172.16.1.1/24). Outbound NAT đang Automatic. Nhớ "Apply Changes".',
+    build: () => fwNet('pfsense', ['em0', 'em1', 'em2']),
+    init: [ISP, ['fw', ['if em0 ip=203.0.113.2/24 zone=WAN', 'if em1 ip=10.1.1.1/24 zone=LAN', 'if em2 ip=172.16.1.1/24 zone=OPT1', 'gw 203.0.113.1', 'apply']]],
+    guide: [
+      { dev: 'fw', raw: true, title: '1. Firewall Rules → tab LAN: thêm rule cho phép từng dịch vụ', why: 'pfSense gắn rule vào cổng NHẬN gói (tab LAN = gói đi vào từ LAN). Nguồn "LAN net" = cả dải LAN. Thêm trước khi xoá rule mặc định để không tự khoá mình.', cmds: ['rule add Web-DNS-Ping from=LAN to=any src="LAN net" dst=any svc=HTTP,HTTPS,DNS,PING action=accept'] },
+      { dev: 'fw', raw: true, title: '2. Xoá "Default allow LAN to any" + Apply Changes', why: 'Còn rule mặc định thì rule mới vô nghĩa (mọi thứ đã được cho phép). pfSense chỉ áp dụng sau "Apply Changes".', cmds: ['rule del "Default allow LAN to any"', 'apply'] },
+    ],
+    tasks: [
+      { text: 'Rule mặc định "Default allow LAN to any" đã bị xoá và đã Apply', verify: 'Firewall Rules → LAN', check: (a) => { const g = a.d('fw').gfw; return !!g && !g.live.rules.some((r) => r.name === 'Default allow LAN to any') && JSON.stringify(g.cand) === JSON.stringify(g.live); } },
+      { text: 'LAN ra Internet bằng web + ping (Automatic outbound NAT)', verify: 'PC-IN: telnet 8.8.8.8 80 ; ping 8.8.8.8', check: (a) => a.d('isp').routes.length === 0 && tcp(a, 'pin', '8.8.8.8', 80) && tcp(a, 'pin2', '8.8.8.8', 443) && a.ping('pin', '8.8.8.8') },
+      { text: 'Telnet ra ngoài và SSH vào DMZ bị chặn; web vào DMZ vẫn được', verify: 'telnet 8.8.8.8', check: (a) => !tcp(a, 'pin', '8.8.8.8', 23) && !tcp(a, 'pin', '172.16.1.10', 22) && tcp(a, 'pin', '172.16.1.10', 80) },
+      { text: 'DMZ (OPT1) không vào được LAN', verify: 'WEB-DMZ → 10.1.1.10', check: (a) => !tcp(a, 'web', '10.1.1.10', 445) },
+      quiz('Muốn chặn gói từ LAN đi ra, trên pfSense đặt rule ở tab nào?', ['Tab LAN — cổng gói ĐI VÀO firewall', 'Tab WAN — cổng gói đi ra', 'Tab nào cũng được', 'Floating bắt buộc'], 0),
+    ],
+    hints: ['Chọn tab thiết bị "pfSense" để mở trang quản trị.', 'Firewall Rules có tab con theo từng cổng (WAN / LAN / OPT1).', 'Sau khi sửa: nút "Apply Changes" phía trên.'],
+  },
+  {
+    id: 'PF02', group: 'sec', lesson: 'Firewall — pfSense port forward', level: 3, kind: 'ticket',
+    title: 'pfSense port forward 8080 → web DMZ: rule đặt nhầm tab nên không chạy',
+    story: '🎫 Trường chỉ có 1 IP public (em0 = 203.0.113.2). Cần cho Internet vào web nội bộ WEB-DMZ (172.16.1.10:80) qua cổng 8080. Thực tập sinh đã tạo alias WEB và một rule "Cho-web-8080" ở tab OPT1, rồi "Apply" — khách vẫn không vào được. Hãy làm đúng: NAT → Port Forward (WAN 8080 → WEB:80, kèm "associated filter rule" trên WAN), xoá rule đặt nhầm tab, Apply. SSH vào WEB từ ngoài vẫn phải bị chặn.',
+    build: () => fwNet('pfsense', ['em0', 'em1', 'em2']),
+    init: [ISP, ['fw', ['if em0 ip=203.0.113.2/24 zone=WAN', 'if em1 ip=10.1.1.1/24 zone=LAN', 'if em2 ip=172.16.1.1/24 zone=OPT1', 'gw 203.0.113.1', 'obj WEB 172.16.1.10', 'svc WEB8080 tcp 8080', 'rule add Cho-web-8080 from=OPT1 to=any src=any dst=WEB svc=WEB8080 action=accept', 'apply']]],
+    guide: [
+      { dev: 'fw', raw: true, title: '1. Rule ở tab OPT1 vô tác dụng', why: 'Gói của khách ĐI VÀO từ WAN, nên rule phải nằm ở tab WAN. Tab OPT1 chỉ xét gói đi vào từ DMZ. Ngoài ra sau port forward đích là 172.16.1.10:80, không còn là 8080. Xoá rule sai.', cmds: ['rule del Cho-web-8080'] },
+      { dev: 'fw', raw: true, title: '2. NAT → Port Forward + associated filter rule', why: 'WAN address:8080 → WEB:80. Tích "Add associated filter rule" để pfSense tự tạo rule trên tab WAN cho phép tới WEB:80 (IP + port THẬT).', cmds: ['nat add WEB-8080 type=dnat ext=wan int=WEB proto=tcp ext_port=8080 int_port=80 rule=yes', 'apply'] },
+    ],
+    tasks: [
+      { text: 'Khách ngoài mở được web qua 203.0.113.2:8080', verify: 'KHACH-NGOAI: telnet 203.0.113.2 8080', check: (a) => tcp(a, 'ext', '203.0.113.2', 8080) },
+      { text: 'SSH (22) vào WEB từ ngoài bị chặn', verify: 'telnet 203.0.113.2 22', check: (a) => !tcp(a, 'ext', '203.0.113.2', 22) && !tcp(a, 'ext', '172.16.1.10', 22) },
+      { text: 'Rule cho phép web nằm ở tab WAN; không còn rule thừa ở tab OPT1; đã Apply', verify: 'Firewall Rules', check: (a) => { const g = a.d('fw').gfw; return !!g && g.live.rules.some((r) => r.from.includes('WAN') && r.action === 'accept') && !g.live.rules.some((r) => r.from.includes('OPT1')) && JSON.stringify(g.cand) === JSON.stringify(g.live); } },
+      { text: 'LAN vẫn ra Internet (rule mặc định LAN còn nguyên)', verify: 'PC-IN: telnet 8.8.8.8 80', check: (a) => tcp(a, 'pin', '8.8.8.8', 80) },
+      quiz('Associated filter rule của port forward 8080 → WEB:80 cho phép đích nào?', ['172.16.1.10 cổng 80 — rule xét sau khi đã đổi đích', '203.0.113.2 cổng 8080', '172.16.1.10 cổng 8080', 'any'], 0),
+    ],
+    hints: ['Rule pfSense nằm ở tab của cổng NHẬN gói.', 'NAT → Port Forward: ext=wan, ext_port 8080 → WEB int_port 80, tích "Add associated filter rule".', 'Đừng quên Apply Changes.'],
   },
 ];

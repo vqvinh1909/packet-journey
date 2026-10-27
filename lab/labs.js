@@ -64,7 +64,7 @@ export const LAB_GROUPS = [
   { id: 'c2', title: '📗 CCNA trực quan — Ch.2 Các bước cấu hình' },
   { id: 'c3', title: '📗 CCNA trực quan — Ch.3 Xử lý sự cố' },
   { id: 'adv', title: '🔬 Chuyên đề nâng cao — VTP · PVLAN · IPsec · BGP · STP' },
-  { id: 'sec', title: '🛡️ Bảo mật & Firewall — ASA · ZBF · FortiGate · Palo Alto' },
+  { id: 'sec', title: '🛡️ Bảo mật & Firewall — ASA · ZBF · FortiGate · Palo Alto · Sophos · Check Point · pfSense' },
 ];
 
 const INFRA_LABS = [

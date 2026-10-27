@@ -5,12 +5,13 @@
    `firewall(id,name,x,y,ifs,os)` trong net.js; tests/fw.test.js).
 2. ✅ Cisco ASA `lab/asa.js` (dialect riêng, gắn vào ios.js qua `d.os === 'asa'`) + lab F01–F04.
 3. ✅ Zone-Based Firewall trong ios.js (mode zone/cmapi/pmapi/pmapic/zpair) + lab Z01–Z03.
-4. ⏳ FortiGate (FortiOS) + Palo Alto (PAN-OS) — kind 'policy' (rule base có sẵn trong fw.js: from/to, src/dst, svc,
-   action, nat). Sophos / Check Point / pfSense (dạng GUI web): user trả lời mâu thuẫn (chọn cả 3 + "chỉ Forti + PA")
-   → HỎI LẠI trước khi làm.
+4. ✅ FortiGate `lab/fortios.js` (FG01–02) + Palo Alto `lab/panos.js` (PA01–02, commit, pre-NAT IP/post-NAT zone) — kind
+   'policy'. Sophos / Check Point / pfSense dạng GUI web: logic `lab/guifw.js` (d.os sophos|checkpoint|pfsense, "lệnh
+   thao tác" `if/gw/obj/svc/rule/nat/outbound/install/apply/show`, cand/live cho CP + pfSense), trang web `ui/guifw.js`
+   (ui/lab.js ẩn console, hiện #lab-gui) + lab SP01–02, CP01–02, PF01–02. Token `key="a b"` giữ 1 từ (pfSense "LAN net").
 5. ⏳ Gói bảo mật L2 + thiết bị: DAI thật (hiện chỉ parse), IP Source Guard, DHCP giả, AAA/login block-for/hardening.
 6. ⏳ Kịch bản tấn công byte-thật (ARP spoofing, DHCP giả/starvation, VLAN hopping) trong scenarios/.
-- Tổng hiện tại: 85 lab, `node --test` 181/181, `node tools/ui-smoke.cjs` 18/18.
+- Tổng hiện tại: 95 lab, `node --test` 194/194, `node tools/ui-smoke.cjs` 28/28.
 
 
 ## ✅ ĐÃ XONG Lab CLI đợt 3 (session 2026-10-27/28) — 7 cải tiến

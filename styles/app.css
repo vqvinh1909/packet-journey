@@ -445,6 +445,52 @@ html, body {
 .lab-exres-x { position: absolute; top: 4px; right: 6px; border: none; background: none; cursor: pointer; color: inherit; font-size: 14px; }
 .lab-best { color: var(--warn); font-weight: 600; }
 .lab-best.pass { color: var(--ok); }
+/* Lab: trang quản trị web giả lập (Sophos / Check Point / pfSense) */
+.lab-gui { flex: 1; min-height: 260px; display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: 0 8px 8px 8px; overflow: hidden; background: var(--panel); font-size: 12.5px; }
+.lab-gui[hidden], .lab-term[hidden] { display: none; }
+.gf-top { display: flex; align-items: center; gap: 10px; padding: 8px 12px; color: #fff; }
+.gf-logo { font-weight: 800; letter-spacing: 0.3px; }
+.gf-dev { opacity: 0.8; flex: 1; }
+.gf-sophos .gf-top { background: #0b2545; } .gf-sophos .gf-nav button.on { border-left-color: #00a3e0; }
+.gf-checkpoint .gf-top { background: #2b2b33; } .gf-checkpoint .gf-nav button.on { border-left-color: #e6007e; }
+.gf-pfsense .gf-top { background: #1f2a38; } .gf-pfsense .gf-nav button.on { border-left-color: #f0883e; }
+.gf-commit { font: inherit; font-weight: 700; padding: 5px 12px; border-radius: 6px; border: 1px solid rgba(255, 255, 255, 0.5); background: transparent; color: #fff; cursor: pointer; }
+.gf-commit.pend { background: #f0883e; border-color: #f0883e; animation: lab-flash 1.6s infinite; }
+.gf-top .gf-muted { color: rgba(255, 255, 255, 0.7); }
+.gf-banner { background: var(--changed-soft); color: var(--warn); padding: 6px 12px; font-weight: 600; }
+.gf-err { background: #fbe1dd; color: #7a1f14; padding: 6px 12px; }
+:root[data-theme='dark'] .gf-err { background: #3a1d1a; color: #f2b8af; }
+.gf-wrap { flex: 1; min-height: 0; display: grid; grid-template-columns: 150px minmax(0, 1fr); }
+.gf-nav { background: var(--panel-2); border-right: 1px solid var(--border); padding: 6px 0; overflow-y: auto; }
+.gf-nav button { display: block; width: 100%; text-align: left; font: inherit; padding: 7px 12px; border: none; border-left: 3px solid transparent; background: none; color: var(--text); cursor: pointer; }
+.gf-nav button.on { background: var(--panel); font-weight: 700; }
+.gf-body { padding: 10px 12px; overflow: auto; }
+.gf-body h4 { margin: 4px 0 8px; font-size: 13px; }
+.gf-t { border-collapse: collapse; width: 100%; margin-bottom: 8px; }
+.gf-t th, .gf-t td { border: 1px solid var(--border); padding: 4px 6px; text-align: left; vertical-align: middle; }
+.gf-t th { background: var(--panel-2); font-weight: 700; }
+.gf-t input, .gf-row input, .gf-row select, .gf-t select, .gf-form input, .gf-form select { font: inherit; font-size: 12px; padding: 3px 5px; border: 1px solid var(--border); border-radius: 5px; background: var(--panel); color: var(--text); }
+.gf-body button { font: inherit; font-size: 12px; padding: 3px 8px; border: 1px solid var(--border); border-radius: 5px; background: var(--panel-2); color: var(--text); cursor: pointer; }
+.gf-body button:hover { border-color: var(--accent); }
+.gf-btns { white-space: nowrap; }
+.gf-btns button { padding: 2px 5px; }
+.gf-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 8px 0; }
+.gf-muted { color: var(--muted); font-size: 11.5px; }
+.gf-act { font-weight: 700; padding: 1px 6px; border-radius: 4px; }
+.gf-act.accept { background: #d6f0e0; color: #14532d; } .gf-act.drop { background: #fbe1dd; color: #7a1f14; }
+:root[data-theme='dark'] .gf-act.accept { background: #1d3a2a; color: #a7e5c3; } :root[data-theme='dark'] .gf-act.drop { background: #3a1d1a; color: #f2b8af; }
+.gf-nat { font-size: 10.5px; background: var(--accent-soft); color: var(--accent); padding: 0 4px; border-radius: 4px; }
+.gf-off td { opacity: 0.45; text-decoration: line-through; }
+.gf-implicit td { color: var(--muted); font-style: italic; background: var(--panel-2); }
+.gf-subtabs { display: flex; gap: 4px; margin-bottom: 6px; }
+.gf-subtabs button.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+.gf-add { margin-top: 6px; border: 1px dashed var(--border); border-radius: 6px; padding: 6px 8px; }
+.gf-add summary { cursor: pointer; font-weight: 700; color: var(--accent); }
+.gf-form { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: flex-end; margin-top: 8px; }
+.gf-form label { display: flex; flex-direction: column; gap: 3px; font-size: 11.5px; color: var(--muted); }
+.gf-form label.gf-chk, .gf-row label.gf-chk { flex-direction: row; align-items: center; color: var(--text); }
+.gf-log { font-family: var(--mono); font-size: 11px; background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; white-space: pre-wrap; max-height: 200px; overflow: auto; }
+@media (max-width: 760px) { .gf-wrap { grid-template-columns: 1fr; } .gf-nav { display: flex; overflow-x: auto; border-right: none; border-bottom: 1px solid var(--border); } .gf-nav button { width: auto; white-space: nowrap; border-left: none; border-bottom: 3px solid transparent; } }
 /* Lab: báo nhiệm vụ vừa đạt sau mỗi bước */
 .lab-gain { font-size: 12.5px; background: #d6f0e0; color: #14532d; border: 1px solid var(--ok); border-radius: 8px; padding: 6px 9px; margin-bottom: 8px; line-height: 1.45; }
 .lab-gain.none { background: var(--panel-2); color: var(--muted); border-color: var(--border); }

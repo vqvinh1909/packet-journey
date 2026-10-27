@@ -7,8 +7,8 @@ và **xuất được `.pcap`** để mở bằng Wireshark đối chiếu.
 
 > Trạng thái: **đã phủ CCNA + CCNP** — 30 kịch bản byte-thật (23 giao thức, quiz đủ 30 bài),
 > chế độ học chủ động (đoán bước, thử thách sửa lỗi, từ điển, lưu tiến độ, PWA offline),
-> Builder + Canvas vẽ mạng, và **🧪 Lab CLI Cisco IOS với 85 lab** (27 lab giáo trình, 41 lab
-> CCNA trực quan, 5 lab chuyên đề, 7 lab firewall, 5 lab tổng hợp doanh nghiệp) + chế độ thi thử + chế độ tự dựng mạng. Chi tiết xem [Lộ trình](#lộ-trình).
+> Builder + Canvas vẽ mạng, và **🧪 Lab CLI Cisco IOS với 95 lab** (27 lab giáo trình, 41 lab
+> CCNA trực quan, 5 lab chuyên đề, 17 lab bảo mật & firewall 7 hãng, 5 lab tổng hợp doanh nghiệp) + chế độ thi thử + chế độ tự dựng mạng. Chi tiết xem [Lộ trình](#lộ-trình).
 
 ## Chạy app
 
@@ -44,7 +44,7 @@ Test kiểm: checksum so với ví dụ đã biết, độ dài & offset header,
 gói ARP/ICMP mẫu, cấu trúc file `.pcap`, longest-prefix match, và tính bất biến của
 kịch bản (TTL giảm qua router, IP src/dst giữ nguyên).
 
-Với Lab CLI (`tests/lab.test.js`), MỖI lab trong 85 lab phải: trước khi giải có ít nhất 1 nhiệm vụ
+Với Lab CLI (`tests/lab.test.js`), MỖI lab trong 95 lab phải: trước khi giải có ít nhất 1 nhiệm vụ
 cấu hình chưa đạt; chạy lời giải (`applySolution` — `solution` hoặc `guide`, bước `'@link'` = cắm dây)
 không sinh lỗi CLI `% Invalid/Incomplete/Ambiguous/Unknown`; sau đó `checkLab(lab, net, quizAnswers(lab))`
 đạt toàn bộ. `tests/sandbox.test.js` kiểm chế độ tự dựng mạng (thêm/xoá/nối dây, đổi tên, nhân bản, hoàn tác,
@@ -78,10 +78,14 @@ node tools/ui-smoke.cjs   # tự bật server tĩnh, in PASS/FAIL từng mục
 - **📘 Từ điển**: ~25 thuật ngữ (có tìm kiếm) + bảng tra nhanh cổng phổ biến & OSI↔TCP/IP.
 - **💾 Tiến độ**: đánh dấu kịch bản đã xem + điểm quiz, và nút xuất/nhập tiến độ (.json).
 - **PWA offline**: có `manifest.webmanifest` + `sw.js` (service worker) → cài được như app và chạy offline sau lần mở online đầu (trên Chrome/Edge thật).
-- **🧪 Lab CLI (Cisco IOS)** — **85 lab** + chế độ thi thử + chế độ tự dựng mạng: gõ lệnh như trên router/switch thật (viết tắt `sh ip int br`, `conf t`, Tab hoàn thành, `?` trợ giúp, lỗi `% Invalid input ... '^' marker`, mật khẩu enable, `| include/section`...). Mạng được **tính thật** từ cấu hình bạn gõ: VLAN/trunk/native/DTP/VTP/EtherChannel/PVLAN, **STP 802.1D/PVST thật** (root/root port/designated, cổng BLOCKING bị chặn khi chuyển frame), bảng định tuyến connected + static (floating) + **OSPF đa vùng/EIGRP/BGP (iBGP qua loopback, eBGP) tự hội tụ** + redistribution, **IPv6 dual-stack** (địa chỉ/EUI-64/link-local, static, OSPFv3, SLAAC, ping IPv6), GRE, IPsec, PPP CHAP, ACL (thứ tự dòng, deny ngầm định), NAT/PAT/NAT tĩnh/NAT pool, HSRP (tracking)/VRRP, DHCP + relay, DHCP snooping, port-security, SSH/Telnet, NTP. Nhiệm vụ **tự chấm** sau mỗi lệnh bằng ping/telnet/`show` thật; ping/traceroute/DHCP có nút **▶ Xem gói tin** mở timeline byte-thật ở màn hình chính.
+- **🧪 Lab CLI (Cisco IOS)** — **95 lab** + chế độ thi thử + chế độ tự dựng mạng: gõ lệnh như trên router/switch thật (viết tắt `sh ip int br`, `conf t`, Tab hoàn thành, `?` trợ giúp, lỗi `% Invalid input ... '^' marker`, mật khẩu enable, `| include/section`...). Mạng được **tính thật** từ cấu hình bạn gõ: VLAN/trunk/native/DTP/VTP/EtherChannel/PVLAN, **STP 802.1D/PVST thật** (root/root port/designated, cổng BLOCKING bị chặn khi chuyển frame), bảng định tuyến connected + static (floating) + **OSPF đa vùng/EIGRP/BGP (iBGP qua loopback, eBGP) tự hội tụ** + redistribution, **IPv6 dual-stack** (địa chỉ/EUI-64/link-local, static, OSPFv3, SLAAC, ping IPv6), GRE, IPsec, PPP CHAP, ACL (thứ tự dòng, deny ngầm định), NAT/PAT/NAT tĩnh/NAT pool, HSRP (tracking)/VRRP, DHCP + relay, DHCP snooping, port-security, SSH/Telnet, NTP. Nhiệm vụ **tự chấm** sau mỗi lệnh bằng ping/telnet/`show` thật; ping/traceroute/DHCP có nút **▶ Xem gói tin** mở timeline byte-thật ở màn hình chính.
   - **27 lab theo giáo trình** *Infrastructure Administrator* (L01–L20 theo bài, 🎫 6 ticket T01–T06, 🏢 dự án GreenMart P01).
   - **41 lab "CCNA trực quan"** (`lab/labs-ccna.js`): Ch.1 khái niệm cốt lõi A01–A26, Ch.2 các bước cấu hình B01–B10, Ch.3 xử lý sự cố C01–C05.
-  - **🛡️ 7 lab firewall** (`lab/labs-sec.js`): **Cisco ASA** (thiết bị riêng, CLI ASA: nameif/security-level, ACL kiểu ASA, object NAT, inspect icmp, show conn/xlate) — F01 3 vùng cơ bản, F02 publish web DMZ, F03 ticket 5 lỗi, F04 port forwarding + 2 DMZ cùng mức; **Zone-Based Firewall trên router IOS** — Z01 INSIDE→OUTSIDE, Z02 3 zone + DMZ, Z03 ticket 4 lỗi. Lõi firewall stateful dùng chung ở `lab/fw.js`.
+  - **🛡️ 17 lab bảo mật & firewall** (`lab/labs-sec.js`), lõi firewall stateful dùng chung `lab/fw.js`:
+    - **Cisco ASA** (CLI ASA: nameif/security-level, ACL kiểu ASA, object NAT, inspect icmp, show conn/xlate) — F01 3 vùng cơ bản, F02 publish web DMZ, F03 ticket 5 lỗi, F04 port forwarding + 2 DMZ cùng mức.
+    - **Zone-Based Firewall trên router IOS** — Z01 INSIDE→OUTSIDE, Z02 3 zone + DMZ, Z03 ticket 4 lỗi.
+    - **FortiGate** (CLI FortiOS `config/edit/set/next/end`, VIP, `get system session list`) — FG01, FG02; **Palo Alto** (PAN-OS: candidate config + `commit`, App-ID, NAT pre-NAT IP / post-NAT zone) — PA01, PA02.
+    - **Trang quản trị web giả lập** (thay console khi chọn thiết bị): **Sophos Firewall** (rule theo zone, Linked NAT MASQ, DNAT) — SP01, SP02; **Check Point** SmartConsole (rulebase, Hide/Static NAT, *Install Policy*) — CP01, CP02; **pfSense** (rule theo cổng nhận gói, *Default allow LAN*, port forward + associated rule, *Apply Changes*) — PF01, PF02. Mỗi thao tác trên form sinh một "lệnh thao tác" nên lời giải/cách giải/nhật ký dùng chung.
   - **🔬 5 lab chuyên đề** (`lab/labs-adv.js`): D01 VTP gỡ "bom revision", D02 Private VLAN khách sạn + DHCP, D03 IPsec site-to-site dựng từ đầu + NAT exemption, D04 BGP iBGP/eBGP + next-hop-self, D05 STP đặt Root Bridge đúng chỗ.
   - **🏆 5 lab tổng hợp doanh nghiệp CCNA + CCNP** (`lab/labs-capstone.js`, có cách giải chi tiết):
     X01 campus 3 lớp (EtherChannel, port-security, HSRP trên SVI, DHCP, OSPF, NAT PAT, ACL khách, SSH) ·
@@ -132,7 +136,8 @@ protocols/  ethernet, dot1q, arp, ipv4, icmp, llc, stp, ospf, eigrp, udp, dhcp, 
             tcp, hsrp, bgp, raw, ipv6, icmpv6, ospfv3, mstp, dhcpv6, mpls, vxlan   (23 giao thức)
 engine/     tables (ARP/MAC/routing + longest-prefix), devices, simulate (recorder)
 lab/        net (máy mô phỏng mạng tính từ cấu hình), net6 + ip6 (IPv6), fw (lõi firewall stateful),
-            ios (CLI Cisco IOS + PC + Zone-Based Firewall), asa (CLI Cisco ASA), labs-sec (lab firewall),
+            ios (CLI Cisco IOS + PC + Zone-Based Firewall), asa (CLI Cisco ASA), fortios, panos,
+            guifw (Sophos/Check Point/pfSense — ui/guifw.js vẽ trang web), labs-sec (lab firewall),
             labs (27 lab + chấm điểm), labs-ccna (41 lab), labs-adv (5 lab chuyên đề), labs-capstone (5 lab tổng hợp),
             kit (helper soạn lab), sandbox (tự dựng mạng)
 tools/      ui-smoke.cjs (kiểm tra giao diện bằng Playwright, tuỳ chọn)
