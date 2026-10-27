@@ -28,6 +28,10 @@ Hoặc bấm đúp **`Mở-Packet-Journey.bat`** (tự bật server và mở đ�
 > UTF-8 nên hết lỗi. Link "📖 Đọc thêm" trong app trỏ sang **file HTML giáo trình đã build**
 > (`Infrastructure-Administrator-Giao-trinh.html#bNN-s0`) để render đẹp.
 
+> Server phải **đa luồng**: app nạp hơn 100 module ES cùng lúc, server 1 luồng (`socketserver.TCPServer`)
+> làm Chrome báo `ERR_CONNECTION_REFUSED` giữa chừng. `serve.py` nên dựng bằng `http.server.ThreadingHTTPServer`;
+> nếu chỉ cần chạy app, `python -m http.server 8000` cũng được (đa luồng sẵn từ Python 3.7).
+
 > Vì sao cần server mà không mở thẳng `index.html`? App dùng ES modules (`import`),
 > trình duyệt chặn `import` khi mở bằng `file://`. Server HTTP là bắt buộc.
 
@@ -109,6 +113,7 @@ node tools/ui-smoke.cjs   # tự bật server tĩnh, in PASS/FAIL từng mục
     - **Trạng thái thiết bị**: mới thêm thì **tắt** (icon xám); **Start** → log khởi động trong console rồi mới gõ lệnh (icon xanh); **Stop** → mọi cổng down, dây nối tới nó down, mất kết nối (cấu hình đang chạy được giữ). Có ▶ Start all / ■ Stop all.
     - **Chuột phải** vào thiết bị: Start, Stop, Wipe (về cấu hình trống), Console, Nối dây từ đây, Đổi tên, Nhân bản, Xoá; vào dây: Xoá dây; vào nền: Add node….
     - **Nhiều cửa sổ console cùng lúc** (nháy đúp thiết bị): kéo, đổi kích thước, thu nhỏ xuống thanh dưới, đóng; mỗi console giữ lịch sử ↑/↓, Tab, `?`, dán nhiều dòng. Sophos / Check Point / pfSense mở trang quản trị web trong cửa sổ.
+    - **☁️ Cloud / Internet** (nhóm *Network*): thiết bị "Internet" vẽ thành đám mây SVG tự vẽ (đầu dây cắm vào mép đám mây, dưới hiện tên + IP) nhưng vẫn là server giả lập 1 cổng — đặt IP/gateway, ping, telnet như server. Cờ `cloud` lưu trong JSON; server tên chứa "INTERNET" (kể cả trong các lab có sẵn và file JSON cũ) tự vẽ thành đám mây ở sơ đồ Lab CLI, workspace và sơ đồ "Xem gói tin".
     - **📡 Capture trên dây kiểu Wireshark** (`lab/capture.js`): chuột phải vào dây → *Start capture* / *Stop capture*; dây đang bắt có dải sáng chạy dọc dây + kính lúp; bắt được nhiều dây cùng lúc, mỗi dây một cửa sổ nổi. Bảng gói No. / Time / Source / Destination / Protocol / Length / Info (vd `Echo (ping) request id=0x0001, seq=1`, `Who has 10.0.0.1? Tell 10.0.0.2`, `Hello Packet`) tô màu theo giao thức, tag VLAN của trunk 802.1Q; bấm 1 gói → cây trường từng lớp + hex dump (rê chuột nối hai bên); bộ lọc hiển thị `icmp`, `arp`, `tcp`, `udp`, `ospf`, `stp`, `dhcp`, `ip.addr == x.x.x.x`, `tcp.port == 80`, `vlan.id == 10` (ghép `&&` / `||` / `!`); tải `.pcap` mở được bằng Wireshark. Gói lấy từ chính engine (ping lặp 4/5 lượt, ARP chỉ khi bảng ARP chưa có, DHCP, telnet/SSH, traceroute) + gói định kỳ theo cấu hình đang chạy: BPDU 2 s, HSRP Hello 3 s, EIGRP Hello 5 s, OSPF Hello 10 s.
     - 🔗 Nối dây, ↶ hoàn tác / ↷ làm lại (Ctrl+Z/Ctrl+Y ngoài console), Delete xoá thiết bị đang chọn, 📐 5 mạng mẫu; tự lưu trong trình duyệt (`pj_sandbox-net`, khung nhìn `pj_sandbox-view`), ⬇ xuất / ⬆ nhập JSON (file cũ chưa có trạng thái bật/tắt vẫn mở được — thiết bị coi như đang chạy); 🧭 6 nhiệm vụ gợi ý lộ trình (LAN → VLAN → định tuyến → DHCP → OSPF/EIGRP).
   - Tiến độ + cấu hình đã gõ được lưu, mở lại vẫn còn; có gợi ý từng bước và lời giải mẫu (nút "▶ Gõ lời giải" chạy `applySolution` ngay trong console).

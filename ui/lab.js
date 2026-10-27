@@ -13,7 +13,7 @@ import { GUI_VENDORS } from '../lab/guifw.js';
 import { renderGuiFw } from './guifw.js';
 import { load, save } from './store.js';
 import { lessonHref } from './i18n.js';
-import { SVG, el, esc, isHost, drawGlyph, adminUp, classifyLine, stpBlocked } from './topo.js';
+import { SVG, el, esc, isHost, drawGlyph, adminUp, classifyLine, stpBlocked, linkEnd } from './topo.js';
 
 const live = new Map(); // labId -> phiên đang làm (giữ nguyên khi đóng/mở lại modal)
 const MAX_LINES = 800;
@@ -224,10 +224,12 @@ export function openLab(onRun) {
       const off = (i - (pairN[k] - 1) / 2) * 16;
       const dx = B.x - A.x, dy = B.y - A.y, len = Math.hypot(dx, dy) || 1;
       const ox = (-dy / len) * off, oy = (dx / len) * off;
+      // đám mây "Internet": đầu dây cắm vào mép đám mây thay vì tâm
+      const PA = linkEnd(A, B.x, B.y), PB = linkEnd(B, A.x, A.y), ex = PB.x - PA.x, ey = PB.y - PA.y;
       const upA = N.lineUp(net, l.a, l.ap), upB = N.lineUp(net, l.b, l.bp);
       const adminDown = !adminUp(net, l.a, l.ap) || !adminUp(net, l.b, l.bp);
       const cls = upA && upB ? 'up' : adminDown ? 'admin' : 'down';
-      const geo = { x1: A.x + ox, y1: A.y + oy, x2: B.x + ox, y2: B.y + oy };
+      const geo = { x1: PA.x + ox, y1: PA.y + oy, x2: PB.x + ox, y2: PB.y + oy };
       layerLinks.appendChild(el('line', { ...geo, class: 'lab-link ' + cls }));
       if (s.tool === 'cut') {
         const hit = el('line', { ...geo, class: 'lab-link-hit' });
@@ -238,7 +240,7 @@ export function openLab(onRun) {
         layerLinks.appendChild(hit);
       }
       for (const [D, port, t] of [[A, l.ap, 0.24], [B, l.bp, 0.76]]) {
-        const px = A.x + dx * t + ox, py = A.y + dy * t + oy;
+        const px = PA.x + ex * t + ox, py = PA.y + ey * t + oy;
         const bv = blk.get(D.id + '|' + port);
         const label = (isHost(D) ? 'Fa0' : N.shortIf(port)) + (bv ? ' ✕' : '');
         const w = label.length * 6.6 + 8;
@@ -260,7 +262,7 @@ export function openLab(onRun) {
       g.appendChild(nm);
       if (isHost(d)) {
         const ip = el('text', { x: d.x, y: d.y + 58, 'text-anchor': 'middle', class: 'lab-ip' });
-        ip.textContent = d.ip ? `${d.ip}/${d.prefix}` : d.dhcp ? 'DHCP (chưa có IP)' : '(chưa có IP)';
+        ip.textContent = d.ip ? `${d.ip}/${d.prefix}` : d.ip6 ? `${d.ip6}/${d.prefix6}` : d.dhcp ? 'DHCP (chưa có IP)' : '(chưa có IP)';
         g.appendChild(ip);
       }
       g.onclick = () => nodeClicked(d.id);

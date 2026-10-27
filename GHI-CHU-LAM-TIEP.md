@@ -1,5 +1,13 @@
 # Ghi chú làm tiếp — Packet Journey
 
+## ☁️ Thiết bị Internet vẽ thành đám mây (2026-10-27, yêu cầu từ phiên "SAP PROMPT App Hoc Mang")
+- `N.server(..., { cloud })`: cờ `cloud` (mặc định bật nếu tên chứa "INTERNET"); `N.isCloud(d)` dùng cờ, JSON cũ
+  không có cờ → nhận theo tên. Chỉ đổi hình vẽ — mô phỏng vẫn là server (ping/telnet như cũ).
+- Vẽ: `cloudPath(x, y)` (một path 4 cung + đáy phẳng) trong `ui/topo.js` cho Lab CLI + workspace; `ui/topology.js`
+  (sơ đồ "Xem gói tin", `topologyOf` trả type 'cloud'); `linkEnd(d, tx, ty)` cắt dây ở mép đám mây (elip xấp xỉ).
+- Workspace: mẫu `cloud` (nhóm "Network", tiền tố INTERNET, 1 cổng fa0); `kindOf` nhận đám mây.
+- README + `.bat`: khuyên server đa luồng (ThreadingHTTPServer / `python -m http.server`).
+
 ## 📡 Capture trên dây kiểu EVE-NG + Wireshark (2026-10-27, yêu cầu từ phiên "SAP PROMPT App Hoc Mang")
 - `lab/capture.js` (thuần logic): `createCapture` → `cap.links[linkId] = { on, t0, pkts, last }` (giây epoch);
   `recordSim(cap, sim, now, {repeat})` lấy sự kiện `transit` của engine có `ev.link` đang bắt (byte thật, tree);
@@ -45,7 +53,7 @@
      trong test), quiet-mode access-class; `aaa new-model` thay "login local"; `security passwords min-length`;
      `ip http server` mở cổng 80; `exec-timeout`, `ip ssh version` lưu và hiện trong running-config.
 6. ⏳ Kịch bản tấn công byte-thật (ARP spoofing, DHCP giả/starvation, VLAN hopping) trong scenarios/.
-- Tổng hiện tại: 101 lab, `node --test` 217/217, `node tools/ui-smoke.cjs` 52/52; workspace tự dựng mạng kiểu EVE-NG + capture.
+- Tổng hiện tại: 101 lab, `node --test` 219/219, `node tools/ui-smoke.cjs` 54/54; workspace tự dựng mạng kiểu EVE-NG + capture.
 
 
 ## ✅ ĐÃ XONG Lab CLI đợt 3 (session 2026-10-27/28) — 7 cải tiến

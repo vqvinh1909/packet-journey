@@ -139,8 +139,10 @@ server.listen(8799, '127.0.0.1', async () => {
   await type('show bogus');
   ok((await p.$$eval('.lab-ln.err', (x) => x.length)) > 0, 'lệnh sai trên ASA hiện lỗi');
   ok(!!(await p.$('.lab-g.fw')), 'topology vẽ biểu tượng firewall');
+  ok((await p.$$eval('.lab-topo .lab-g.cloud', (x) => x.length)) === 1 && (await p.$$eval('.lab-topo .lab-name', (x) => x.map((e) => e.textContent))).includes('INTERNET 8.8.8.8'), 'Internet vẽ thành đám mây (kèm tên)');
   await p.click('#lab-sbx-open');
-  for (const k of ['asa', 'fortios', 'pfsense']) { await p.click(`.ws-pi[data-kind="${k}"]`); await p.click('#ad-ok'); }
+  for (const k of ['asa', 'fortios', 'pfsense', 'cloud']) { await p.click(`.ws-pi[data-kind="${k}"]`); await p.click('#ad-ok'); }
+  ok(!!(await p.$('.ws-node[data-id="internet1"] .lab-g.cloud')), 'workspace: mẫu Cloud / Internet (nhóm Network) vẽ đám mây');
   ok((await p.$$eval('.ws-node', (x) => x.map((e) => e.getAttribute('aria-label')))).includes('ASA1'), 'workspace: thêm firewall ASA');
   await p.click('#ws-start');
   await wsMenu('fgt1', 'Console');

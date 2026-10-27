@@ -11,7 +11,9 @@ export function esc(s) { return String(s ?? '').replace(/[&<>"]/g, (m) => ({ '&'
 /** Vẽ biểu tượng thiết bị d (toạ độ d.x, d.y) vào nhóm SVG g. */
 export function drawGlyph(g, d) {
   const { x, y } = d;
-  if (d.fw && d.os) {
+  if (N.isCloud(d)) {
+    g.appendChild(el('path', { d: cloudPath(x, y), class: 'lab-g cloud' })); // đám mây "Internet" (vẫn là server giả lập)
+  } else if (d.fw && d.os) {
     // firewall: bức tường gạch (router chạy Zone-Based Firewall vẫn vẽ như router)
     g.appendChild(el('rect', { x: x - 24, y: y - 18, width: 48, height: 36, rx: 4, class: 'lab-g fw' }));
     g.appendChild(el('path', { d: `M${x - 24} ${y - 6}h48 M${x - 24} ${y + 6}h48 M${x - 8} ${y - 18}v12 M${x + 10} ${y - 18}v12 M${x} ${y - 6}v12 M${x - 16} ${y - 6}v12 M${x + 16} ${y - 6}v12 M${x - 8} ${y + 6}v12 M${x + 10} ${y + 6}v12`, class: 'lab-gl fwl' }));
@@ -29,6 +31,23 @@ export function drawGlyph(g, d) {
     g.appendChild(el('rect', { x: x - 20, y: y - 18, width: 40, height: 27, rx: 3, class: 'lab-g host' }));
     g.appendChild(el('path', { d: `M${x - 9} ${y + 17}h18 M${x} ${y + 9}v8`, class: 'lab-gl' }));
   }
+}
+/** Đường bao đám mây quanh (x, y): 4 cung tròn nối nhau + đáy phẳng; rộng ~70 (x−33…x+36), cao ~38 (y−22…y+16). */
+export function cloudPath(x, y) {
+  const P = (dx, dy) => `${x + dx} ${y + dy}`;
+  return `M${P(-22, 16)} A11 11 0 0 1 ${P(-23, -6)} A15 15 0 0 1 ${P(3.9, -16.2)} A13 13 0 0 1 ${P(25, -6)} A11 11 0 0 1 ${P(25, 16)} Z`;
+}
+/**
+ * Điểm đầu dây phía thiết bị d khi nối tới (tx, ty): đám mây thì cắm vào MÉP (xấp xỉ elip),
+ * thiết bị khác giữ tâm (icon vẽ đè lên đầu dây). Trả { x, y }.
+ */
+export function linkEnd(d, tx, ty) {
+  if (!N.isCloud(d)) return { x: d.x, y: d.y };
+  const cx = d.x + 1.5, cy = d.y - 3, a = 35, b = 19;
+  const dx = tx - cx, dy = ty - cy, len = Math.hypot(dx, dy) || 1;
+  const ux = dx / len, uy = dy / len;
+  const r = Math.min(len, 1 / Math.hypot(ux / a, uy / b));
+  return { x: cx + ux * r, y: cy + uy * r };
 }
 /** Cổng đang bật về mặt quản trị (không shutdown) — để tô dây "admin down". */
 export function adminUp(net, dev, port) {

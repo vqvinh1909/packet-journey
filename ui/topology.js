@@ -1,5 +1,7 @@
 // ui/topology.js — vẽ sơ đồ mạng bằng SVG + animation gói tin chạy trên dây.
 
+import { cloudPath } from './topo.js';
+
 const SVG_NS = 'http://www.w3.org/2000/svg';
 let svg = null;
 let dot = null;
@@ -79,7 +81,10 @@ function arrow(x1, y1, x2, y2) {
 function drawIcon(d) {
   const { x, y } = d;
   const parts = [];
-  if (d.type === 'host') {
+  if (d.type === 'cloud') {
+    // Đám mây "Internet" (vẫn là server giả lập, chỉ đổi hình vẽ)
+    parts.push(el('path', { class: 'glyph-body glyph-cloud', d: cloudPath(x, y) }));
+  } else if (d.type === 'host') {
     // Màn hình + chân đế
     parts.push(el('rect', { class: 'glyph-body', x: x - 22, y: y - 22, width: 44, height: 30, rx: 3 }));
     parts.push(el('rect', { class: 'glyph-screen', x: x - 18, y: y - 18, width: 36, height: 22, rx: 1 }));

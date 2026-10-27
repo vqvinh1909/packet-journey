@@ -80,6 +80,7 @@ html, body {
 .dev-node.active .node-bg { fill: var(--accent-soft); stroke: var(--accent); }
 .glyph-body { fill: var(--panel); stroke: var(--accent); stroke-width: 2; }
 .glyph-screen { fill: var(--accent-soft); stroke: none; }
+.glyph-body.glyph-cloud { fill: var(--accent-soft); stroke-linejoin: round; }
 .glyph-fill { fill: var(--accent); stroke: none; }
 .glyph-line { stroke: var(--accent); stroke-width: 2.4; fill: none; stroke-linecap: round; }
 .glyph-arrow { fill: var(--accent); stroke: none; }
@@ -344,6 +345,7 @@ html, body {
 .lab-g.switch { stroke: #2e7d5b; }
 .lab-g.host { stroke: var(--accent); }
 .lab-g.fw { stroke: #b03a2e; fill: var(--changed-soft); }
+.lab-g.cloud { stroke: #2f7fc1; fill: var(--accent-soft); stroke-linejoin: round; }
 .lab-gl.fwl { stroke: #b03a2e; stroke-width: 1.6; }
 .lab-gl { stroke: var(--text); stroke-width: 2; fill: none; stroke-linecap: round; stroke-linejoin: round; }
 .lab-gd { fill: var(--text); }

@@ -156,3 +156,16 @@ test('thi thử: thời gian theo độ khó, chấm thang 1000 đạt từ 800'
   assert.equal(examResult([true, false, false]).pass, false);
   assert.equal(examResult([]).score, 0);
 });
+
+test('lab có sẵn: server tên chứa "INTERNET" vẽ thành đám mây, server thật giữ icon server', () => {
+  let clouds = 0;
+  for (const lab of LABS) {
+    for (const d of Object.values(lab.build().devices)) {
+      if (d.type !== 'server') continue;
+      const inet = /internet/i.test(d.name);
+      assert.equal(N.isCloud(d), inet, `${lab.id} ${d.name}`);
+      if (inet) clouds++;
+    }
+  }
+  assert.ok(clouds >= 15, 'các lab có "INTERNET 8.8.8.8" đều thành đám mây');
+});
