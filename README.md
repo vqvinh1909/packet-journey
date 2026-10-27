@@ -43,6 +43,11 @@ Test kiểm: checksum so với ví dụ đã biết, độ dài & offset header,
 gói ARP/ICMP mẫu, cấu trúc file `.pcap`, longest-prefix match, và tính bất biến của
 kịch bản (TTL giảm qua router, IP src/dst giữ nguyên).
 
+Với Lab CLI (`tests/lab.test.js`), MỖI lab trong 72 lab phải: trước khi giải có ít nhất 1 nhiệm vụ
+cấu hình chưa đạt; chạy lời giải (`applySolution` — `solution` hoặc `guide`, bước `'@link'` = cắm dây)
+không sinh lỗi CLI `% Invalid/Incomplete/Ambiguous/Unknown`; sau đó `checkLab(lab, net, quizAnswers(lab))`
+đạt toàn bộ. `tests/sandbox.test.js` kiểm chế độ tự dựng mạng (thêm/xoá/nối dây, xuất-nhập JSON, nhiệm vụ).
+
 ## Kiểm chứng bằng Wireshark (quan trọng nhất)
 
 1. Mở app, chọn kịch bản, bấm **Xuất .pcap**.
@@ -65,10 +70,19 @@ kịch bản (TTL giảm qua router, IP src/dst giữ nguyên).
 - **📘 Từ điển**: ~25 thuật ngữ (có tìm kiếm) + bảng tra nhanh cổng phổ biến & OSI↔TCP/IP.
 - **💾 Tiến độ**: đánh dấu kịch bản đã xem + điểm quiz, và nút xuất/nhập tiến độ (.json).
 - **PWA offline**: có `manifest.webmanifest` + `sw.js` (service worker) → cài được như app và chạy offline sau lần mở online đầu (trên Chrome/Edge thật).
-- **🧪 Lab CLI (Cisco IOS)** — 27 lab bám giáo trình *Infrastructure Administrator*: gõ lệnh như trên router/switch thật (viết tắt `sh ip int br`, `conf t`, Tab hoàn thành, `?` trợ giúp, lỗi `% Invalid input ... '^' marker`, mật khẩu enable, `| include/section`...). Mạng được **tính thật** từ cấu hình bạn gõ: VLAN/trunk/native/EtherChannel/STP root, bảng định tuyến connected + static (floating) + **OSPF/EIGRP tự hội tụ**, ACL (thứ tự dòng, deny ngầm định), NAT/PAT/NAT tĩnh, HSRP, DHCP + relay, DHCP snooping, port-security, SSH/Telnet, NTP. Nhiệm vụ **tự chấm** sau mỗi lệnh bằng ping/telnet/`show` thật; ping/traceroute/DHCP có nút **▶ Xem gói tin** mở timeline byte-thật ở màn hình chính.
-  - Lab cấu hình theo bài: IPv4/subnet (B05), switch cơ bản + SSH (B07), VLAN (B08), trunk + native 999 (B09), EtherChannel + root bridge (B10), router (B11), router-on-a-stick (B12), static + floating static (B13), OSPF + default-information originate (B14), EIGRP (B15), ACL standard/extended (B16–17), NTP/Syslog (B18), DHCP + relay (B19), PAT + NAT tĩnh (B20), HSRP (B21), port-security + DHCP snooping (B26).
-  - 🎫 6 **ticket sự cố** dựng sẵn lỗi (3 ticket lấy nguyên từ Lab tổng hợp CCNA 04/05/06 + 3 ticket thêm), 🏢 dự án **GreenMart** (VLAN → ROAS → OSPF → default → DHCP → NAT → ACL).
-  - Tiến độ + cấu hình đã gõ được lưu, mở lại vẫn còn; có gợi ý từng bước và lời giải mẫu (chạy thử được ngay trong console).
+- **🧪 Lab CLI (Cisco IOS)** — **72 lab** + chế độ tự dựng mạng: gõ lệnh như trên router/switch thật (viết tắt `sh ip int br`, `conf t`, Tab hoàn thành, `?` trợ giúp, lỗi `% Invalid input ... '^' marker`, mật khẩu enable, `| include/section`...). Mạng được **tính thật** từ cấu hình bạn gõ: VLAN/trunk/native/DTP/VTP/EtherChannel/STP root/PVLAN, bảng định tuyến connected + static (floating) + **OSPF đa vùng/EIGRP/BGP tự hội tụ** + redistribution, GRE, IPsec, PPP CHAP, ACL (thứ tự dòng, deny ngầm định), NAT/PAT/NAT tĩnh/NAT pool, HSRP (tracking)/VRRP, DHCP + relay, DHCP snooping, port-security, SSH/Telnet, NTP. Nhiệm vụ **tự chấm** sau mỗi lệnh bằng ping/telnet/`show` thật; ping/traceroute/DHCP có nút **▶ Xem gói tin** mở timeline byte-thật ở màn hình chính.
+  - **27 lab theo giáo trình** *Infrastructure Administrator* (L01–L20 theo bài, 🎫 6 ticket T01–T06, 🏢 dự án GreenMart P01).
+  - **41 lab "CCNA trực quan"** (`lab/labs-ccna.js`): Ch.1 khái niệm cốt lõi A01–A26, Ch.2 các bước cấu hình B01–B10, Ch.3 xử lý sự cố C01–C05.
+  - **🏆 4 lab tổng hợp doanh nghiệp CCNA + CCNP** (`lab/labs-capstone.js`, có cách giải chi tiết):
+    X01 campus 3 lớp (EtherChannel, port-security, HSRP trên SVI, DHCP, OSPF, NAT PAT, ACL khách, SSH) ·
+    X02 HQ + 2 chi nhánh (PPP CHAP, GRE qua Internet, OSPF đa vùng, DHCP relay, NAT tập trung) ·
+    X03 sáp nhập công ty (redistribution OSPF↔EIGRP, dual-ISP eBGP + default-originate, HSRP tracking, NAT) ·
+    X04 troubleshooting marathon 9 lỗi (VLAN, allowed list, native, SVI, area OSPF, default-information, ACL NAT, thứ tự ACL, VIP HSRP).
+  - Nhiệm vụ dạng **❓ trắc nghiệm** hiện thành nút chọn đáp án (lưu ở `pj_labans:<id>`), chấm cùng các nhiệm vụ cấu hình.
+  - **🧭 Cách giải chi tiết** cho lab có `guide`: từng bước có tiêu đề, lý do và khối lệnh, nút "▶ Gõ bước này vào console".
+  - **🔗 Nối dây** cho lab kéo-thả (A04): chọn 2 thiết bị rồi chọn cổng; ✂ gỡ dây bằng cách bấm vào dây.
+  - **🧱 Tự dựng mạng riêng (sandbox)**: thêm PC / Server / Switch 2960 / Switch L3 3560 / Router, nối dây, xoá, kéo thả, cấu hình bằng CLI; tự lưu trong trình duyệt (`pj_sandbox-net`), ⬇ xuất / ⬆ nhập JSON; kèm 6 nhiệm vụ gợi ý lộ trình (LAN → VLAN → định tuyến → DHCP → OSPF/EIGRP).
+  - Tiến độ + cấu hình đã gõ được lưu, mở lại vẫn còn; có gợi ý từng bước và lời giải mẫu (nút "▶ Gõ lời giải" chạy `applySolution` ngay trong console).
 - **🛠️ Tự tạo (Builder)**: nhập IP/mask/gateway cho PC1–PC2 (± router) → app tự dựng & chạy mô phỏng ping, đúng cho 3 trường hợp: cùng mạng, khác mạng (gateway đúng), và sai gateway (ping hỏng).
 - **✏️ Vẽ mạng (Canvas)**: kéo-thả thêm PC/Switch/Router, nối dây, cấu hình IP/gateway từng thiết bị, rồi chọn 2 PC bấm "Chạy ping" → app tìm đường (BFS) và mô phỏng gói tin trên topology BẤT KỲ bạn vẽ (ARP, định tuyến qua router, TTL−1), báo lỗi rõ nếu sai gateway/không nối dây/khác subnet.
 
@@ -103,7 +117,8 @@ packet/     addr, bytes (BitWriter), checksum (RFC 1071), serialize, pcap
 protocols/  ethernet, dot1q, arp, ipv4, icmp, llc, stp, ospf, eigrp, udp, dhcp, dns,
             tcp, hsrp, bgp, raw, ipv6, icmpv6, ospfv3, mstp, dhcpv6, mpls, vxlan   (23 giao thức)
 engine/     tables (ARP/MAC/routing + longest-prefix), devices, simulate (recorder)
-lab/        net (máy mô phỏng mạng tính từ cấu hình), ios (CLI Cisco IOS + PC), labs (27 lab + chấm điểm)
+lab/        net (máy mô phỏng mạng tính từ cấu hình), ios (CLI Cisco IOS + PC), labs (27 lab + chấm điểm),
+            labs-ccna (41 lab), labs-capstone (4 lab tổng hợp), kit (helper soạn lab), sandbox (tự dựng mạng)
 scenarios/  s01..s08 (xem danh sách dưới)
 ui/         topology, controls, layerstack, fieldtree, hexview, explain, i18n, store, app
 i18n/       vi, en  (chuỗi giao diện)

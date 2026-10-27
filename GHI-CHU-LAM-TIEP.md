@@ -1,5 +1,35 @@
 # Ghi chú làm tiếp — Packet Journey
 
+## ✅ ĐÃ XONG Lab CLI đợt 2 (session 2026-10-27 #2) — CCNA + capstone + UI mới
+- **41 lab CCNA** (`lab/labs-ccna.js`, A01–A26 · B01–B10 · C01–C05) đã chạy test lần đầu: tất cả đạt, tên field
+  trong check khớp `lab/net.js`/`lab/ios.js` (cdpRun, ports[x].cdp, lines.vty.accessClass, stp.prio/bpduDefault,
+  ps.viol, startupCfg, version, crypto.keys/tsets, cryptoMap, l2enc, pppAuth, encap, native, helper, nat.*, routes[].nh).
+- `tests/lab.test.js` giờ chạy lời giải qua `applySolution(lab, net, cli)` (hỗ trợ `solution`, `guide`, bước `'@link'`)
+  và chấm bằng `checkLab(lab, net, quizAnswers(lab))`. Điều kiện "trước khi giải" chấm VỚI đáp án quiz đúng → buộc
+  phải có ít nhất 1 nhiệm vụ CẤU HÌNH trượt (quiz không tính).
+- **4 lab capstone** (`lab/labs-capstone.js`, group `'cap'`, đều dùng `guide`): X01 campus 3 lớp, X02 HQ + 2 chi
+  nhánh (PPP CHAP/GRE/OSPF đa vùng/DHCP relay/NAT), X03 sáp nhập (OSPF↔EIGRP, dual-ISP eBGP, HSRP track, NAT),
+  X04 troubleshooting 9 lỗi. Đã thử bỏ từng bước guide → bước nào cũng làm ít nhất 1 nhiệm vụ trượt.
+- **Engine** (`lab/net.js` `eigrpExt`): `redistribute ospf` vào EIGRP giờ mang MỌI route OSPF trong bảng (kể cả
+  O E2 và default O*E2) như IOS thật — cần cho X03 (công ty B ra Internet qua default từ OSPF).
+- **`lab/sandbox.js`** (mới): thêm/xoá thiết bị, nối/gỡ dây, xuất/nhập JSON, `SANDBOX_LAB` (6 nhiệm vụ gợi ý).
+  Test `tests/sandbox.test.js`.
+- **`ui/lab.js`** viết lại phần lớn: quiz thành nút (lưu `pj_labans:<id>`), panel "🧭 Cách giải chi tiết" (bước
+  không có title được gộp vào bước trước; nút "▶ Gõ bước này"), "▶ Gõ lời giải" dùng `applySolution`, đáp án
+  quiz trong lời giải, `lessonPath`/`lesson` tuỳ chọn, thanh công cụ 🔗 Nối dây / ✂ Gỡ dây (lab `edit:'wire'` + sandbox),
+  log khôi phục có `['@link', [a,ap,b,bp]]` / `['@unlink', linkId]`, chế độ 🧱 sandbox (thêm PC/Server/2960/3560/Router,
+  kéo thả, xoá, xuất/nhập JSON, lưu `pj_sandbox-net`). CSS mới ở `styles/app.css` (khối "Lab: …").
+- Đã chạy thật bằng Chromium (Playwright): quiz, guide, gõ lời giải (B02 5/5, X04 10/10), nối dây A04 + khôi phục sau
+  reload, sandbox (thêm/nối/kéo/ping/xuất/nhập/xoá/gỡ dây/reload), màn 390px không tràn ngang, 0 lỗi console.
+- Tổng: **72 lab**, `node --test` **153/153 pass**.
+
+### Còn có thể làm tiếp (tuỳ chọn)
+- Sandbox: chưa có undo; chưa đổi tên thiết bị bằng UI (dùng `hostname` trong CLI vẫn đổi tên hiển thị).
+- Capstone: có thể thêm X05 (IPv6/OSPFv3) khi engine hỗ trợ IPv6 trong Lab CLI.
+- Lab X01: STP blocking chưa mô phỏng trong forwarding (vòng L2 access–core không gây bão) — nếu thêm STP thật
+  cần xem lại X01/X04 vì cả hai có đường dự phòng L2.
+
+
 ## ✅ ĐÃ XONG (session 2026-10-xx)
 - **Link "Đọc thêm" → HTML giáo trình**: sửa tập trung ở `ui/i18n.js` `lessonHref()` — tự đổi
   `.../Bai-NN_*.md` sang `Infrastructure-Administrator-Giao-trinh.html#bNN-s0`, tách `#anchor` khỏi

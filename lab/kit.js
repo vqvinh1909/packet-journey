@@ -17,7 +17,7 @@ export const aclOn = (d, ifn, dir, type) => { const n = N.l3ifs(d)[ifn]?.[dir ==
 /** Câu hỏi trắc nghiệm trong danh sách nhiệm vụ. */
 export const quiz = (text, options, correct, explain) => ({ text, quiz: { options, correct, explain } });
 /** Lab "cách giải chi tiết": mỗi bước { dev, title, why, cmds } → đồng thời là lời giải chạy được. */
-export const guideToSolution = (guide) => guide.map((g) => [g.dev, g.raw ? g.cmds : cfg(...g.cmds)]);
+export const guideToSolution = (guide) => guide.map((g) => [g.dev, g.raw || g.dev === '@link' ? g.cmds : cfg(...g.cmds)]);
 /** IP có hợp lệ làm địa chỉ host trong subnet (không phải network/broadcast) không. */
 export function hostIn(ip, net, prefix) {
   if (!ip || !N.inNet(ip, net, prefix)) return false;
