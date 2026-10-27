@@ -343,6 +343,8 @@ html, body {
 .lab-g.router { stroke: #c8611a; }
 .lab-g.switch { stroke: #2e7d5b; }
 .lab-g.host { stroke: var(--accent); }
+.lab-g.fw { stroke: #b03a2e; fill: var(--changed-soft); }
+.lab-gl.fwl { stroke: #b03a2e; stroke-width: 1.6; }
 .lab-gl { stroke: var(--text); stroke-width: 2; fill: none; stroke-linecap: round; stroke-linejoin: round; }
 .lab-gd { fill: var(--text); }
 .lab-name { font-size: 13px; font-weight: 700; fill: var(--text); paint-order: stroke; stroke: var(--panel-2); stroke-width: 4px; }

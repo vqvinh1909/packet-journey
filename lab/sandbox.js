@@ -11,6 +11,7 @@ export const SANDBOX_KINDS = {
   sw2960: { label: '⇄ Switch 2960', prefix: 'SW', make: (id, name, x, y) => N.sw(id, name, x, y, fa(24, ['g0/1', 'g0/2'])) },
   sw3560: { label: '⇶ Switch L3 3560', prefix: 'L3SW', make: (id, name, x, y) => { const d = N.sw(id, name, x, y, fa(24, ['g0/1', 'g0/2'])); d.model = '3560'; return d; } },
   router: { label: '⛁ Router', prefix: 'R', make: (id, name, x, y) => N.router(id, name, x, y, ['g0/0', 'g0/1', 'g0/2', 's0/0/0', 's0/0/1']) },
+  asa: { label: '🛡 Firewall ASA', prefix: 'ASA', make: (id, name, x, y) => N.firewall(id, name, x, y, ['g1/1', 'g1/2', 'g1/3', 'g1/4'], 'asa') },
 };
 const TYPES = ['pc', 'server', 'switch', 'router'];
 export const SANDBOX_VIEW = { w: 1000, h: 440 };

@@ -15,7 +15,7 @@ for (const lab of LABS) {
     const cli = createCli(net);
     const errs = [];
     for (const o of applySolution(lab, net, cli)) {
-      if (o.out.some((l) => /^% (Invalid|Incomplete|Ambiguous|Unknown)/.test(l) || l.includes("'^' marker"))) errs.push(`${o.dev}: "${o.cmd}" → ${o.out.join(' | ')}`);
+      if (o.out.some((l) => /^% (Invalid|Incomplete|Ambiguous|Unknown)/.test(l) || /^ERROR:/.test(l) || l.includes("'^' marker"))) errs.push(`${o.dev}: "${o.cmd}" → ${o.out.join(' | ')}`);
     }
     assert.deepEqual(errs, [], 'Lệnh trong lời giải bị CLI từ chối');
     const after = checkLab(lab, net, quizAnswers(lab));

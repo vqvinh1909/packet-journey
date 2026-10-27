@@ -14,6 +14,7 @@ import { createCli, runScript } from './ios.js';
 import { CCNA_LABS } from './labs-ccna.js';
 import { CAP_LABS } from './labs-capstone.js';
 import { ADV_LABS } from './labs-adv.js';
+import { SEC_LABS } from './labs-sec.js';
 
 const B = '../Quản trị Hạ tầng mạng (Infrastructure Administrator)/';
 const P = {
@@ -63,6 +64,7 @@ export const LAB_GROUPS = [
   { id: 'c2', title: '📗 CCNA trực quan — Ch.2 Các bước cấu hình' },
   { id: 'c3', title: '📗 CCNA trực quan — Ch.3 Xử lý sự cố' },
   { id: 'adv', title: '🔬 Chuyên đề nâng cao — VTP · PVLAN · IPsec · BGP · STP' },
+  { id: 'sec', title: '🛡️ Bảo mật & Firewall — ASA · ZBF · FortiGate · Palo Alto' },
 ];
 
 const INFRA_LABS = [
@@ -769,7 +771,7 @@ const INFRA_LABS = [
   },
 ];
 
-export const LABS = [...INFRA_LABS, ...CAP_LABS, ...CCNA_LABS, ...ADV_LABS];
+export const LABS = [...INFRA_LABS, ...CAP_LABS, ...CCNA_LABS, ...ADV_LABS, ...SEC_LABS];
 export function getLab(id) { return LABS.find((l) => l.id === id) || null; }
 
 /** Chế độ thi thử: thời gian làm bài (phút) theo độ khó / loại lab. */

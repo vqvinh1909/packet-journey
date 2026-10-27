@@ -70,6 +70,20 @@ server.listen(8799, '127.0.0.1', async () => {
   const n = await p.$$('.lab-node'); await n[0].click(); const n2 = await p.$$('.lab-node'); await n2[1].click();
   await p.click('#lab-w-ok');
   ok((await p.$$eval('.lab-link', (x) => x.length)) >= 1, 'nối dây A04');
+  // 6) firewall ASA: cách giải F02 + show conn, biểu tượng firewall, sandbox thêm ASA
+  await p.click('.lab-item[data-id="F02"]');
+  await p.click('.lab-guide summary');
+  for (let g = 0; g < 3; g++) await p.click(`.lab-grun[data-g="${g}"]`);
+  ok((await p.textContent('.lab-score')) === '5/6', 'F02: 3 bước guide → 5/6 (còn quiz)');
+  await p.click('.lab-tab[data-id="asa"]');
+  await type('show conn');
+  ok((await p.$$eval('.lab-ln', (x) => x.map((e) => e.textContent))).some((l) => /^TCP dmz 172\.16\.1\.10:80/.test(l)), 'ASA show conn có phiên vào web DMZ');
+  await type('show bogus');
+  ok((await p.$$eval('.lab-ln.err', (x) => x.length)) > 0, 'lệnh sai trên ASA hiện lỗi');
+  ok(!!(await p.$('.lab-g.fw')), 'topology vẽ biểu tượng firewall');
+  await p.click('#lab-sbx-open');
+  await p.click('[data-add="asa"]');
+  ok((await p.$$eval('.lab-node', (x) => x.map((e) => e.getAttribute('aria-label')))).includes('ASA1'), 'sandbox: thêm firewall ASA');
   ok(errs.length === 0, 'không có lỗi JS: ' + JSON.stringify(errs).slice(0, 300));
   await b.close();
   server.close();

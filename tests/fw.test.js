@@ -15,8 +15,9 @@ function net3(os = 'asa') {
     N.server('srv', 'SRV', 0, 0, { ip: '8.8.8.8', gw: '8.8.8.1', services: [80, 443] }),
   ], [['pin', 'fa0', 'fw', 'g0/0'], ['fw', 'g0/1', 'isp', 'g0/0'], ['fw', 'g0/2', 'web', 'fa0'], ['isp', 'g0/1', 'srv', 'fa0']]);
   const cli = createCli(net);
-  // địa chỉ + định tuyến (dùng tạm CLI IOS: firewall là router trong engine)
-  runScript(cli, 'fw', cfg('interface g0/0', 'ip address 10.1.1.1 255.255.255.0', 'no shutdown', 'interface g0/1', 'ip address 203.0.113.2 255.255.255.0', 'no shutdown', 'interface g0/2', 'ip address 172.16.1.1 255.255.255.0', 'no shutdown', 'exit', 'ip route 0.0.0.0 0.0.0.0 203.0.113.1'));
+  // địa chỉ + định tuyến đặt thẳng vào model (CLI của từng hãng được test riêng)
+  for (const [n, ip, p] of [['g0/0', '10.1.1.1', 24], ['g0/1', '203.0.113.2', 24], ['g0/2', '172.16.1.1', 24]]) Object.assign(fw.ifaces[n], { ip, prefix: p, shutdown: false });
+  fw.routes.push({ net: '0.0.0.0', prefix: 0, nh: '203.0.113.1', iface: null, ad: 1 });
   runScript(cli, 'isp', cfg('interface g0/0', 'ip address 203.0.113.1 255.255.255.0', 'no shutdown', 'interface g0/1', 'ip address 8.8.8.1 255.255.255.0', 'no shutdown'));
   return { net, cli, fw: net.devices.fw };
 }

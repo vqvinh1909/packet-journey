@@ -14,6 +14,7 @@
 import * as N from './net.js';
 import * as A6 from './ip6.js';
 import * as V6 from './net6.js';
+import { makeAsa } from './asa.js';
 
 const { longIf, shortIf, normIf, isIp, maskToPrefix, prefixToMask, netOf, ifSort } = N;
 
@@ -803,7 +804,13 @@ export function createCli(net) {
 
   const showsFor = (d) => [...(isRouter(d) ? SHOW_ROUTER : SHOW_SWITCH), ...SHOW_COMMON];
   const userShows = (d) => showsFor(d).filter((e) => !['running-config', 'startup-config'].includes(e.toks[1]));
+  // Cisco ASA: bộ lệnh riêng (lab/asa.js), dùng chung parser / ping / lưu cấu hình
+  const ASA = makeAsa({
+    c, R, net, iosPing: (d, ip) => iosPing(d, ip), iosTrace: (d, ip) => iosTrace(d, ip), toPriv: (x) => toPriv(x), saveCfg: (x) => saveCfg(x),
+    doIn: (x, table) => { const words = x.a[0].split(/\s+/); const p = parse(table, words); return p.hit ? p.hit.fn({ ...x, a: p.args, words }) : errOut(p, { mode: 'config' }, x.a[0], words, 'do '); },
+  });
   function tableFor(d, s) {
+    if (d.os === 'asa') return ASA.tableFor(d, s);
     switch (s.mode) {
       case 'user': return [...EXEC_USER, ...userShows(d)];
       case 'priv': return [...EXEC_PRIV, ...showsFor(d)];
@@ -826,8 +833,8 @@ export function createCli(net) {
       default: return [];
     }
   }
-  const cfgTable = (d) => (isRouter(d) ? CFG_ROUTER : CFG_SWITCH);
-  const SUB = new Set(['if', 'subif', 'range', 'vlan', 'router', 'pool', 'acl-std', 'acl-ext', 'line', 'isakmp', 'tset', 'cmap', 'vamap', 'bgp', 'mstcfg', 'ospf6']);
+  const cfgTable = (d) => (d.os === 'asa' ? ASA.cfgTable() : isRouter(d) ? CFG_ROUTER : CFG_SWITCH);
+  const SUB = new Set(['if', 'subif', 'range', 'vlan', 'router', 'pool', 'acl-std', 'acl-ext', 'line', 'isakmp', 'tset', 'cmap', 'vamap', 'bgp', 'mstcfg', 'ospf6', 'asaobj', 'pmap', 'pmapc']);
 
   // ================== Thực thi ==================
   function prompt(id) {
@@ -838,6 +845,7 @@ export function createCli(net) {
     if (s.ask) { const st = s.ask.steps[s.ask.i]; return typeof st.p === 'function' ? st.p(s.ask.data) : st.p; }
     if (s.pw) return s.pwPrompt || 'Password: ';
     if (s.loggedOut) return '';
+    if (d.os === 'asa') return ASA.prompt(d, s);
     const h = d.name;
     return ({ user: `${h}>`, priv: `${h}#`, config: `${h}(config)#`, if: `${h}(config-if)#`, subif: `${h}(config-subif)#`, range: `${h}(config-if-range)#`, vlan: `${h}(config-vlan)#`, router: `${h}(config-router)#`, pool: `${h}(dhcp-config)#`, 'acl-std': `${h}(config-std-nacl)#`, 'acl-ext': `${h}(config-ext-nacl)#`, line: `${h}(config-line)#`, isakmp: `${h}(config-isakmp)#`, tset: `${h}(cfg-crypto-trans)#`, cmap: `${h}(config-crypto-map)#`, vamap: `${h}(config-access-map)#`, bgp: `${h}(config-router)#`, mstcfg: `${h}(config-mst)#`, ospf6: `${h}(config-rtr)#` })[s.mode] || `${h}#`;
   }
