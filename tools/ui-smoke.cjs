@@ -18,7 +18,7 @@ const server = http.createServer((req, res) => {
 const ok = (c, m) => { console.log((c ? 'PASS ' : 'FAIL ') + m); if (!c) process.exitCode = 1; };
 server.listen(8799, '127.0.0.1', async () => {
   const b = await chromium.launch();
-  const p = await b.newPage({ viewport: { width: 1440, height: 900 } });
+  const p = await (await b.newContext({ viewport: { width: 1440, height: 900 }, acceptDownloads: true })).newPage();
   const errs = []; p.on('pageerror', (e) => errs.push(e.stack)); p.on('console', (m) => { if (m.type() === 'error') errs.push(m.text()); });
   p.on('dialog', (d) => (d.type() === 'prompt' ? d.accept('RENAMED') : d.accept()));
   await p.goto('http://127.0.0.1:8799/index.html');
@@ -101,6 +101,26 @@ server.listen(8799, '127.0.0.1', async () => {
   await p.$eval('[data-link]', (e) => e.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 300, clientY: 300 })));
   ok((await wsText('.ws-menu')).includes('Xoá dây'), 'chuột phải vào dây → Xoá dây');
   await p.keyboard.press('Escape');
+  // capture trên dây (kiểu Wireshark): Start capture → ping → bảng gói, lọc, chi tiết, .pcap
+  const capLink = await p.$eval('.ws-link-hit[data-link*="pc2:fa0"]', (e) => e.dataset.link);
+  await p.$eval(`.ws-link-hit[data-link="${capLink}"]`, (e) => e.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 400, clientY: 300 })));
+  await p.click('.ws-menu button:has-text("Start capture")');
+  const cw = `.ws-win[data-id="cap:${capLink}"]`;
+  ok(await p.isVisible(cw) && !!(await p.$('.ws-cap-ico')), 'Start capture: mở cửa sổ capture + kính lúp trên dây');
+  for (const [dev, c] of [['pc3', 'ipconfig 10.0.0.3 255.255.255.0'], ['pc2', 'ipconfig 10.0.0.2 255.255.255.0'], ['pc2', 'ping 10.0.0.3']]) {
+    await p.dblclick(`.ws-node[data-id="${dev}"]`);
+    const i = `.ws-win[data-id="${dev}"] .lab-in`;
+    await p.fill(i, c); await p.press(i, 'Enter');
+  }
+  const capRows = await p.$$eval(`${cw} tbody tr`, (x) => x.map((e) => e.textContent));
+  ok(capRows.some((r) => r.includes('Who has 10.0.0.3? Tell 10.0.0.2')) && capRows.filter((r) => r.includes('Echo (ping) request')).length === 4, 'capture: ARP + 4 Echo request của lệnh ping');
+  await p.fill(`${cw} .ws-cap-f`, 'arp'); await p.press(`${cw} .ws-cap-f`, 'Enter');
+  ok((await p.$$eval(`${cw} tbody tr`, (x) => x.every((e) => e.textContent.includes('ARP')))) && (await p.textContent(`${cw} .ws-cap-foot`)).startsWith('Đang hiển thị 2 /'), 'capture: bộ lọc "arp"');
+  await p.click(`${cw} .ws-wn`); // đưa cửa sổ capture lên trên console
+  await p.click(`${cw} tbody tr >> nth=0`);
+  ok((await p.$$eval(`${cw} .flayer`, (x) => x.length)) === 2 && (await p.$$eval(`${cw} .hex-row`, (x) => x.length)) > 0, 'capture: bấm gói → cây trường + hex dump');
+  const [capDl] = await Promise.all([p.waitForEvent('download'), p.click(`${cw} [data-c="pcap"]`)]);
+  ok(capDl.suggestedFilename().endsWith('.pcap'), 'capture: tải file .pcap');
   await p.click('#ws-close');
   // 5) nối dây A04
   await p.click('.lab-item[data-id="A04"]');

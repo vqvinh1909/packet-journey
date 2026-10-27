@@ -4,6 +4,8 @@
 //   • Thiết bị mới ở trạng thái TẮT (xám); Start → log khởi động rồi mới gõ lệnh (xanh); Stop → link xuống.
 //   • Chuột phải: thiết bị (Start/Stop/Wipe/Console/Đổi tên/Nhân bản/Xoá), dây (Xoá dây), nền (Add node…).
 //   • Nhiều cửa sổ console nổi cùng lúc (kéo, đổi kích thước, thu nhỏ, đóng) — lịch sử ↑/↓, Tab, "?", dán nhiều dòng.
+//   • Capture trên dây (chuột phải vào dây → Start capture): cửa sổ kiểu Wireshark — bảng gói, bộ lọc, cây trường +
+//     hex dump (ui/fieldtree.js, ui/hexview.js), tải .pcap. Logic bắt gói ở lab/capture.js.
 // Logic mạng/thiết bị ở lab/sandbox.js; mạng tự lưu vào localStorage ("sandbox-net"), xuất/nhập JSON.
 
 import { createCli } from '../lab/ios.js';
@@ -14,16 +16,22 @@ import { GUI_VENDORS } from '../lab/guifw.js';
 import { renderGuiFw } from './guifw.js';
 import { load, save } from './store.js';
 import { el, esc, isHost, drawGlyph, adminUp, classifyLine, stpBlocked } from './topo.js';
+import * as C from '../lab/capture.js';
+import { flattenFields } from '../packet/serialize.js';
+import { renderFieldTree, highlightFieldRow, clearFieldHighlight } from './fieldtree.js';
+import { renderHex, highlightRange, clearHexHighlight } from './hexview.js';
 
 const MAX_LINES = 800;
 const BOOT_MS = 160; // mỗi dòng log khởi động
 const LAB = S.SANDBOX_LAB;
+const nowSec = () => Date.now() / 1000;
+const CAP = 'cap:'; // id cửa sổ capture = 'cap:' + id dây (id thiết bị không chứa ":")
 let W = null; // trạng thái workspace — giữ nguyên khi đóng / mở lại trong cùng phiên trình duyệt
 
 function freshState() {
   let net;
   try { net = S.importSandbox(load('sandbox-net', null)); } catch { net = S.emptySandbox(); }
-  return { net, cli: createCli(net), undo: S.createHistory(), term: {}, hist: {}, gui: {}, wins: [], z: 20, view: load('sandbox-view', null), sel: null, tool: null, pick: [], boot: {}, side: false, hintN: 0, pal: typeof window === 'undefined' || window.innerWidth > 760 };
+  return { net, cli: createCli(net), undo: S.createHistory(), term: {}, hist: {}, gui: {}, wins: [], z: 20, view: load('sandbox-view', null), sel: null, tool: null, pick: [], boot: {}, side: false, hintN: 0, cap: C.createCapture(), capUi: {}, pal: typeof window === 'undefined' || window.innerWidth > 760 };
 }
 
 export function openWorkspace({ onRun }) {
@@ -62,7 +70,8 @@ export function openWorkspace({ onRun }) {
   const saveView = () => { clearTimeout(saveView.t); saveView.t = setTimeout(() => save('sandbox-view', W.view), 300); };
   const mut = (fn) => W.undo.track(W.net, fn);
   function afterStructural() {
-    for (const w of [...W.wins]) if (!net().devices[w.id]) closeWin(w.id);
+    C.pruneCapture(W.cap, W.net);
+    for (const w of [...W.wins]) if (w.cap ? !net().links.some((l) => l.id === w.cap) : !net().devices[w.id]) closeWin(w.id);
     if (W.sel && !net().devices[W.sel]) W.sel = null;
     W.pick = W.pick.filter((id) => net().devices[id]);
     persist();
@@ -168,6 +177,17 @@ export function openWorkspace({ onRun }) {
       const cls = up ? 'up' : S.isOff(A) || S.isOff(B) ? 'down' : !adminUp(n, l.a, l.ap) || !adminUp(n, l.b, l.bp) ? 'admin' : 'down';
       const geo = { x1: A.x + ox, y1: A.y + oy, x2: B.x + ox, y2: B.y + oy };
       gL.appendChild(el('line', { ...geo, class: 'lab-link ' + cls }));
+      if (C.isCapturing(W.cap, l.id)) {
+        // dây đang bắt gói: dải sáng chạy dọc dây + kính lúp ở giữa (tự vẽ)
+        gL.appendChild(el('line', { ...geo, class: 'ws-cap-line' }));
+        const mx = (geo.x1 + geo.x2) / 2, my = (geo.y1 + geo.y2) / 2;
+        const ic = el('g', { class: 'ws-cap-ico', 'data-link': l.id });
+        ic.append(el('circle', { cx: mx, cy: my, r: 11, class: 'ws-cap-bg' }), el('circle', { cx: mx - 2, cy: my - 2, r: 4.5, class: 'ws-cap-gl' }), el('line', { x1: mx + 1.5, y1: my + 1.5, x2: mx + 6, y2: my + 6, class: 'ws-cap-gl' }));
+        const ct = el('title', {});
+        ct.textContent = 'Đang bắt gói — nháy đúp để mở cửa sổ capture';
+        ic.appendChild(ct);
+        gT.appendChild(ic);
+      }
       const hit = el('line', { ...geo, class: 'ws-link-hit', 'data-link': l.id });
       const tt = el('title', {});
       tt.textContent = `${A.name} ${N.shortIf(l.ap)} ↔ ${B.name} ${N.shortIf(l.bp)} — chuột phải để xoá dây`;
@@ -270,6 +290,7 @@ export function openWorkspace({ onRun }) {
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up);
   }
+  stage.addEventListener('dblclick', (e) => { const ic = e.target.closest('.ws-cap-ico'); if (ic) openCapWin(ic.dataset.link); });
   stage.addEventListener('keydown', (e) => {
     const node = e.target.closest?.('.ws-node');
     if (node && e.key === 'Enter') openConsole(node.dataset.id);
@@ -319,7 +340,14 @@ export function openWorkspace({ onRun }) {
     const l = net().links.find((x) => x.id === lid);
     if (!l) return;
     const A = net().devices[l.a], B = net().devices[l.b];
-    showMenu([{ head: `${A.name} ${N.shortIf(l.ap)} ↔ ${B.name} ${N.shortIf(l.bp)}` }, { label: '✂ Xoá dây', act: () => { mut(() => S.disconnect(W.net, lid)); afterStructural(); }, danger: true }], e);
+    const on = C.isCapturing(W.cap, lid), n = W.cap.links[lid]?.pkts.length || 0;
+    showMenu([
+      { head: `${A.name} ${N.shortIf(l.ap)} ↔ ${B.name} ${N.shortIf(l.bp)}` },
+      on ? { label: '■ Stop capture', act: () => { C.stopCapture(W.cap, lid); draw(); refreshWin(CAP + lid); } } : { label: '▶ Start capture', act: () => startCap(lid) },
+      ...(on || n ? [{ label: `📡 Mở cửa sổ capture (${n} gói)`, act: () => openCapWin(lid) }] : []),
+      '-',
+      { label: '✂ Xoá dây', act: () => { mut(() => S.disconnect(W.net, lid)); afterStructural(); }, danger: true },
+    ], e);
   }
   function bgMenu(e) {
     const at = toWorld(e);
@@ -492,15 +520,20 @@ export function openWorkspace({ onRun }) {
     return W.term[id];
   }
   function openConsole(id) {
+    if (id.startsWith(CAP)) { openCapWin(id.slice(CAP.length)); return; }
     if (!net().devices[id]) return;
+    showWin(id, 560, 340);
+  }
+  /** Mở (hoặc đưa lên trên) cửa sổ nổi `id`; cửa sổ mới xếp so le từ góc phải. */
+  function showWin(id, w0, h0, extra = {}) {
     let w = W.wins.find((x) => x.id === id);
     if (w) { w.min = false; w.z = ++W.z; }
     else {
       const r = root.getBoundingClientRect();
       const n = W.wins.length;
       const top = root.querySelector('.ws-top').offsetHeight + 10;
-      const ww = Math.min(560, r.width - 20), hh = Math.min(340, r.height - top - 60);
-      w = { id, w: ww, h: hh, x: Math.max(10, r.width - ww - 30 - (n % 5) * 34), y: top + (n % 5) * 34, z: ++W.z, min: false };
+      const ww = Math.min(w0, r.width - 20), hh = Math.min(h0, r.height - top - 60);
+      w = { id, w: ww, h: hh, x: Math.max(10, r.width - ww - 30 - (n % 5) * 34), y: top + (n % 5) * 34, z: ++W.z, min: false, ...extra };
       W.wins.push(w);
     }
     renderWins();
@@ -537,7 +570,7 @@ export function openWorkspace({ onRun }) {
     const dock = $('ws-dock');
     const mins = W.wins.filter((w) => w.min);
     dock.hidden = !mins.length;
-    dock.innerHTML = mins.map((w) => `<button data-id="${esc(w.id)}" title="Mở lại console">🖥 ${esc(net().devices[w.id]?.name || w.id)}</button>`).join('');
+    dock.innerHTML = mins.map((w) => `<button data-id="${esc(w.id)}" title="Mở lại cửa sổ">${w.cap ? '📡 ' + esc(linkName(w.cap)) : '🖥 ' + esc(net().devices[w.id]?.name || w.id)}</button>`).join('');
     dock.querySelectorAll('button').forEach((b) => (b.onclick = () => openConsole(b.dataset.id)));
   }
   function buildWin(w) {
@@ -564,6 +597,7 @@ export function openWorkspace({ onRun }) {
   }
   /** Vẽ lại nội dung 1 cửa sổ console (full = dựng lại cả thân: đổi giữa terminal và trang web). */
   function refreshWin(id, full) {
+    if (id.startsWith(CAP)) { refreshCapWin(id.slice(CAP.length), full); return; }
     const e = alive() && root.querySelector(`.ws-win[data-id="${CSS.escape(id)}"]`);
     const d = net().devices[id];
     if (!e || !d) return;
@@ -610,6 +644,89 @@ export function openWorkspace({ onRun }) {
     const se = W.cli.session(id);
     inp.type = ready && se.pw ? 'password' : 'text';
   }
+  // ---------------------------------------------------------------- capture trên dây (kiểu Wireshark)
+  const linkName = (lid) => {
+    const l = net().links.find((x) => x.id === lid);
+    if (!l) return lid;
+    const nm = (dev, p) => `${net().devices[dev]?.name} ${isHost(net().devices[dev] || {}) ? 'Fa0' : N.shortIf(p)}`;
+    return `${nm(l.a, l.ap)} ↔ ${nm(l.b, l.bp)}`;
+  };
+  function startCap(lid) {
+    C.startCapture(W.cap, lid, nowSec());
+    C.tickCapture(W.cap, W.net, nowSec());
+    draw();
+    openCapWin(lid);
+  }
+  function openCapWin(lid) { if (W.cap.links[lid]) showWin(CAP + lid, 900, 500, { cap: lid }); }
+  function refreshCaps() { for (const w of W.wins) if (w.cap) refreshCapWin(w.cap); }
+  function refreshCapWin(lid, full) {
+    const e = alive() && root.querySelector(`.ws-win[data-id="${CSS.escape(CAP + lid)}"]`);
+    const c = W.cap.links[lid];
+    if (!e || !c) return;
+    const ui = (W.capUi[lid] ||= { filter: '', sel: null });
+    e.querySelector('.ws-wdot').className = 'ws-wdot ' + (c.on ? 'rec' : 'off');
+    e.querySelector('.ws-wn').textContent = '📡 ' + linkName(lid);
+    e.querySelector('.ws-wk').textContent = c.on ? 'đang bắt gói' : 'đã dừng';
+    const body = e.querySelector('.ws-wbody');
+    if (full || body.dataset.mode !== 'cap') {
+      body.dataset.mode = 'cap';
+      body.className = 'ws-wbody ws-capbody';
+      body.innerHTML = `<div class="ws-cap-bar"><input class="ws-cap-f" spellcheck="false" autocomplete="off" aria-label="Bộ lọc hiển thị" placeholder="Lọc: icmp · arp · tcp · udp · ospf · ip.addr == 10.0.0.1 · tcp.port == 80 · vlan.id == 10"><button data-c="tog"></button><button data-c="clr" title="Xoá danh sách gói">🧹</button><button data-c="pcap" title="Tải file .pcap — mở được bằng Wireshark">⬇ .pcap</button></div>` +
+        `<div class="ws-cap-err"></div><div class="ws-cap-list"><table class="ws-cap-t"><thead><tr><th>No.</th><th>Time</th><th>Source</th><th>Destination</th><th>Protocol</th><th>Length</th><th>Info</th></tr></thead><tbody></tbody></table></div>` +
+        `<div class="ws-cap-det"><div class="ws-cap-tree ftree"></div><div class="ws-cap-hex hexview"></div></div><div class="ws-cap-foot"></div>`;
+      const f = body.querySelector('.ws-cap-f');
+      f.value = ui.filter;
+      f.addEventListener('input', () => { ui.filter = f.value; clearTimeout(f.t); f.t = setTimeout(() => refreshCapWin(lid), 250); });
+      f.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') { ui.filter = f.value; refreshCapWin(lid); } });
+      body.querySelector('[data-c="tog"]').onclick = () => { if (c.on) C.stopCapture(W.cap, lid); else C.startCapture(W.cap, lid, nowSec()); draw(); refreshCapWin(lid); };
+      body.querySelector('[data-c="clr"]').onclick = () => { c.pkts = []; ui.sel = null; refreshCapWin(lid); };
+      body.querySelector('[data-c="pcap"]').onclick = () => {
+        const blob = new Blob([C.capturePcap(c.pkts, c.t0)], { type: 'application/vnd.tcpdump.pcap' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `capture-${linkName(lid).replace(/[^A-Za-z0-9]+/g, '_')}.pcap`;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+      };
+      body.querySelector('tbody').addEventListener('click', (ev) => { const tr = ev.target.closest('tr[data-no]'); if (tr) { ui.sel = +tr.dataset.no; refreshCapWin(lid); } });
+    }
+    body.querySelector('[data-c="tog"]').textContent = c.on ? '■ Stop' : '▶ Start';
+    const cf = C.compileFilter(ui.filter);
+    const err = body.querySelector('.ws-cap-err');
+    err.textContent = cf.error ? `Bộ lọc chưa đúng: ${cf.error}` : '';
+    body.querySelector('.ws-cap-f').classList.toggle('bad', !!cf.error);
+    const shown = cf.error ? c.pkts : c.pkts.filter(cf.fn);
+    const list = body.querySelector('.ws-cap-list');
+    // chỉ tự cuộn xuống khi có gói mới và người xem đang ở cuối bảng (bấm chọn gói thì giữ nguyên vị trí)
+    const grew = c.pkts.length !== ui.seen;
+    ui.seen = c.pkts.length;
+    const atEnd = grew && list.scrollTop + list.clientHeight >= list.scrollHeight - 30;
+    body.querySelector('tbody').innerHTML = shown.map((p) => {
+      const r = C.summarize(p);
+      return `<tr data-no="${r.no}" class="pc-${r.cls}${r.no === ui.sel ? ' sel' : ''}"><td>${r.no}</td><td>${r.time.toFixed(6)}</td><td>${esc(r.src)}</td><td>${esc(r.dst)}</td><td>${esc(r.proto)}</td><td>${r.len}</td><td>${r.vlan != null ? `<span class="ws-vtag">VLAN ${r.vlan}</span> ` : ''}${esc(r.info)}</td></tr>`;
+    }).join('');
+    if (atEnd) list.scrollTop = list.scrollHeight;
+    body.querySelector('.ws-cap-foot').textContent = `Đang hiển thị ${shown.length} / ${c.pkts.length} gói${c.on ? ' · đang bắt…' : ' · đã dừng'}`;
+    const det = body.querySelector('.ws-cap-det');
+    const pk = c.pkts.find((p) => p.no === ui.sel);
+    det.hidden = !pk;
+    if (pk && det.dataset.no !== String(pk.no)) {
+      det.dataset.no = pk.no;
+      const tree = det.querySelector('.ws-cap-tree'), hex = det.querySelector('.ws-cap-hex');
+      const flat = flattenFields(pk.tree);
+      renderFieldTree(tree, pk.tree, [], { onFieldHover: (st, len) => highlightRange(hex, st, len), onFieldLeave: () => clearHexHighlight(hex) });
+      renderHex(hex, pk.bytes, [], {
+        onByteHover: (i) => { const f = flat.filter((x) => i >= x.byteOffset && i < x.byteOffset + x.byteLength).sort((a, b) => a.byteLength - b.byteLength)[0]; if (f) highlightFieldRow(tree, f.name); },
+        onByteLeave: () => clearFieldHighlight(tree),
+      });
+    }
+  }
+  // gói định kỳ (OSPF/EIGRP/HSRP Hello, BPDU) theo đồng hồ thật khi đang có dây được bắt
+  const capTimer = setInterval(() => {
+    if (!alive()) { clearInterval(capTimer); return; }
+    if (C.tickCapture(W.cap, W.net, nowSec())) refreshCaps();
+  }, 1000);
+
   function renderGui(id, body) {
     const d = net().devices[id];
     const g = (W.gui[id] ||= {});
@@ -643,6 +760,8 @@ export function openWorkspace({ onRun }) {
     let res;
     try { res = mut(() => W.cli.exec(id, line)); } catch (err) { res = { out: ['% Lỗi mô phỏng: ' + err.message] }; }
     pushOut(id, line, res, pr, wasPw);
+    // capture: frame của lần mô phỏng này đi qua dây đang bắt (ping: PC gửi 4 lượt, router 5)
+    if (res.sim && C.recordSim(W.cap, res.sim, nowSec(), { repeat: /^\s*ping\b/i.test(line) ? (isHost(d) ? 4 : 5) : 1 })) refreshCaps();
     if (!opts.noHist && !wasPw && line.trim()) (W.hist[id] ||= []).push(line);
     persist();
     refreshWin(id);
@@ -710,6 +829,8 @@ export function openWorkspace({ onRun }) {
   function replaceNet(n) {
     mut(() => { W.net.devices = n.devices; W.net.links = n.links; });
     W.term = {}; W.hist = {}; W.gui = {}; W.boot = {}; W.pick = []; W.sel = null;
+    W.cap = C.createCapture(); W.capUi = {};
+    for (const w of [...W.wins]) if (w.cap) closeWin(w.id);
     for (const id of Object.keys(n.devices)) resetSession(id);
     afterStructural();
     fit();
