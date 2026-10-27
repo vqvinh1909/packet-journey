@@ -330,7 +330,10 @@ html, body {
 .lab-topo { width: 100%; height: 215px; flex: 0 0 auto; background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; }
 .lab-link { stroke-width: 3; }
 .lab-link.up { stroke: var(--ok); }
-.lab-link.down { stroke: var(--muted); stroke-dasharray: 6 5; opacity: 0.7; }
+.lab-link.down { stroke: #e74c3c; stroke-dasharray: 2 5; stroke-linecap: round; }
+.lab-link.off { stroke: var(--muted); stroke-dasharray: 6 5; opacity: 0.7; }
+.lab-link.serial { stroke-dasharray: 16 4 3 4; }
+.lab-link.serial.up { stroke: #e67e22; }
 .lab-link.admin { stroke: #c0392b; stroke-dasharray: 6 5; }
 .lab-port-bg { fill: var(--panel); stroke: var(--border); }
 .lab-port { font-family: var(--mono); font-size: 10px; fill: var(--muted); }
@@ -799,3 +802,35 @@ html, body {
 .ws-cf-rep li.bad { color: var(--warn); }
 .ws-cf-rep code, .ws-note code { font-family: var(--mono); font-size: 11.5px; }
 #ws-cfg { max-width: 160px; }
+
+/* ---------- 📚 Thư viện lab (workspace) ---------- */
+.ws-dlg:has(.ws-lib-tree) { width: min(640px, 100%); max-height: calc(100vh - 120px); overflow: auto; }
+.ws-lib-save { border: 1px solid var(--border); border-radius: 8px; padding: 10px; display: grid; gap: 8px; }
+.ws-lib-acts { flex-wrap: wrap; justify-content: flex-start; }
+.ws-lib-h { font-weight: 700; font-size: 12.5px; color: var(--muted); }
+.ws-lib-recent { display: flex; flex-wrap: wrap; gap: 6px; }
+.ws-lib-recent button { font-size: 12.5px; }
+.ws-lib-tree details { border-top: 1px solid var(--border); padding: 6px 0; }
+.ws-lib-tree summary { cursor: pointer; display: flex; align-items: center; gap: 6px; }
+.ws-lib-tree summary button { padding: 0 6px; font-size: 12px; }
+.ws-lib-tree ul { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 4px; }
+.ws-lib-tree li { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 3px 6px; border-radius: 6px; }
+.ws-lib-tree li.cur { background: var(--accent-soft, rgba(46, 125, 50, 0.12)); }
+.ws-lib-tree li small { color: var(--muted); font-size: 11.5px; }
+.ws-lib-open { font-weight: 600; }
+.ws-lib-ops { margin-left: auto; display: flex; gap: 4px; }
+.ws-lib-ops select, .ws-lib-ops button { padding: 1px 6px; font-size: 12px; }
+
+/* ---------- ✎ Chú thích trên sơ đồ (workspace) ---------- */
+.ws-note { cursor: move; --nc: #2f6fde; }
+.ws-note.c-green { --nc: #2e9e57; } .ws-note.c-orange { --nc: #e67e22; } .ws-note.c-red { --nc: #d64545; }
+.ws-note.c-purple { --nc: #8e5bd8; } .ws-note.c-gray { --nc: #7d8792; }
+.ws-nt-shape { fill: var(--nc); fill-opacity: 0.07; stroke: var(--nc); stroke-width: 2; stroke-dasharray: 8 5; }
+.ws-nt-textbg { fill: var(--panel); stroke: var(--nc); stroke-width: 1.5; }
+.ws-nt-label { fill: var(--nc); font-weight: 700; font-size: 14px; pointer-events: none; }
+.ws-nt-arrow { stroke: var(--nc); stroke-width: 3; }
+.ws-nt-head { fill: var(--nc); }
+.ws-nt-hit { stroke: transparent; stroke-width: 14; }
+.ws-note.sel .ws-nt-shape, .ws-note.sel .ws-nt-textbg { stroke-width: 3; stroke-dasharray: none; }
+.ws-nt-handle { fill: var(--panel); stroke: var(--nc); stroke-width: 2; cursor: nwse-resize; }
+#ws-note { max-width: 140px; }
