@@ -3008,7 +3008,7 @@ export function createCli(net) {
   function complete(id, line0) {
     const d = net.devices[id];
     const s = sess(id);
-    if (VENDOR[d.os]) return null; // Tab hoàn thành lệnh chỉ hỗ trợ cú pháp IOS/ASA
+    if (VENDOR[d.os]) return VENDOR[d.os].complete?.(d, s, line0) ?? null; // FortiOS / PAN-OS có cây lệnh riêng
     const m = String(line0).match(/^(.*?)(\S*)$/);
     const head = m[1], part = m[2].toLowerCase();
     if (!part) return null;
