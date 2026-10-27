@@ -3,23 +3,22 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as N from '../lab/net.js';
 import { createCli, runScript, parseVlist, fmtVlist } from '../lab/ios.js';
-import { LABS, buildLab, checkLab } from '../lab/labs.js';
+import { LABS, buildLab, checkLab, applySolution, quizAnswers } from '../lab/labs.js';
 
 // ---------- mọi lab: ban đầu chưa đạt, chạy lời giải thì đạt hết ----------
 for (const lab of LABS) {
   test(`${lab.id} — ${lab.title}: lời giải làm đạt mọi nhiệm vụ`, () => {
     const net = buildLab(lab);
-    const before = checkLab(lab, net);
-    assert.ok(before.some((x) => !x), `${lab.id}: ngay từ đầu đã đạt hết — lab không có gì để làm`);
+    // Chấm "trước" với đáp án quiz đúng → buộc phải có ít nhất 1 nhiệm vụ cấu hình trượt (không tính quiz)
+    const before = checkLab(lab, net, quizAnswers(lab));
+    assert.ok(lab.tasks.some((t, i) => !t.quiz && !before[i]), `${lab.id}: ngay từ đầu đã đạt hết — lab không có gì để làm`);
     const cli = createCli(net);
     const errs = [];
-    for (const [dev, cmds] of lab.solution) {
-      for (const o of runScript(cli, dev, cmds)) {
-        if (o.out.some((l) => /^% (Invalid|Incomplete|Ambiguous|Unknown)/.test(l) || l.includes("'^' marker"))) errs.push(`${dev}: "${o.cmd}" → ${o.out.join(' | ')}`);
-      }
+    for (const o of applySolution(lab, net, cli)) {
+      if (o.out.some((l) => /^% (Invalid|Incomplete|Ambiguous|Unknown)/.test(l) || l.includes("'^' marker"))) errs.push(`${o.dev}: "${o.cmd}" → ${o.out.join(' | ')}`);
     }
     assert.deepEqual(errs, [], 'Lệnh trong lời giải bị CLI từ chối');
-    const after = checkLab(lab, net);
+    const after = checkLab(lab, net, quizAnswers(lab));
     const failed = lab.tasks.filter((_, i) => !after[i]).map((t) => t.text);
     assert.deepEqual(failed, [], `${lab.id}: còn nhiệm vụ chưa đạt sau lời giải`);
   });
@@ -30,7 +29,8 @@ test('id lab là duy nhất và đủ trường bắt buộc', () => {
   for (const l of LABS) {
     assert.ok(!ids.has(l.id), 'trùng id ' + l.id);
     ids.add(l.id);
-    for (const k of ['group', 'title', 'story', 'build', 'tasks', 'hints', 'solution']) assert.ok(l[k], `${l.id} thiếu ${k}`);
+    for (const k of ['group', 'title', 'story', 'build', 'tasks', 'hints']) assert.ok(l[k], `${l.id} thiếu ${k}`);
+    assert.ok(l.solution || l.guide, `${l.id} thiếu solution/guide`);
   }
   assert.ok(LABS.length >= 25);
 });
@@ -124,4 +124,15 @@ test('ACL: thứ tự dòng + deny ngầm định', () => {
   assert.equal(N.aclEval(d, 'X', { src: '1.1.1.1', dst: '10.0.0.1', proto: 'tcp', dport: 80 }).action, 'permit');
   d.acls.Y = { type: 'standard', entries: [{ seq: 10, action: 'permit', src: { ip: '10.0.0.0', wild: '0.0.0.255' } }] };
   assert.equal(N.aclEval(d, 'Y', { src: '10.0.1.1' }).action, 'deny'); // implicit deny
+});
+
+test('4 lab tổng hợp doanh nghiệp (X01–X04) có cách giải chi tiết đầy đủ', async () => {
+  const { CAP_LABS } = await import('../lab/labs-capstone.js');
+  assert.deepEqual(CAP_LABS.map((l) => l.id), ['X01', 'X02', 'X03', 'X04']);
+  for (const l of CAP_LABS) {
+    assert.equal(l.group, 'cap');
+    assert.ok(Array.isArray(l.guide) && l.guide.length >= 5, `${l.id}: guide quá ngắn`);
+    assert.ok(l.guide[0].title && l.guide[0].why, `${l.id}: bước đầu thiếu title/why`);
+    for (const g of l.guide) assert.ok(g.dev && Array.isArray(g.cmds) && g.cmds.length, `${l.id}: bước "${g.title}" thiếu dev/cmds`);
+  }
 });
