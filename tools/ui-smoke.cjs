@@ -260,6 +260,30 @@ server.listen(8799, '127.0.0.1', async () => {
   await p.click('#btn-progress');
   ok((await p.textContent('#pg-body')).includes('Luyện subnet: 12 câu'), 'Tiến độ: tóm tắt luyện subnet');
   await p.click('.modal .modal-x');
+  // 12) 📊 Điểm yếu: gõ sai lệnh trong lab → ghi nhận + gợi ý cú pháp; biểu đồ; lab nên làm; nút phá mạng theo chủ đề
+  await p.click('#btn-lab');
+  await p.click('.lab-item[data-id="L04"]');
+  await p.click('.lab-tab[data-id="t3"]');
+  for (const c of ['enable', 'configure terminal', 'interface g0/1', 'switchport trunk native 999', 'switchport trunk native 999', 'end']) await type(c);
+  await p.click('.lab-modal .modal-x');
+  await p.click('#btn-weak');
+  ok((await p.$$eval('.wk-chart .wk-row', (x) => x.length)) >= 15, 'điểm yếu: biểu đồ SVG đủ các chủ đề');
+  const wkTxt = await p.textContent('.wk-tbl');
+  ok(wkTxt.includes('switchport trunk native 999') && wkTxt.includes('switchport trunk native vlan <num>'), 'điểm yếu: lệnh gõ sai nhiều nhất kèm cú pháp đúng');
+  const nRec = await p.$$eval('.wk-recs li', (x) => x.length);
+  ok(nRec >= 3 && nRec <= 5, 'điểm yếu: gợi ý ' + nRec + ' lab nên làm');
+  const recId = await p.getAttribute('.wk-open', 'data-id');
+  await p.click('.wk-open');
+  ok((await p.inputValue('#lab-select')) === recId, 'điểm yếu: bấm lab gợi ý → mở đúng lab ' + recId);
+  await p.click('.lab-modal .modal-x');
+  await p.click('#btn-weak');
+  if (await p.$('#wk-break')) {
+    const bid = await p.getAttribute('#wk-break', 'data-id');
+    await p.click('#wk-break');
+    ok((await p.inputValue('#brk-lab')) === bid, 'điểm yếu: 🎲 phá mạng chủ đề yếu → hộp thoại chọn sẵn lab ' + bid);
+    await p.click('#brk-x');
+    await p.click('.lab-modal .modal-x');
+  } else ok(false, 'điểm yếu: thiếu nút phá mạng chủ đề yếu');
   ok(errs.length === 0, 'không có lỗi JS: ' + JSON.stringify(errs).slice(0, 300));
   await b.close();
   server.close();

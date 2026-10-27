@@ -1,5 +1,17 @@
 # Ghi chú làm tiếp — Packet Journey
 
+## 📊 Điểm yếu của tôi (2026-10-27, việc 3/11)
+- `lab/weak.js`: `TOPICS` (regex) → `labTopics(lab)` (ưu tiên `lab.topics`; đã thêm `topics` cho T01/T05/T06/P01/X04/B02),
+  `taskTopics`, `cmdTopic(cmd|spec)`, `cmdError(out)`. Reducer `recordCmd` (lệnh sai → `errs[lệnh]` kèm `sug`; lệnh
+  đúng → `cmds["mode|spec"]` — nguồn cho cheat sheet việc 9) và `recordLab(type: hint|sol|fail|quiz|done|time)`.
+  `topicScores(w, {subnet, breaks, labOf})`: điểm Laplace (tốt+1)/(tốt+xấu+2), trọng số ở `GOOD`/`BAD`, < 3 bằng chứng → null.
+  `recommend(scores, LABS, done)` 3–5 lab; `breakLabFor(topic)`.
+- `lab/ios.js`: `exec` trả thêm `spec` (mẫu lệnh đã khớp); `cli.suggest(dev, line)` xếp mẫu lệnh theo số từ khớp, thử mọi
+  chế độ (đánh dấu `here:false` khi sai chế độ), sửa chính tả từ đầu (edit distance ≤ 2).
+- `ui/lab.js` ghi: lệnh tự gõ/dán (không ghi mật khẩu, `?`, lệnh mẫu; lệnh của đề 🎲 tính cho lab gốc), gợi ý, lời giải
+  (+ nhiệm vụ chưa đạt → fail), quiz (lần chọn đầu), nộp thi thử (fail), xong lab (done; > độ khó × 15 phút → slow),
+  thời gian (cộng khi đổi lab / đóng). `ui/quiz.js` ghi quiz kịch bản. `openLab(onRun, {labId, breakLab})`.
+
 ## 🧮 Luyện subnet vô hạn (2026-10-27, việc 2/11 — phiên "SAP PROMPT App Hoc Mang")
 - `lab/subnet.js` thuần logic: `generate(kind|'mix', level, rng)` → `{kind, level, text, fields:[[key,label]], ans, data}`;
   `grade(q, input)` chuẩn hoá cách gõ (prefix "26" = "/26", "1.022" = 1022, có/không/khong/k/no…), VLSM chấm theo luật
@@ -72,7 +84,7 @@
      trong test), quiet-mode access-class; `aaa new-model` thay "login local"; `security passwords min-length`;
      `ip http server` mở cổng 80; `exec-timeout`, `ip ssh version` lưu và hiện trong running-config.
 6. ⏳ Kịch bản tấn công byte-thật (ARP spoofing, DHCP giả/starvation, VLAN hopping) trong scenarios/.
-- Tổng hiện tại: 101 lab, `node --test` 233/233, `node tools/ui-smoke.cjs` 66/66; workspace tự dựng mạng kiểu EVE-NG + capture; phá mạng ngẫu nhiên; luyện subnet.
+- Tổng hiện tại: 101 lab, `node --test` 240/240, `node tools/ui-smoke.cjs` 71/71; workspace tự dựng mạng kiểu EVE-NG + capture; phá mạng ngẫu nhiên; luyện subnet; điểm yếu.
 
 
 ## ✅ ĐÃ XONG Lab CLI đợt 3 (session 2026-10-27/28) — 7 cải tiến

@@ -573,7 +573,7 @@ const INFRA_LABS = [
 
   // ===================================================================== TICKETS
   {
-    id: 'T01', group: 'tk', lesson: 'Lab CCNA 04', lessonPath: P.t04, level: 2, kind: 'ticket',
+    id: 'T01', group: 'tk', topics: ['VLAN/Trunk'], lesson: 'Lab CCNA 04', lessonPath: P.t04, level: 2, kind: 'ticket',
     title: 'Ticket #4471 — Thay switch xong, phòng Kế toán mất mạng',
     story: '🎫 Ticket #4471 (Ưu tiên: Cao). Sáng nay đội hạ tầng thay switch tầng Kế toán (SW-EDGE-NEW) do switch cũ hỏng nguồn. Sau khi thay, TOÀN BỘ máy phòng Kế toán (VLAN 30) không vào được mạng, gán tay IP đúng dải cũng không ping được gateway. Các phòng khác bình thường. Đội thi công khẳng định "đã copy y nguyên cấu hình switch cũ". → Tìm TẤT CẢ nguyên nhân, sửa tối thiểu, không đổi VLAN/port.',
     build: () => makeNet([
@@ -680,7 +680,7 @@ const INFRA_LABS = [
     solution: [['rb3', cfg('router ospf 1', 'no network 10.255.0.0 0.0.0.3 area 1', 'network 10.255.0.0 0.0.0.3 area 0', 'no passive-interface s0/0/0')]],
   },
   {
-    id: 'T05', group: 'tk', lesson: 'Bài 12', lessonPath: P.b12, level: 2, kind: 'ticket',
+    id: 'T05', group: 'tk', topics: ['VLAN/Trunk'], lesson: 'Bài 12', lessonPath: P.b12, level: 2, kind: 'ticket',
     title: 'Ticket #4655 — Phòng Kỹ thuật mất kết nối sau bảo trì',
     story: '🎫 Ticket #4655. Sau đợt bảo trì cuối tuần (thay cáp, "dọn dẹp" cấu hình), phòng Kỹ thuật (VLAN 20, 192.168.20.0/24) không ping được gateway 192.168.20.1. Phòng Nhân sự (VLAN 10) bình thường. Có thể có nhiều hơn 1 lỗi.',
     build: () => makeNet([
@@ -703,7 +703,7 @@ const INFRA_LABS = [
     solution: [['rcore', cfg('interface g0/0.20', 'encapsulation dot1Q 20')], ['swcore', cfg('interface fa0/2', 'switchport mode access', 'switchport access vlan 20')]],
   },
   {
-    id: 'T06', group: 'tk', lesson: 'Bài 13', lessonPath: P.b13, level: 2, kind: 'ticket',
+    id: 'T06', group: 'tk', topics: ['Static'], lesson: 'Bài 13', lessonPath: P.b13, level: 2, kind: 'ticket',
     title: 'Ticket #4710 — "Đã thêm route đầy đủ" mà site A vẫn không tới site C',
     story: '🎫 Ticket #4710. Người dùng site A (192.168.1.0/24) không truy cập được server site C (192.168.3.10). Ca NOC trước ghi chú: "đã thêm route đầy đủ trên các router". Hãy chứng minh bằng show/traceroute và sửa tối thiểu.',
     build: () => makeNet([
@@ -730,7 +730,7 @@ const INFRA_LABS = [
 
   // ===================================================================== PROJECT
   {
-    id: 'P01', group: 'pj', lesson: 'Lab tổng hợp CCNA 01', lessonPath: P.gm, level: 3, kind: 'project',
+    id: 'P01', group: 'pj', topics: ['VLAN/Trunk', 'OSPF', 'DHCP', 'NAT', 'ACL'], lesson: 'Lab tổng hợp CCNA 01', lessonPath: P.gm, level: 3, kind: 'project',
     title: 'Dự án GreenMart Retail: dựng HQ + Store A + Internet',
     story: 'GreenMart Retail: bạn là kỹ sư mạng duy nhất, dựng hạ tầng HQ (VLAN OFFICE 10.10.0.0/27, WAREHOUSE 10.10.0.32/27) và Store A (10.10.1.0/28) theo đúng bảng địa chỉ của đề GreenMart. WAN & ISP đã đấu nối sẵn. Làm lần lượt các task như đề thi lab tổng hợp: VLAN/trunk → router-on-a-stick → OSPF → default route → DHCP → NAT → ACL cách ly.',
     build: () => makeNet([

@@ -14,6 +14,8 @@ import { renderGuiFw } from './guifw.js';
 import { load, save, remove } from './store.js';
 import { isBreakId, breakLab, breakId, randomSeed, addBreakResult, breakScore } from '../lab/breaker.js';
 import { openBreakDialog } from './breakui.js';
+import { trackCmd, trackLab } from './weak.js';
+import { cmdError } from '../lab/weak.js';
 import { lessonHref } from './i18n.js';
 import { SVG, el, esc, isHost, drawGlyph, adminUp, classifyLine, stpBlocked, linkEnd } from './topo.js';
 
@@ -24,9 +26,10 @@ const SBX = SANDBOX_LAB.id;
 const anyLab = (id) => (isBreakId(id) ? breakLab(id) : getLab(id));
 const IOS_MODES_OK = ['user', 'priv'];
 
-export function openLab(onRun) {
+/** o = { labId (mở thẳng lab này), breakLab (mở luôn hộp thoại 🎲 với lab gợi ý) } — dùng từ 📊 Điểm yếu. */
+export function openLab(onRun, o = {}) {
   document.querySelector('.modal-backdrop')?.remove();
-  let lab = anyLab(load('lab-cur', 'L01')) || LABS[0];
+  let lab = anyLab(o.labId || load('lab-cur', 'L01')) || LABS[0];
   let s = null;
 
   const back = document.createElement('div');
@@ -56,9 +59,13 @@ export function openLab(onRun) {
 
   const $ = (id) => modal.querySelector('#' + id);
   const input = $('lab-in');
-  modal.querySelector('.modal-x').onclick = () => back.remove();
+  // 📊 Điểm yếu: thời gian làm lab (cộng dồn khi đổi lab / đóng), lệnh của đề phá mạng tính vào chủ đề lab gốc
+  let tIn = Date.now();
+  function flushTime() { if (lab && !lab.breakInfo) trackLab('time', lab, { secs: (Date.now() - tIn) / 1000 }); tIn = Date.now(); }
+  const srcLab = () => (lab.breakInfo ? getLab(lab.breakInfo.src) : lab);
+  modal.querySelector('.modal-x').onclick = () => { flushTime(); back.remove(); };
   // Tự dựng mạng: workspace toàn màn hình đè lên modal lab; "▶ Xem gói tin" trong đó đóng cả hai
-  const openWs = () => openWorkspace({ onRun: (sim, label) => { back.remove(); onRun(sim, label); } });
+  const openWs = () => openWorkspace({ onRun: (sim, label) => { flushTime(); back.remove(); onRun(sim, label); } });
   $('lab-sbx-open').onclick = openWs;
   const openBreak = (o = {}) => openBreakDialog(modal, { labId: lab.breakInfo?.src ?? (load('labs-done', {})[lab.id] ? lab.id : ''), n: lab.breakInfo?.n, ...o, onStart: startBreak });
   $('lab-brk-open').onclick = () => openBreak();
@@ -108,6 +115,7 @@ export function openLab(onRun) {
 
   function selectLab(id) {
     if (id === SBX) { $('lab-select').value = lab.id; openWs(); return; }
+    flushTime();
     lab = anyLab(id) || LABS[0];
     save('lab-cur', lab.id);
     s = session(lab);
@@ -371,7 +379,12 @@ export function openLab(onRun) {
   function run(line, opts = {}) {
     if (!s.dev) return;
     s.gainMsg = null;
-    exec(s.dev, line, opts);
+    const dev = s.dev, d = s.net.devices[dev], pw = s.password, mode = s.cli.session(dev)?.mode;
+    const res = exec(dev, line, opts);
+    // 📊 Điểm yếu: chỉ lệnh người học tự gõ/dán trên router/switch IOS (không ghi mật khẩu, "?", lệnh mẫu)
+    if (!opts.noLog && !pw && !isHost(d) && !GUI_VENDORS[d.os] && d.os !== 'fortios' && d.os !== 'panos') {
+      trackCmd({ cmd: line, out: res.out, spec: res.spec, mode, lab: srcLab(), sug: cmdError(res.out) ? s.cli.suggest(dev, line) : [] });
+    }
     s.hpos = -1;
     renderAll(false);
   }
@@ -501,7 +514,7 @@ export function openLab(onRun) {
     const ok = res.filter(Boolean).length;
     const all = ok === res.length;
     const done = load('labs-done', {});
-    if (all && !lab.breakInfo && !done[lab.id]) { done[lab.id] = true; save('labs-done', done); renderList(); }
+    if (all && !lab.breakInfo && !done[lab.id]) { done[lab.id] = true; save('labs-done', done); flushTime(); trackLab('done', lab); renderList(); }
     if (all && s.brk && !s.brk.done) finishBreak();
     const pct = Math.round((ok / res.length) * 100);
     let html = examResHtml() + breakHead() + `<div class="lab-side-h">Nhiệm vụ <span class="lab-score${all ? ' all' : ''}">${ok}/${res.length}</span></div>` +
@@ -541,9 +554,11 @@ export function openLab(onRun) {
     $('lab-side').innerHTML = html;
     $('lab-side').scrollTop = scroll;
     $('lab-exp').onchange = (e) => save(explainKey(), e.target.checked);
-    $('lab-hint').onclick = () => { if (s.hintN < lab.hints.length) s.hintN += 1; if (s.brk && !s.brk.done) { s.brk.hints = s.hintN; save('break-cur', s.brk); } renderSide(); };
+    $('lab-hint').onclick = () => { if (s.hintN < lab.hints.length) { s.hintN += 1; if (!s.brk) trackLab('hint', lab); } if (s.brk && !s.brk.done) { s.brk.hints = s.hintN; save('break-cur', s.brk); } renderSide(); };
     $('lab-side').querySelectorAll('.lab-qopt').forEach((b) => (b.onclick = () => {
-      s.answers[+b.dataset.q] = +b.dataset.o;
+      const qi = +b.dataset.q;
+      if (s.answers[qi] == null) trackLab('quiz', srcLab(), { ok: +b.dataset.o === lab.tasks[qi].quiz.correct, task: lab.tasks[qi] });
+      s.answers[qi] = +b.dataset.o;
       save('labans:' + lab.id, s.answers);
       renderSide();
     }));
@@ -560,6 +575,13 @@ export function openLab(onRun) {
       if (!s.showSol && lab.kind !== 'config' && !confirm(s.brk ? 'Xem đáp án? Lượt này sẽ không được tính điểm.' : 'Xem lời giải ticket/dự án ngay? Thử tự chẩn đoán bằng lệnh show trước sẽ học được nhiều hơn.')) return;
       s.showSol = !s.showSol;
       if (s.brk && s.showSol && !s.brk.done) { s.brk.revealed = true; save('break-cur', s.brk); }
+      if (!s.brk && s.showSol && !s.solTracked) {
+        // mở lời giải khi còn nhiệm vụ chưa đạt → tính là "nhiệm vụ trượt" cho chủ đề của từng nhiệm vụ
+        s.solTracked = true;
+        trackLab('sol', lab);
+        const r = checkLab(lab, s.net, s.answers);
+        trackLab('fail', lab, { tasks: lab.tasks.filter((t, i) => !r[i] && !t.quiz) });
+      }
       renderSide();
     };
     const bn = $('lab-brk-new');
@@ -622,6 +644,7 @@ export function openLab(onRun) {
     const res = checkLab(lab, s.net, s.answers);
     const secs = Math.min(Math.round((Date.now() - s.exam.start) / 1000), Math.round((s.exam.end - s.exam.start) / 1000));
     const r = { ...examResult(res), secs, auto, failed: res.map((x, i) => (x ? -1 : i)).filter((i) => i >= 0) };
+    trackLab('fail', lab, { tasks: r.failed.map((i) => lab.tasks[i]) });
     const best = load('labexam-best', {});
     const b = best[lab.id];
     if (!b || r.score > b.score || (r.score === b.score && r.secs < b.secs)) { best[lab.id] = { score: r.score, secs: r.secs }; save('labexam-best', best); }
@@ -641,7 +664,9 @@ export function openLab(onRun) {
     $('lab-submit').onclick = () => submitExam(false);
     $('lab-quit').onclick = () => { if (confirm('Huỷ bài thi? Cấu hình đã gõ vẫn giữ, không tính điểm.')) { s.exam = null; renderAll(); } };
     $('lab-side').querySelectorAll('.lab-qopt').forEach((b) => (b.onclick = () => {
-      s.answers[+b.dataset.q] = +b.dataset.o;
+      const qi = +b.dataset.q;
+      if (s.answers[qi] == null) trackLab('quiz', srcLab(), { ok: +b.dataset.o === lab.tasks[qi].quiz.correct, task: lab.tasks[qi] });
+      s.answers[qi] = +b.dataset.o;
       save('labans:' + lab.id, s.answers);
       renderSide();
     }));
@@ -698,6 +723,7 @@ export function openLab(onRun) {
   $('lab-term').addEventListener('click', (e) => { if (e.target.tagName !== 'BUTTON' && !window.getSelection()?.toString()) input.focus(); });
 
   selectLab(lab.id);
+  if (o.breakLab) openBreak({ labId: o.breakLab });
 }
 
 function fmtTime(sec) { const m = Math.floor(sec / 60), x = sec % 60; return `${String(m).padStart(2, '0')}:${String(x).padStart(2, '0')}`; }

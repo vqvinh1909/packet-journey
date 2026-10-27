@@ -194,7 +194,7 @@ export const CAP_LABS = [
   // X04 — Troubleshooting marathon (9 lỗi cài sẵn)
   // =====================================================================
   {
-    id: 'X04', group: 'cap', lesson: 'Capstone 4 — Troubleshooting marathon', level: 3, kind: 'ticket',
+    id: 'X04', group: 'cap', topics: ['VLAN/Trunk', 'STP', 'OSPF', 'ACL', 'FHRP'], lesson: 'Capstone 4 — Troubleshooting marathon', level: 3, kind: 'ticket',
     title: 'Troubleshooting marathon: 9 lỗi ẩn trong mạng campus',
     story: '🎫 Sáng thứ Hai, kỹ sư cũ nghỉ việc để lại mạng "chạy được một nửa". Thiết kế chuẩn (đúng): ACC1 trunk lên DS1 (Gi0/1) và DS2 (Gi0/2), native VLAN 99 trên MỌI trunk, cho phép VLAN 10,20,30,99. VLAN 10 SALES / 20 HR / 30 IT = 192.168.V.0/24 — DS1 .2, DS2 .3, VIP HSRP .1 (DS1 Active). DS1/DS2 chạy OSPF area 0 với R-EDGE (VLAN 100: 10.0.1.0/30, VLAN 200: 10.0.2.0/30); R-EDGE có default ra ISP và phải quảng bá default vào OSPF, NAT PAT cho cả 3 VLAN. Chính sách: HR KHÔNG được truy cập VLAN IT (ACL HR_IN trên SVI VLAN 20 của 2 DS), còn lại tự do. Người dùng phàn nàn: IT mất mạng, HR không ra được gateway, không ai vào Internet… Hãy tìm và sửa từng lỗi bằng lệnh show — KHÔNG đổi IP của PC, KHÔNG thêm static route trên DS.',
     build: () => makeNet([

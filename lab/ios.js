@@ -151,6 +151,15 @@ function matchOne(toks, words) {
   if (wi < words.length) return { fail: wi, kwAt };
   return { ok: true, args, score, kwAt };
 }
+function editDist(a, b) {
+  const dp = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    let prev = dp[0];
+    dp[0] = i;
+    for (let j = 1; j <= b.length; j++) { const t = dp[j]; dp[j] = Math.min(dp[j] + 1, dp[j - 1] + 1, prev + (a[i - 1] === b[j - 1] ? 0 : 1)); prev = t; }
+  }
+  return dp[b.length];
+}
 function parse(table, words) {
   const res = table.map((entry) => ({ entry, r: matchOne(entry.toks, words) }));
   const oks = res.filter((x) => x.r.ok).sort((a, b) => b.r.score - a.r.score);
@@ -992,10 +1001,12 @@ export function createCli(net) {
 
   function dispatch(d, s, words, raw, pr) {
     const p = parse(tableFor(d, s), words);
-    if (p.hit) return p.hit.fn({ d, s, a: p.args, words, raw });
+    // spec = mẫu lệnh đã khớp (vd "switchport trunk allowed vlan <vlist>") — cho thống kê / cheat sheet
+    const withSpec = (r, spec) => (r && typeof r === 'object' ? { ...r, spec } : r);
+    if (p.hit) return withSpec(p.hit.fn({ d, s, a: p.args, words, raw }), p.hit.spec);
     if (SUB.has(s.mode)) {
       const g = parse(cfgTable(d), words);
-      if (g.hit) { s.mode = 'config'; s.ifs = []; return g.hit.fn({ d, s, a: g.args, words, raw }); }
+      if (g.hit) { s.mode = 'config'; s.ifs = []; return withSpec(g.hit.fn({ d, s, a: g.args, words, raw }), g.hit.spec); }
     }
     return errOut(p, s, raw, words, pr);
   }
@@ -3038,7 +3049,49 @@ export function createCli(net) {
     return cands.size === 1 ? head + [...cands][0] + ' ' : null;
   }
 
-  return { exec, prompt, complete, session: sess, net, runningConfig };
+  /**
+   * Gợi ý cú pháp đúng cho một lệnh gõ sai (📊 Điểm yếu): xếp mẫu lệnh theo số từ khớp liên tiếp từ đầu, xét cả
+   * chế độ hiện tại và các chế độ khác (lỗi hay gặp: gõ lệnh cổng ở (config)#). Từ đầu gõ sai chính tả (≤ 2 ký tự)
+   * vẫn được nhận. Trả [{ spec, mode, here }] (tối đa `k`), mode là chế độ dùng được lệnh đó.
+   */
+  function suggest(id, line, k = 3) {
+    const d = net.devices[id];
+    if (!d || d.type === 'pc' || d.type === 'server' || VENDOR[d.os] || d.os === 'asa') return [];
+    const cur = sess(id);
+    let words = String(line).replace(/\?$/, '').trim().split(/\s+/).filter(Boolean);
+    if (words[0]?.toLowerCase() === 'do' && words.length > 1) words = words.slice(1);
+    if (!words.length) return [];
+    const modes = [[cur.mode, cur]];
+    const fake = (mode, extra = {}) => ({ mode, ifs: ['g0/0'], ...extra });
+    for (const m of ['priv', 'config', 'if', 'vlan', 'line', 'pool', 'acl-ext', 'acl-std', 'bgp']) if (m !== cur.mode) modes.push([m, fake(m)]);
+    for (const rp of ['ospf', 'eigrp']) modes.push(['router', fake('router', { rp })]);
+    const rank = (ws) => {
+      const out = [];
+      for (const [mode, s] of modes) {
+        for (const e of tableFor(d, s)) {
+          const r = matchOne(e.toks, ws);
+          const depth = r.ok ? ws.length : r.inc ? r.wi : r.fail ?? r.amb ?? 0;
+          if (depth < Math.min(2, ws.length) && !(depth >= 1 && e.toks.length === 1)) continue;
+          const score = depth * 10 + (r.ok || r.inc ? 5 : 0) + (mode === cur.mode ? 3 : 0) - e.toks.length * 0.3;
+          out.push({ spec: e.spec, mode, here: mode === cur.mode, score });
+        }
+      }
+      return out;
+    };
+    let cands = rank(words);
+    if (!cands.length) {
+      // từ đầu gõ sai chính tả: thay bằng từ khoá gần nhất (khoảng cách sửa ≤ 2)
+      const firsts = new Set();
+      for (const [, s] of modes) for (const e of tableFor(d, s)) if (e.toks[0][0] !== '<' && e.toks[0][0] !== '{') firsts.add(e.toks[0]);
+      const w0 = words[0].toLowerCase();
+      const best = [...firsts].map((f) => [f, editDist(w0, f)]).filter(([, x]) => x <= 2).sort((a, b) => a[1] - b[1])[0];
+      if (best) cands = rank([best[0], ...words.slice(1)]);
+    }
+    const seen = new Set();
+    return cands.sort((a, b) => b.score - a.score).filter((c0) => !seen.has(c0.spec + c0.mode) && seen.add(c0.spec + c0.mode)).slice(0, k).map(({ spec, mode, here }) => ({ spec, mode, here }));
+  }
+
+  return { exec, prompt, complete, suggest, session: sess, net, runningConfig };
 }
 
 /** Chạy một loạt lệnh trên 1 thiết bị (dùng cho cấu hình khởi tạo lab, lời giải, test). */
