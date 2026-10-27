@@ -1,5 +1,18 @@
 # Ghi chú làm tiếp — Packet Journey
 
+## 🛡️ ĐANG LÀM: Bảo mật & Firewall (đợt 4, 2026-10-27) — kế hoạch 6 giai đoạn user đã duyệt
+1. ✅ Lõi firewall stateful `lab/fw.js` (kind asa / zbf / policy; phiên stateful theo ctx; firewall xét ACL in SAU NAT;
+   `firewall(id,name,x,y,ifs,os)` trong net.js; tests/fw.test.js).
+2. ✅ Cisco ASA `lab/asa.js` (dialect riêng, gắn vào ios.js qua `d.os === 'asa'`) + lab F01–F04.
+3. ✅ Zone-Based Firewall trong ios.js (mode zone/cmapi/pmapi/pmapic/zpair) + lab Z01–Z03.
+4. ⏳ FortiGate (FortiOS) + Palo Alto (PAN-OS) — kind 'policy' (rule base có sẵn trong fw.js: from/to, src/dst, svc,
+   action, nat). Sophos / Check Point / pfSense (dạng GUI web): user trả lời mâu thuẫn (chọn cả 3 + "chỉ Forti + PA")
+   → HỎI LẠI trước khi làm.
+5. ⏳ Gói bảo mật L2 + thiết bị: DAI thật (hiện chỉ parse), IP Source Guard, DHCP giả, AAA/login block-for/hardening.
+6. ⏳ Kịch bản tấn công byte-thật (ARP spoofing, DHCP giả/starvation, VLAN hopping) trong scenarios/.
+- Tổng hiện tại: 85 lab, `node --test` 181/181, `node tools/ui-smoke.cjs` 18/18.
+
+
 ## ✅ ĐÃ XONG Lab CLI đợt 3 (session 2026-10-27/28) — 7 cải tiến
 - **Cách giải báo nhiệm vụ vừa đạt** (`withGain` trong `ui/lab.js`): sau "▶ Gõ bước này"/"Gõ lời giải" hiện bước đó làm
   đạt nhiệm vụ nào; nhiệm vụ mới chuyển xanh nháy sáng (so với lần chấm trước, cả khi gõ tay).
