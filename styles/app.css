@@ -834,3 +834,35 @@ html, body {
 .ws-note.sel .ws-nt-shape, .ws-note.sel .ws-nt-textbg { stroke-width: 3; stroke-dasharray: none; }
 .ws-nt-handle { fill: var(--panel); stroke: var(--nc); stroke-width: 2; cursor: nwse-resize; }
 #ws-note { max-width: 140px; }
+
+/* ---------- 📝 Ghi chú lab + 📋 Cheat sheet ---------- */
+.lab-note { margin-top: 10px; border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px; }
+.lab-note summary { cursor: pointer; font-weight: 600; }
+.lab-note textarea { width: 100%; box-sizing: border-box; margin-top: 6px; font: 12.5px var(--mono); resize: vertical; background: var(--bg); color: var(--fg); border: 1px solid var(--border); border-radius: 6px; padding: 6px; }
+.lab-note-md { font-size: 12.5px; margin-top: 4px; }
+.lab-note-md p { margin: 2px 0; } .lab-note-md ul { margin: 2px 0; padding-left: 18px; }
+.lab-note-md code { font-family: var(--mono); font-size: 11.5px; background: var(--bg); padding: 0 3px; border-radius: 3px; }
+.lab-star { display: flex; gap: 6px; align-items: center; font-size: 12.5px; margin-top: 6px; }
+.cs-modal { width: min(860px, 100%); }
+.cs-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 8px 16px; border-bottom: 1px solid var(--border); }
+.cs-bar input#cs-q { flex: 1; min-width: 140px; }
+.cs-ex { display: flex; gap: 4px; align-items: center; font-size: 12.5px; }
+.cs-body { max-height: calc(100vh - 220px); overflow: auto; }
+.cs-note { font-size: 12.5px; color: var(--muted); margin: 0 0 8px; }
+.cs-empty { padding: 24px; text-align: center; color: var(--muted); }
+.cs-topic h4 { margin: 14px 0 4px; border-bottom: 2px solid var(--accent, #2e7d32); padding-bottom: 2px; }
+.cs-mode { margin: 8px 0 2px; font-size: 12.5px; font-weight: 700; color: var(--muted); }
+.cs-pr { font-family: var(--mono); font-size: 11.5px; font-weight: 400; }
+.cs-tbl { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.cs-tbl td { border-bottom: 1px solid var(--border); padding: 3px 6px; vertical-align: top; }
+.cs-tbl td:first-child { width: 48%; }
+.cs-tbl code { font-family: var(--mono); font-size: 12px; }
+.cs-eg { color: var(--muted); font-size: 11.5px; }
+.cs-n { color: var(--muted); text-align: right; white-space: nowrap; width: 40px; }
+@media print {
+  body.cs-printing > *:not(.cs-back) { display: none !important; }
+  body.cs-printing .cs-back { position: static; background: none; display: block; padding: 0; }
+  body.cs-printing .cs-modal { width: 100%; box-shadow: none; border: 0; max-height: none; }
+  body.cs-printing .cs-bar, body.cs-printing .modal-x { display: none; }
+  body.cs-printing .cs-body { max-height: none; overflow: visible; }
+}

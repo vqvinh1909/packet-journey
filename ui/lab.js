@@ -17,6 +17,7 @@ import { openBreakDialog } from './breakui.js';
 import { trackCmd, trackLab } from './weak.js';
 import { clockStep, afterCommand, pullLogs as pullClockLogs, renderClockBar, TICK_MS } from './clock.js';
 import { cmdError } from '../lab/weak.js';
+import { miniMd } from '../lab/cheat.js';
 import { lessonHref } from './i18n.js';
 import { SVG, el, esc, isHost, drawGlyph, adminUp, classifyLine, stpBlocked, linkEnd } from './topo.js';
 
@@ -43,7 +44,7 @@ export function openLab(onRun, o = {}) {
     `<div class="modal-h"><span>🧪 Lab thực hành CLI — Cisco IOS <span class="lab-count" id="lab-count"></span></span><span class="lab-hbtns"><button class="lab-sbx-btn" id="lab-brk-open" title="Lab xử lý sự cố vô hạn: gài lỗi ngẫu nhiên vào mạng đang chạy tốt">🎲 Phá mạng ngẫu nhiên</button><button class="lab-sbx-btn" id="lab-sbx-open" title="Tự thêm thiết bị, nối dây, cấu hình tự do">🧱 Tự dựng mạng riêng</button><button class="modal-x" title="Đóng (lab vẫn được giữ nguyên)">✕</button></span></div>` +
     `<div class="lab-body">` +
     `<aside class="lab-list" id="lab-list"><div class="lab-find"><input type="search" id="lab-q" placeholder="🔎 Tìm lab: ospf, nat, vlan, X0…" aria-label="Tìm lab">` +
-    `<div class="lab-filt" id="lab-filt"><button data-f="all">Tất cả</button><button data-f="todo">Chưa xong</button><button data-f="done">Đã xong</button></div></div><div id="lab-items"></div></aside>` +
+    `<div class="lab-filt" id="lab-filt"><button data-f="all">Tất cả</button><button data-f="todo">Chưa xong</button><button data-f="done">Đã xong</button><button data-f="star" title="Lab đã đánh dấu ⭐ cần làm lại">⭐</button></div></div><div id="lab-items"></div></aside>` +
     `<main class="lab-main">` +
     `<select class="lab-select" id="lab-select" aria-label="Chọn lab"></select>` +
     `<div class="lab-head" id="lab-head"></div>` +
@@ -90,7 +91,8 @@ export function openLab(onRun, o = {}) {
   function renderList() {
     const done = load('labs-done', {});
     $('lab-count').textContent = `· ${LABS.length} lab · đã xong ${LABS.filter((l) => done[l.id]).length}`;
-    const show = (l) => labMatch(l, query) && (filt === 'all' || (filt === 'done') === !!done[l.id]);
+    const star = load('lab-star', {});
+    const show = (l) => labMatch(l, query) && (filt === 'all' || (filt === 'star' ? !!star[l.id] : (filt === 'done') === !!done[l.id]));
     let html = query || filt !== 'all' ? '' : `<div class="lab-grp">🧱 Chế độ tự do</div>` +
       `<button class="lab-item" data-id="${SBX}"><span class="lab-id">🧱</span><span class="lab-t">Tự dựng mạng riêng (workspace)</span><span></span></button>`;
     let shown = 0;
@@ -104,7 +106,7 @@ export function openLab(onRun, o = {}) {
         `<div class="lab-gbar"><div style="width:${Math.round((nd / all.length) * 100)}%"></div></div>`;
       for (const l of items) {
         html += `<button class="lab-item${l.id === lab.id ? ' active' : ''}${done[l.id] ? ' done' : ''}" data-id="${l.id}">` +
-          `<span class="lab-id">${done[l.id] ? '✓' : l.id}</span><span class="lab-t">${esc(l.title)}</span><span class="lab-lv" title="Độ khó">${'●'.repeat(l.level)}${'○'.repeat(3 - l.level)}</span></button>`;
+          `<span class="lab-id">${done[l.id] ? '✓' : l.id}</span><span class="lab-t">${star[l.id] ? '⭐ ' : ''}${esc(l.title)}</span><span class="lab-lv" title="Độ khó">${'●'.repeat(l.level)}${'○'.repeat(3 - l.level)}</span></button>`;
       }
     }
     if (!shown && (query || filt !== 'all')) html += `<div class="lab-none">Không có lab nào khớp${query ? ` "${esc(query)}"` : ''}.</div>`;
@@ -537,6 +539,15 @@ export function openLab(onRun, o = {}) {
     const hasSol = solutionOf(lab).length > 0;
     html += `<div class="lab-acts"><button id="lab-hint">💡 Gợi ý (${s.hintN}/${lab.hints.length})</button>${hasSol ? `<button id="lab-sol">🔑 ${s.brk ? 'Xem đáp án' : 'Lời giải'}</button>` : ''}<button id="lab-reset">↺ Làm lại</button>${s.brk ? '<button id="lab-brk-new" title="Đề mới, cùng lab, cùng số lỗi">🎲 Phá tiếp</button>' : '<button id="lab-exam" title="Làm lại từ đầu, có giờ, không gợi ý — chấm thang 1000">⏱ Thi thử</button>'}</div>`;
     if (s.hintN) html += `<ul class="lab-hints">${lab.hints.slice(0, s.hintN).map((h) => `<li>${esc(h)}</li>`).join('')}</ul>`;
+    if (!lab.breakInfo) {
+      // 📝 ghi chú riêng + ⭐ cần làm lại (localStorage "labnote:<id>", "lab-star")
+      const note = load('labnote:' + lab.id, '');
+      const starred = !!load('lab-star', {})[lab.id];
+      html += `<details class="lab-note" id="lab-note"${s.noteOpen ?? !!note ? ' open' : ''}><summary>📝 Ghi chú của tôi${note ? ' •' : ''}${starred ? ' · ⭐' : ''}</summary>` +
+        `<textarea id="lab-note-t" rows="4" spellcheck="false" placeholder="Chỗ hay nhầm, lệnh cần nhớ… Hỗ trợ **đậm**, \`lệnh\`, dòng bắt đầu bằng - ">${esc(note)}</textarea>` +
+        `<div class="lab-note-md" id="lab-note-md">${miniMd(note)}</div>` +
+        `<label class="lab-star"><input type="checkbox" id="lab-star"${starred ? ' checked' : ''}> ⭐ Cần làm lại (lọc bằng nút ⭐ ở danh sách lab)</label></details>`;
+    }
     if (lab.guide?.length) {
       const groups = guideGroups();
       html += `<details class="lab-guide" id="lab-guide"${s.guideOpen ? ' open' : ''}><summary>🧭 Cách giải chi tiết (${groups.length} bước)</summary>` +
@@ -559,8 +570,18 @@ export function openLab(onRun, o = {}) {
         `<button id="lab-runsol" class="btn-accent">▶ Gõ lời giải vào console (xem từng lệnh)</button></div>`;
     }
     const scroll = $('lab-side').scrollTop;
+    const ta = document.activeElement?.id === 'lab-note-t' ? document.activeElement : null; // đang gõ ghi chú: giữ con trỏ
+    const caret = ta && [ta.selectionStart, ta.selectionEnd];
     $('lab-side').innerHTML = html;
     $('lab-side').scrollTop = scroll;
+    if (caret && $('lab-note-t')) { $('lab-note-t').focus(); $('lab-note-t').setSelectionRange(...caret); }
+    const nt = $('lab-note-t');
+    if (nt) {
+      $('lab-note').ontoggle = () => { s.noteOpen = $('lab-note').open; };
+      nt.oninput = () => { save('labnote:' + lab.id, nt.value); $('lab-note-md').innerHTML = miniMd(nt.value); };
+      nt.onkeydown = (e) => e.stopPropagation(); // phím trong ô ghi chú không lọt sang console
+      $('lab-star').onchange = (e) => { const st = load('lab-star', {}); if (e.target.checked) st[lab.id] = true; else delete st[lab.id]; save('lab-star', st); renderList(); };
+    }
     $('lab-exp').onchange = (e) => save(explainKey(), e.target.checked);
     $('lab-hint').onclick = () => { if (s.hintN < lab.hints.length) { s.hintN += 1; if (!s.brk) trackLab('hint', lab); } if (s.brk && !s.brk.done) { s.brk.hints = s.hintN; save('break-cur', s.brk); } renderSide(); };
     $('lab-side').querySelectorAll('.lab-qopt').forEach((b) => (b.onclick = () => {

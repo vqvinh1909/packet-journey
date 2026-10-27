@@ -198,7 +198,7 @@ function prefixMatch(toks, words) {
 }
 
 // Mô tả tiếng Việt cho "?" (giúp người mới)
-const DESC = {
+export const DESC = {
   show: 'Xem thông tin/trạng thái', configure: 'Vào chế độ cấu hình', ping: 'Gửi ICMP Echo kiểm tra thông mạng', traceroute: 'Dò đường đi từng chặng',
   enable: 'Vào chế độ đặc quyền (#) / đặt mật khẩu enable', disable: 'Về chế độ user (>)', exit: 'Thoát về chế độ trước', end: 'Về thẳng chế độ # (privileged EXEC)',
   interface: 'Chọn cổng để cấu hình', hostname: 'Đặt tên thiết bị', ip: 'Các lệnh IP', no: 'Phủ định / xoá một lệnh', router: 'Bật giao thức định tuyến',

@@ -13,6 +13,7 @@ import { openCanvas } from './canvas.js';
 import { openLab } from './lab.js';
 import { openSubnet } from './subnet.js';
 import { openWeak } from './weak.js';
+import { openCheat } from './cheat.js';
 import * as topo from './topology.js';
 import { renderControls } from './controls.js';
 import { renderLayerStack } from './layerstack.js';
@@ -83,6 +84,7 @@ function buildChrome() {
   $('btn-canvas').onclick = () => openCanvas(loadSimResult);
   $('btn-lab').onclick = () => openLab(loadSimResult);
   $('btn-subnet').onclick = openSubnet;
+  $('btn-cheat').onclick = openCheat;
   $('btn-weak').onclick = () => openWeak({ openLab: (id, x = {}) => openLab(loadSimResult, { labId: id, ...x }) });
   refreshGuessBtn();
   refreshChromeText();
