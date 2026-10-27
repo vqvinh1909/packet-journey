@@ -1877,7 +1877,7 @@ export function createCli(net) {
   // ---------- IOS / flash / NVRAM ----------
   function cfgSnap(d) {
     const o = JSON.parse(JSON.stringify(d));
-    for (const k of ['id', 'type', 'x', 'y', 'flash', 'flashSize', 'image', 'version', 'startupCfg', 'arp', 'macTable', 'natTable', 'rommon']) delete o[k];
+    for (const k of ['id', 'type', 'x', 'y', 'flash', 'flashSize', 'image', 'version', 'startupCfg', 'arp', 'macTable', 'natTable', 'rommon', 'logBuf', 'debug', 'off']) delete o[k];
     if (o.dhcp) o.dhcp.bindings = [];
     if (o.ports) for (const p of Object.values(o.ports)) p.errdis = false;
     for (const a of Object.values(o.acls || {})) for (const e of a.entries) e.matches = 0;

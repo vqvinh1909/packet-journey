@@ -306,6 +306,25 @@ server.listen(8799, '127.0.0.1', async () => {
   ok(/Log Buffer[\s\S]*%OSPF-5-ADJCHG/.test(await outTxt()), 'show logging có log OSPF');
   await p.click('#lab-clock [data-sp="5"]');
   await p.click('.lab-modal .modal-x');
+  // 14) 📄 cấu hình dạng văn bản trong workspace: nạp (dán, tách theo hostname) → đặt startup-config → Wipe về startup
+  await p.click('#btn-lab'); await p.click('#lab-sbx-open');
+  await p.selectOption('#ws-tpl', 'lan');
+  await p.click('#ws-start');
+  await p.waitForTimeout(400);
+  await p.selectOption('#ws-cfg', 'imp');
+  await p.fill('#cf-text', 'hostname PC1\nip 10.0.0.31/24 10.0.0.1\nset pcname PC2\nip 10.0.0.32/24 10.0.0.1\nhostname KHONGCO\ninterface g0/0');
+  await p.click('#cf-go');
+  const rep = await p.textContent('#cf-rep');
+  ok(rep.includes('✓ PC1') && rep.includes('✓ PC2') && rep.includes('KHONGCO: không có thiết bị'), 'nạp cấu hình: tách theo hostname / set pcname, báo thiết bị không có');
+  await p.click('#cf-x');
+  ok((await wsText('.ws-svg')).includes('10.0.0.31/24'), 'nạp cấu hình: sơ đồ cập nhật IP');
+  await p.selectOption('#ws-cfg', 'save');
+  ok((await p.textContent('.ws-dlg')).includes('startup-config'), 'Đặt làm startup-config: báo số thiết bị đã lưu');
+  await p.click('#cf-ok');
+  const [dl] = await Promise.all([p.waitForEvent('download'), p.selectOption('#ws-cfg', 'exp')]);
+  const txt = require('fs').readFileSync(await dl.path(), 'utf8');
+  ok(/! ===== Thiết bị: PC1 \(VPCS\) =====\nset pcname PC1\nip 10\.0\.0\.31\/24 10\.0\.0\.1/.test(txt), 'xuất tất cả cấu hình (.txt) theo từng thiết bị');
+  await p.click('#ws-close');
   ok(errs.length === 0, 'không có lỗi JS: ' + JSON.stringify(errs).slice(0, 300));
   await b.close();
   server.close();

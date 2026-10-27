@@ -1,5 +1,15 @@
 # Ghi chú làm tiếp — Packet Journey
 
+## ⏳ ĐANG DỞ (dừng vì hết credit, 2026-10-27) — việc 6/11 xuất/nạp cấu hình
+- Đã xong: `lab/configio.js` (exportConfigs / splitConfigs / importConfigs / saveAllStartup), `S.wipeDevice` về
+  startup-config, `cfgSnap` bỏ logBuf/debug/off, workspace menu "📁 Lưu / Nạp…" (gộp Xuất/Nhập JSON + cấu hình .txt
+  + Đặt làm startup-config, hộp thoại nạp có báo cáo), `tests/configio.test.js` (4 test) — `node --test` 257/257 đạt.
+- CÒN LẠI: `node tools/ui-smoke.cjs` dừng ở bước capture (~28 PASS): select "📁 Lưu / Nạp…" quá rộng làm thanh công cụ
+  workspace xuống 2 dòng → cửa sổ capture che node PC3. Đã thêm CSS `#ws-cfg { max-width: 160px }` nhưng CHƯA chạy
+  lại smoke để xác nhận; bước smoke 14 (nạp/xuất cấu hình) mới viết, chưa chạy được tới. README chưa ghi việc 6.
+- Việc 7 → 11 chưa làm: 7 thư mục lab + .unl EVE-NG, 8 chú thích sơ đồ + kiểu dây, 9 ghi chú + cheat sheet (dùng
+  `weak.cmds` từ việc 3), 10 so sánh cấu hình + "🩺 Vì sao không ping được?", 11 đề thi thử CCNA.
+
 ## 🐧 VPCS cho PC (2026-10-27, việc 5/11)
 - `lab/ios.js` `vpcsExec` khi `d.shell === 'vpcs'` (prompt `PC1> `); PC không có cờ → `pcExec` kiểu Windows như cũ.
   `save` lưu `d.vpcsSaved`; `S.wipeDevice` nạp lại. VPCS không có telnet/ssh (như thật) — cần thì đổi shell.

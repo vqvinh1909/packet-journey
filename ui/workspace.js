@@ -17,6 +17,7 @@ import { renderGuiFw } from './guifw.js';
 import { load, save } from './store.js';
 import { el, esc, isHost, drawGlyph, adminUp, classifyLine, stpBlocked, linkEnd } from './topo.js';
 import { clockStep, afterCommand, pullLogs as pullClockLogs, renderClockBar, TICK_MS } from './clock.js';
+import * as IO from '../lab/configio.js';
 import * as C from '../lab/capture.js';
 import { flattenFields } from '../packet/serialize.js';
 import { renderFieldTree, highlightFieldRow, clearFieldHighlight } from './fieldtree.js';
@@ -50,7 +51,10 @@ export function openWorkspace({ onRun }) {
     `<button id="ws-start" class="ws-go" title="Bật mọi thiết bị đang tắt">▶ Start all</button><button id="ws-stop" class="ws-halt" title="Tắt mọi thiết bị">■ Stop all</button><span class="ws-sep"></span>` +
     `<button id="ws-undo" title="Hoàn tác (Ctrl+Z khi không gõ console)">↶</button><button id="ws-redo" title="Làm lại (Ctrl+Y)">↷</button>` +
     `<select id="ws-tpl" title="Nạp mạng mẫu (chỉ thiết bị + dây, bạn tự cấu hình)"><option value="">📐 Mạng mẫu…</option>${S.SANDBOX_TEMPLATES.map((t) => `<option value="${t.id}" title="${esc(t.desc)}">${esc(t.title)}</option>`).join('')}</select>` +
-    `<button id="ws-exp" title="Tải mạng về máy">⬇ Xuất JSON</button><button id="ws-imp" title="Mở file mạng đã xuất (kể cả file cũ)">⬆ Nhập JSON</button><button id="ws-clr" title="Bắt đầu lại từ mạng trống">🧹 Xoá hết</button>` +
+    `<select id="ws-cfg" title="Lưu / nạp cả mạng (JSON) hoặc cấu hình dạng văn bản của mọi thiết bị"><option value="">📁 Lưu / Nạp…</option>` +
+    `<optgroup label="Cả mạng (thiết bị + dây + cấu hình)"><option value="json-exp">⬇ Xuất mạng (.json)</option><option value="json-imp">⬆ Nhập mạng (.json, kể cả file cũ)…</option></optgroup>` +
+    `<optgroup label="Cấu hình dạng văn bản"><option value="exp">⬇ Xuất tất cả cấu hình (.txt)</option><option value="imp">⬆ Nạp cấu hình (dán / file)…</option><option value="save">💾 Đặt làm startup-config (mọi thiết bị)</option></optgroup></select>` +
+    `<button id="ws-clr" title="Bắt đầu lại từ mạng trống">🧹 Xoá hết</button>` +
     `<span class="ws-grow"></span><button id="ws-side-t" title="Nhiệm vụ gợi ý lộ trình"></button><button id="ws-close" title="Đóng workspace (mạng vẫn được lưu)">✕ Đóng</button>` +
     `<input type="file" id="ws-file" accept=".json,application/json" hidden></div>` +
     `<div class="ws-body"><aside class="ws-pal" id="ws-pal"></aside>` +
@@ -877,15 +881,14 @@ export function openWorkspace({ onRun }) {
     if (!t || (Object.keys(W.net.devices).length && !confirm(`Thay mạng hiện tại bằng mẫu "${t.title}"? (Có thể ↶ Hoàn tác)`))) return;
     replaceNet(t.build());
   };
-  $('ws-exp').onclick = () => {
+  function exportJson() {
     const blob = new Blob([JSON.stringify(S.exportSandbox(W.net), null, 1)], { type: 'application/json' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
     a.download = 'packet-journey-mang.json';
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-  };
-  $('ws-imp').onclick = () => $('ws-file').click();
+  }
   $('ws-file').onchange = async (e) => {
     const f = e.target.files?.[0];
     e.target.value = '';
@@ -893,6 +896,47 @@ export function openWorkspace({ onRun }) {
     try { replaceNet(S.importSandbox(JSON.parse(await f.text()))); }
     catch (err) { alert('Không nhập được file: ' + err.message); }
   };
+  // 📄 cấu hình dạng văn bản (lab/configio.js): xuất 1 file .txt, nạp lại theo tên thiết bị, lưu startup-config
+  $('ws-cfg').onchange = (e) => {
+    const v = e.target.value;
+    e.target.value = '';
+    if (v === 'json-exp') exportJson();
+    else if (v === 'json-imp') $('ws-file').click();
+    else if (v === 'exp') {
+      const { text, skipped } = IO.exportConfigs(W.net, W.cli);
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob([text], { type: 'text/plain' }));
+      a.download = 'packet-journey-cau-hinh.txt';
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+      if (skipped.length) alert(`Đã xuất cấu hình. ${skipped.join(', ')}: hãng này chưa hỗ trợ dạng văn bản — dùng ⬇ Xuất JSON để lưu cả mạng.`);
+    } else if (v === 'imp') openCfgImport();
+    else if (v === 'save') {
+      const n = mut(() => IO.saveAllStartup(W.net, W.cli));
+      persist();
+      dialog(`<h3>💾 Đặt làm startup-config</h3><p class="ws-note">Đã lưu cấu hình đang chạy làm startup-config cho <b>${n}</b> thiết bị (Cisco: <code>write memory</code>, VPCS: <code>save</code>). Từ giờ <b>⟲ Wipe</b> đưa thiết bị về đúng cấu hình này; <code>show startup-config</code> xem lại.</p><div class="ws-dlg-b"><button id="cf-ok" class="btn-accent">OK</button></div>`, (dlg, close) => { dlg.querySelector('#cf-ok').onclick = close; });
+    }
+  };
+  function openCfgImport() {
+    dialog(`<h3>⬆ Nạp cấu hình</h3><p class="ws-note">Dán cấu hình (file .txt do app xuất, hoặc nhiều <code>show running-config</code> liền nhau) hoặc chọn file. App tách theo dòng <code>! ===== Thiết bị: …</code> / <code>hostname …</code> / <code>set pcname …</code> và gõ vào thiết bị cùng tên. Cổng không ghi <code>shutdown</code> sẽ được bật như khi nạp startup-config.</p>` +
+      `<textarea id="cf-text" rows="10" spellcheck="false" placeholder="hostname R1&#10;interface g0/0&#10; ip address 10.0.0.1 255.255.255.0&#10;!&#10;hostname R2&#10;…"></textarea>` +
+      `<label class="ws-file-l">hoặc chọn file <input type="file" id="cf-file" accept=".txt,.cfg,.conf,text/plain"></label><div class="ws-cf-rep" id="cf-rep"></div>` +
+      `<div class="ws-dlg-b"><button id="cf-go" class="btn-accent">Nạp</button><button id="cf-x">Đóng</button></div>`, (dlg, close) => {
+      const q = (id) => dlg.querySelector('#' + id);
+      q('cf-x').onclick = close;
+      q('cf-file').onchange = async (ev) => { const f = ev.target.files?.[0]; if (f) q('cf-text').value = await f.text(); };
+      q('cf-go').onclick = () => {
+        const text = q('cf-text').value;
+        if (!IO.splitConfigs(text).length) { q('cf-rep').innerHTML = '<div class="ws-err">Không tìm thấy khối cấu hình nào (cần dòng <code>hostname …</code> hoặc tiêu đề <code>! ===== Thiết bị: …</code>).</div>'; return; }
+        const rep = mut(() => IO.importConfigs(W.net, W.cli, text));
+        for (const r of rep) if (r.id && r.lines) { termOf(r.id).push({ t: `— ⬆ Đã nạp ${r.lines} dòng cấu hình${r.errors.length ? `, ${r.errors.length} dòng lỗi` : ''} —`, c: 'sys' }); refreshWin(r.id); }
+        persist();
+        draw();
+        scheduleSide();
+        q('cf-rep').innerHTML = `<ul>${rep.map((r) => `<li class="${r.ok ? 'ok' : 'bad'}">${r.ok ? '✓' : '✗'} <b>${esc(r.name)}</b>: ${r.note ? esc(r.note) : `${r.lines} dòng${r.errors.length ? ` — lỗi: ${r.errors.map((x) => `<code>${esc(x)}</code>`).join(', ')}` : ''}`}</li>`).join('')}</ul>`;
+      };
+    });
+  }
   $('ws-clr').onclick = () => { if (confirm('Xoá toàn bộ mạng đang dựng? (Có thể ↶ Hoàn tác)')) replaceNet(S.emptySandbox()); };
 
   // phím tắt: Esc thoát công cụ / menu, Delete xoá thiết bị đang chọn, Ctrl+Z / Ctrl+Y hoàn tác (khi không gõ console)

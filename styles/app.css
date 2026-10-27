@@ -789,3 +789,13 @@ html, body {
 .lab-port-bg.lsn { fill: var(--accent-soft); stroke: var(--accent); stroke-dasharray: 3 2; }
 .lab-port.lsn { fill: var(--accent-dark); }
 .ws-clock { position: absolute; left: 12px; top: 10px; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 3px 8px; box-shadow: var(--shadow); z-index: 5; max-width: calc(100% - 24px); }
+
+/* ---------- 📄 cấu hình dạng văn bản (workspace) ---------- */
+.ws-dlg .ws-note { margin: 0; font-size: 12.5px; color: var(--muted); line-height: 1.45; }
+.ws-dlg textarea { width: 100%; box-sizing: border-box; font-family: var(--mono); font-size: 12px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel-2); color: var(--text); resize: vertical; }
+.ws-dlg .ws-file-l { flex-direction: row; align-items: center; gap: 8px; font-weight: 400; }
+.ws-cf-rep ul { margin: 0; padding-left: 4px; list-style: none; font-size: 12.5px; display: grid; gap: 3px; }
+.ws-cf-rep li.ok { color: var(--ok); }
+.ws-cf-rep li.bad { color: var(--warn); }
+.ws-cf-rep code, .ws-note code { font-family: var(--mono); font-size: 11.5px; }
+#ws-cfg { max-width: 160px; }

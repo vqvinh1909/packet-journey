@@ -162,6 +162,8 @@ export function wipeDevice(net, id) {
   const kind = kindOf(d);
   const k = SANDBOX_KINDS[kind];
   const fresh = k.make(d.id, d.name, d.x, d.y, k.ports ? physPorts(d) : null);
+  // đã "Đặt làm startup-config" (copy run start / write memory) → Wipe quay về đúng cấu hình đó, như reload
+  if (d.startupCfg) Object.assign(fresh, JSON.parse(JSON.stringify(d.startupCfg)), { id: d.id, x: d.x, y: d.y, startupCfg: d.startupCfg });
   fresh.kind = kind;
   fresh.off = true;
   if (d.shell) fresh.shell = d.shell;
