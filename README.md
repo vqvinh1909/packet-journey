@@ -48,7 +48,8 @@ Với Lab CLI (`tests/lab.test.js`), MỖI lab trong 101 lab phải: trước kh
 cấu hình chưa đạt; chạy lời giải (`applySolution` — `solution` hoặc `guide`, bước `'@link'` = cắm dây)
 không sinh lỗi CLI `% Invalid/Incomplete/Ambiguous/Unknown`; sau đó `checkLab(lab, net, quizAnswers(lab))`
 đạt toàn bộ. `tests/sandbox.test.js` kiểm chế độ tự dựng mạng (thêm/xoá/nối dây, đổi tên, nhân bản, hoàn tác,
-mạng mẫu, xuất-nhập JSON kể cả file cũ, nhiệm vụ, mẫu theo hãng + Add node, Start/Stop/Wipe + link down); `tests/ip6.test.js` + `tests/net6.test.js` kiểm IPv6 (địa chỉ, SLAAC, OSPFv3, ping);
+mạng mẫu, xuất-nhập JSON kể cả file cũ, nhiệm vụ, mẫu theo hãng + Add node, Start/Stop/Wipe + link down);
+`tests/capture.test.js` kiểm capture trên dây (gói đúng dây, ping lặp, ARP lần đầu, tag 802.1Q, gói định kỳ, bộ lọc, .pcap); `tests/ip6.test.js` + `tests/net6.test.js` kiểm IPv6 (địa chỉ, SLAAC, OSPFv3, ping);
 `tests/fw.test.js` + `tests/guifw.test.js` kiểm firewall; `tests/l2sec.test.js` kiểm DHCP snooping/DHCP giả, DAI,
 IP Source Guard, login block-for, AAA.
 
@@ -108,6 +109,7 @@ node tools/ui-smoke.cjs   # tự bật server tĩnh, in PASS/FAIL từng mục
     - **Trạng thái thiết bị**: mới thêm thì **tắt** (icon xám); **Start** → log khởi động trong console rồi mới gõ lệnh (icon xanh); **Stop** → mọi cổng down, dây nối tới nó down, mất kết nối (cấu hình đang chạy được giữ). Có ▶ Start all / ■ Stop all.
     - **Chuột phải** vào thiết bị: Start, Stop, Wipe (về cấu hình trống), Console, Nối dây từ đây, Đổi tên, Nhân bản, Xoá; vào dây: Xoá dây; vào nền: Add node….
     - **Nhiều cửa sổ console cùng lúc** (nháy đúp thiết bị): kéo, đổi kích thước, thu nhỏ xuống thanh dưới, đóng; mỗi console giữ lịch sử ↑/↓, Tab, `?`, dán nhiều dòng. Sophos / Check Point / pfSense mở trang quản trị web trong cửa sổ.
+    - **📡 Capture trên dây kiểu Wireshark** (`lab/capture.js`): chuột phải vào dây → *Start capture* / *Stop capture*; dây đang bắt có dải sáng chạy dọc dây + kính lúp; bắt được nhiều dây cùng lúc, mỗi dây một cửa sổ nổi. Bảng gói No. / Time / Source / Destination / Protocol / Length / Info (vd `Echo (ping) request id=0x0001, seq=1`, `Who has 10.0.0.1? Tell 10.0.0.2`, `Hello Packet`) tô màu theo giao thức, tag VLAN của trunk 802.1Q; bấm 1 gói → cây trường từng lớp + hex dump (rê chuột nối hai bên); bộ lọc hiển thị `icmp`, `arp`, `tcp`, `udp`, `ospf`, `stp`, `dhcp`, `ip.addr == x.x.x.x`, `tcp.port == 80`, `vlan.id == 10` (ghép `&&` / `||` / `!`); tải `.pcap` mở được bằng Wireshark. Gói lấy từ chính engine (ping lặp 4/5 lượt, ARP chỉ khi bảng ARP chưa có, DHCP, telnet/SSH, traceroute) + gói định kỳ theo cấu hình đang chạy: BPDU 2 s, HSRP Hello 3 s, EIGRP Hello 5 s, OSPF Hello 10 s.
     - 🔗 Nối dây, ↶ hoàn tác / ↷ làm lại (Ctrl+Z/Ctrl+Y ngoài console), Delete xoá thiết bị đang chọn, 📐 5 mạng mẫu; tự lưu trong trình duyệt (`pj_sandbox-net`, khung nhìn `pj_sandbox-view`), ⬇ xuất / ⬆ nhập JSON (file cũ chưa có trạng thái bật/tắt vẫn mở được — thiết bị coi như đang chạy); 🧭 6 nhiệm vụ gợi ý lộ trình (LAN → VLAN → định tuyến → DHCP → OSPF/EIGRP).
   - Tiến độ + cấu hình đã gõ được lưu, mở lại vẫn còn; có gợi ý từng bước và lời giải mẫu (nút "▶ Gõ lời giải" chạy `applySolution` ngay trong console).
 - **🛠️ Tự tạo (Builder)**: nhập IP/mask/gateway cho PC1–PC2 (± router) → app tự dựng & chạy mô phỏng ping, đúng cho 3 trường hợp: cùng mạng, khác mạng (gateway đúng), và sai gateway (ping hỏng).
@@ -148,7 +150,7 @@ lab/        net (máy mô phỏng mạng tính từ cấu hình), net6 + ip6 (IP
             ios (CLI Cisco IOS + PC + Zone-Based Firewall), asa (CLI Cisco ASA), fortios, panos,
             guifw (Sophos/Check Point/pfSense — ui/guifw.js vẽ trang web), labs-sec (lab firewall), labs-l2sec (lab bảo mật L2),
             labs (27 lab + chấm điểm), labs-ccna (41 lab), labs-adv (5 lab chuyên đề), labs-capstone (5 lab tổng hợp),
-            kit (helper soạn lab), sandbox (tự dựng mạng)
+            kit (helper soạn lab), sandbox (tự dựng mạng), capture (bắt gói trên dây, lọc, .pcap)
 tools/      ui-smoke.cjs (kiểm tra giao diện bằng Playwright, tuỳ chọn)
 scenarios/  s01..s08 (xem danh sách dưới)
 ui/         topology, controls, layerstack, fieldtree, hexview, explain, i18n, store, app,

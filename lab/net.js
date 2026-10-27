@@ -219,11 +219,11 @@ export function epMac(net, ep) {
   return `00:1a:2f:${hx(i)}:${hx(pi)}:01`;
 }
 export function switchMac(net, id) { return `00:d0:ba:${hx(devIndex(net, id))}:00:00`; }
-const hsrpMac = (g) => `00:00:0c:07:ac:${hx(+g)}`;
+export const hsrpMac = (g) => `00:00:0c:07:ac:${hx(+g)}`;
 const vrrpMac = (g) => `00:00:5e:00:01:${hx(+g)}`;
-/** "00:50:79:66:01:01" -> "0050.7966.0101" (kiểu Cisco) */
 /** "aabb.ccdd.eeff" (kiểu Cisco) hoặc "aa:bb:…" → "aa:bb:cc:dd:ee:ff"; sai định dạng → null. */
 export function parseCiscoMac(w) { const h = String(w).toLowerCase().replace(/[.:-]/g, ''); return /^[0-9a-f]{12}$/.test(h) ? h.match(/../g).join(':') : null; }
+/** "00:50:79:66:01:01" -> "0050.7966.0101" (kiểu Cisco) */
 export function ciscoMac(m) { const h = m.replace(/:/g, ''); return `${h.slice(0, 4)}.${h.slice(4, 8)}.${h.slice(8)}`; }
 
 // ======================================================================
@@ -1249,7 +1249,7 @@ class Rec {
   transit(h, f, o) {
     if (!this.on) return;
     const lbl = h.tag != null ? `802.1Q VLAN ${h.tag}` : h.vlan != null ? `VLAN ${h.vlan}` : o.lbl || '';
-    this.sim.emit({ kind: 'transit', fromDevice: h.from, toDevice: h.to, packet: f, activeLayer: o.l || 2, side: o.side || 'encap', titleVi: o.title, explanationVi: o.ex, changedFields: o.changed || [], overlay: { links: { [h.link]: { cls: h.tag != null ? 'trunk' : 'forwarding', label: lbl } } } });
+    this.sim.emit({ kind: 'transit', fromDevice: h.from, toDevice: h.to, link: h.link, capSkip: !!o.capSkip, packet: f, activeLayer: o.l || 2, side: o.side || 'encap', titleVi: o.title, explanationVi: o.ex, changedFields: o.changed || [], overlay: { links: { [h.link]: { cls: h.tag != null ? 'trunk' : 'forwarding', label: lbl } } } });
   }
   proc(at, o) {
     if (!this.on) return;
@@ -1353,7 +1353,9 @@ function deliverL2(ctx, R, egress, nh, pkt) {
       return { fail: true, at: dai.at, kind: 'dai', why: dai.why };
     }
     ctx.arpc[key] = res;
-    if (!net.devices[egress.dev].arp[nh]) ctx.firstArp = true;
+    // bảng ARP đã có MAC → thiết bị thật không hỏi lại: timeline vẫn minh hoạ ARP, nhưng capture trên dây bỏ qua
+    const arpKnown = !!net.devices[egress.dev].arp[nh];
+    if (!arpKnown) ctx.firstArp = true;
     if (ctx.record) {
       net.devices[egress.dev].arp[nh] = { mac: res.mac, ifn: egress.ifn };
       const od = net.devices[res.ep.dev];
@@ -1365,7 +1367,7 @@ function deliverL2(ctx, R, egress, nh, pkt) {
       for (const h of res.hops) {
         const f = R.frame([...l2(h.tag, 0x0806, srcMac, 'ff:ff:ff:ff:ff:ff'), { proto: 'arp', fields: { opcode: 1, senderMac: srcMac, senderIp: srcIp, targetMac: '00:00:00:00:00:00', targetIp: nh } }]);
         if (h === res.hops[0]) R.cap(f, `ARP Who has ${nh}? Tell ${srcIp}`);
-        R.transit(h, f, { l: 2, title: `ARP Request (broadcast): ai giữ ${nh}?`, ex: `${dname} chưa có MAC của ${nh} → phát broadcast FF:FF:FF:FF:FF:FF.${h.tag != null ? ` Trên đường trunk khung được gắn nhãn 802.1Q VLAN ${h.tag}.` : ''}` });
+        R.transit(h, f, { l: 2, capSkip: arpKnown, title: `ARP Request (broadcast): ai giữ ${nh}?`, ex: `${dname} chưa có MAC của ${nh} → phát broadcast FF:FF:FF:FF:FF:FF.${h.tag != null ? ` Trên đường trunk khung được gắn nhãn 802.1Q VLAN ${h.tag}.` : ''}` });
       }
       const back = [...res.hops].reverse();
       const fh = res.fhrp === 'vrrp' ? 'VRRP' : 'HSRP';
@@ -1373,7 +1375,7 @@ function deliverL2(ctx, R, egress, nh, pkt) {
         const hh = { ...h, from: h.to, to: h.from };
         const f = R.frame([...l2(h.tag, 0x0806, res.mac, srcMac), { proto: 'arp', fields: { opcode: 2, senderMac: res.mac, senderIp: nh, targetMac: srcMac, targetIp: srcIp } }]);
         if (h === back[0]) R.cap(f, `ARP ${nh} is at ${res.mac}`);
-        R.transit(hh, f, { l: 2, side: 'decap', title: `ARP Reply: ${nh} ở ${ciscoMac(res.mac)}${res.fhrp ? ` (MAC ảo ${fh})` : res.proxy ? ' (proxy-ARP)' : ''}`, ex: `${net.devices[res.ep.dev].name} trả lời unicast.${res.fhrp ? ` Đây là router ${res.fhrp === 'vrrp' ? 'MASTER' : 'ACTIVE'} của nhóm ${fh} ${res.hsrp} → trả MAC ảo ${ciscoMac(res.mac)}.` : ''}${res.proxy ? ' Router trả lời THAY cho một IP ở mạng khác (proxy-ARP) vì nó có route tới mạng đó.' : ''}` });
+        R.transit(hh, f, { l: 2, side: 'decap', capSkip: arpKnown, title: `ARP Reply: ${nh} ở ${ciscoMac(res.mac)}${res.fhrp ? ` (MAC ảo ${fh})` : res.proxy ? ' (proxy-ARP)' : ''}`, ex: `${net.devices[res.ep.dev].name} trả lời unicast.${res.fhrp ? ` Đây là router ${res.fhrp === 'vrrp' ? 'MASTER' : 'ACTIVE'} của nhóm ${fh} ${res.hsrp} → trả MAC ảo ${ciscoMac(res.mac)}.` : ''}${res.proxy ? ' Router trả lời THAY cho một IP ở mạng khác (proxy-ARP) vì nó có route tới mạng đó.' : ''}` });
       }
     }
   }

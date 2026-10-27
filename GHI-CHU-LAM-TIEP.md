@@ -1,5 +1,17 @@
 # Ghi chú làm tiếp — Packet Journey
 
+## 📡 Capture trên dây kiểu EVE-NG + Wireshark (2026-10-27, yêu cầu từ phiên "SAP PROMPT App Hoc Mang")
+- `lab/capture.js` (thuần logic): `createCapture` → `cap.links[linkId] = { on, t0, pkts, last }` (giây epoch);
+  `recordSim(cap, sim, now, {repeat})` lấy sự kiện `transit` của engine có `ev.link` đang bắt (byte thật, tree);
+  ping nhân 4/5 lượt bằng `serialize` lại (seq, IP ID tăng); thời gian luôn tăng dần. `tickCapture` sinh gói định kỳ
+  từ cấu hình: BPDU (Designated Port, VLAN không tag), OSPF Hello (`ospfIfaces` không passive, DR/BDR, neighbors),
+  EIGRP Hello, HSRP Hello (Active dùng MAC ảo) — thiết bị tắt / link down thì im lặng. `summarize` (cột Wireshark),
+  `compileFilter` (giao thức, ip.addr/src/dst, tcp/udp.port, vlan.id, eth.addr, && || ! ngoặc), `capturePcap`.
+- Engine: `Rec.transit` ghi thêm `link` + `capSkip`; ARP mà bảng ARP đã có thì `capSkip` (timeline vẫn minh hoạ).
+- `ui/workspace.js`: cửa sổ id `cap:<linkId>` dùng chung khung với console (`showWin`), `refreshCapWin`
+  (bảng, lọc, cây trường `ui/fieldtree.js` + hex `ui/hexview.js`, ⬇ .pcap), timer 1 s gọi `tickCapture`.
+- Đã kiểm .pcap bằng scapy (đọc đủ record, Dot1Q/DHCP/ARP/TCP/STP, 0 lỗi checksum).
+
 ## 🧱 Workspace tự dựng mạng kiểu EVE-NG (2026-10-27, yêu cầu từ phiên "SAP PROMPT App Hoc Mang")
 - `ui/workspace.js`: overlay `.ws` toàn màn hình đè lên modal Lab CLI (nút "🧱 Tự dựng mạng riêng" / mục SBX trong danh sách).
   Trạng thái module-level `W` (net, cli, undo, term/hist/gui theo thiết bị, cửa sổ console, view, boot) giữ khi đóng/mở lại.
@@ -33,7 +45,7 @@
      trong test), quiet-mode access-class; `aaa new-model` thay "login local"; `security passwords min-length`;
      `ip http server` mở cổng 80; `exec-timeout`, `ip ssh version` lưu và hiện trong running-config.
 6. ⏳ Kịch bản tấn công byte-thật (ARP spoofing, DHCP giả/starvation, VLAN hopping) trong scenarios/.
-- Tổng hiện tại: 101 lab, `node --test` 212/212, `node tools/ui-smoke.cjs` 47/47; workspace tự dựng mạng kiểu EVE-NG.
+- Tổng hiện tại: 101 lab, `node --test` 217/217, `node tools/ui-smoke.cjs` 52/52; workspace tự dựng mạng kiểu EVE-NG + capture.
 
 
 ## ✅ ĐÃ XONG Lab CLI đợt 3 (session 2026-10-27/28) — 7 cải tiến
