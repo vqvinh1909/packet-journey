@@ -105,6 +105,13 @@ function toggleGuess() {
 
 function openQuizForScenario() {
   const sc = getScenario(state.scenarioId);
+  if (!sc) {
+    // đang xem mô phỏng tự tạo (🛠️ Tự tạo / ✏️ Vẽ mạng / "Xem gói tin" của Lab CLI) — quiz chỉ có cho kịch bản dựng sẵn
+    openQuiz('custom', 'Kịch bản tự tạo', [
+      { q: 'Quiz chỉ có cho 30 kịch bản dựng sẵn. Hãy chọn một kịch bản ở danh sách trên cùng rồi bấm 🎯 Quiz.', options: ['Đã hiểu'], correct: 0, explainVi: 'Mô phỏng bạn tự tạo vẫn xem từng bước, cây trường và hex như bình thường.' },
+    ]);
+    return;
+  }
   const quiz = quizFor(state.scenarioId) || sc.meta.quiz;
   if (!quiz || !quiz.length) {
     openQuiz(state.scenarioId, sc.meta.titleVi, [
@@ -126,6 +133,14 @@ function refreshChromeText() {
   $('h-timeline').textContent = t('timeline');
   $('h-layer').textContent = t('layerStack');
   $('h-detail').textContent = t('packetDetail');
+  // nút thanh trên cùng (nội dung lab / kịch bản vẫn là tiếng Việt)
+  const en = getLang() === 'en';
+  const HDR = {
+    'btn-subnet': ['🧮 Luyện subnet', '🧮 Subnetting'], 'btn-cheat': ['📋 Cheat sheet', '📋 Cheat sheet'], 'btn-exam': ['🎓 Thi thử CCNA', '🎓 CCNA mock exam'],
+    'btn-weak': ['📊 Điểm yếu', '📊 Weak spots'], 'btn-guess': ['🤔 Đoán bước', '🤔 Guess step'], 'btn-quiz': ['🎯 Quiz', '🎯 Quiz'], 'btn-builder': ['🛠️ Tự tạo', '🛠️ Builder'],
+    'btn-canvas': ['✏️ Vẽ mạng', '✏️ Draw network'], 'btn-glossary': ['📘 Từ điển', '📘 Glossary'], 'btn-progress': ['💾 Tiến độ', '💾 Progress'],
+  };
+  for (const [id, [vi, enT]] of Object.entries(HDR)) if ($(id)) $(id).textContent = en ? enT : vi;
 }
 
 // ---------- Tabs ----------

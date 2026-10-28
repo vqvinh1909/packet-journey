@@ -40,11 +40,11 @@ export function deviceConfig(net, cli, id) {
 
 /** Toàn bộ cấu hình của mạng thành 1 file .txt. Trả { text, skipped: [tên thiết bị không xuất được] }. */
 export function exportConfigs(net, cli) {
-  const parts = [`! Packet Journey — cấu hình ${Object.keys(net.devices).length} thiết bị`, '! Nạp lại: workspace → 📄 Cấu hình → Nạp cấu hình (dán hoặc chọn file này)', ''];
+  const parts = [`! Packet Journey — cấu hình ${Object.keys(net.devices).length} thiết bị`, '! Nạp lại: workspace → 📁 Lưu / Nạp… → ⬆ Nạp cấu hình (dán hoặc chọn file này)', ''];
   const skipped = [];
   for (const [id, d] of Object.entries(net.devices)) {
     const L = deviceConfig(net, cli, id);
-    if (!L) { skipped.push(d.name); parts.push(HEAD(d), `! (${kindLabel(d)} ${d.os || ''}: chưa hỗ trợ xuất dạng văn bản — dùng ⬇ Xuất JSON để lưu cả mạng)`, ''); continue; }
+    if (!L) { skipped.push(d.name); parts.push(HEAD(d), `! (${kindLabel(d)} ${d.os || ''}: chưa hỗ trợ xuất dạng văn bản — dùng 📁 Lưu / Nạp… → ⬇ Xuất mạng (.json) để lưu cả mạng)`, ''); continue; }
     parts.push(HEAD(d), ...L, '');
   }
   return { text: parts.join('\n'), skipped };

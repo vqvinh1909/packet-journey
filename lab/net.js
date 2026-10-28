@@ -501,7 +501,12 @@ export function flood(net, src, diag) {
         if (!allowedHas(e, vlan)) { note(`${d.name} trunk ${longIf(e.bundle || it.port)} không cho phép VLAN ${vlan} (allowed vlan) → bỏ frame`); continue; }
       }
       if (!d.vlans[vlan]) { note(`${d.name}: VLAN ${vlan} không tồn tại trong VLAN database → bỏ frame`); continue; }
-      if (blocked(it.dev, it.port, vlan)) { note(`${d.name} ${longIf(e.bundle || it.port)} đang STP BLOCKING cho VLAN ${vlan} → bỏ frame (chống vòng lặp)`); continue; }
+      const bst = blocked(it.dev, it.port, vlan);
+      if (bst) {
+        note(bst === 'BLK' ? `${d.name} ${longIf(e.bundle || it.port)} đang STP BLOCKING cho VLAN ${vlan} → bỏ frame (chống vòng lặp)`
+          : `${d.name} ${longIf(e.bundle || it.port)} đang STP ${bst === 'LSN' ? 'LISTENING' : 'LEARNING'} cho VLAN ${vlan} (cổng vừa lên, STP cần ~30 s mới chuyển forwarding — bật PortFast cho cổng nối máy trạm, hoặc bấm ⚡ Hội tụ ngay) → chưa chuyển frame`);
+        continue;
+      }
       q.push({ k: 'sw', dev: it.dev, vlan, inPort: it.port, inBundle: e.bundle, hops: it.hops });
     } else {
       const key = it.dev + '#' + it.vlan;
@@ -1640,7 +1645,9 @@ function sendPacketInner(net, o) {
   // ICMP id / port nguồn: máy trạm dùng 1, router/switch tự phát dùng giá trị khác — như thiết bị thật, để gói
   // trả lời cho chính router không khớp nhầm entry PAT của máy bên trong (cùng IP global của cổng outside)
   const id0 = o.icmpId || (isHost ? 1 : 0x7a69);
-  const pkt = { src: null, dst: o.dst, proto, ttl: isHost ? 128 : 255, ipId: 0x1a2b, icmpId: id0, seq: 1, reply: false, sport: 49152 + (id0 % 16384), dport: o.dport, flags: { syn: true }, tseq: 1000, tack: 0 };
+  // TTL gốc: máy kiểu Windows / Packet Tracer 128, VPCS (EVE-NG/GNS3) 64, router/switch Cisco 255
+  const hostTtl = (d) => (d.shell === 'vpcs' ? 64 : 128);
+  const pkt = { src: null, dst: o.dst, proto, ttl: isHost ? hostTtl(srcDev) : 255, ipId: 0x1a2b, icmpId: id0, seq: 1, reply: false, sport: 49152 + (id0 % 16384), dport: o.dport, flags: { syn: true }, tseq: 1000, tack: 0 };
   const wopts = { noCrypto: !!o.noCrypto };
   const done = (r) => {
     if (o.record) { persistNat(net, ctx); persistFw(net, ctx); }
@@ -1650,7 +1657,7 @@ function sendPacketInner(net, o) {
   if (!fwd.ok) return done({ ok: false, kind: fwd.fail.code === 'U' ? 'unreach' : 'timeout', fail: fwd.fail, hops: fwd.hops });
   const dd = net.devices[fwd.at.dev];
   let open = true;
-  const reply = { ...pkt, dst0: undefined, src: pkt.dst, dst: pkt.src, reply: true, ttl: dd.type === 'router' || dd.type === 'switch' ? 255 : 128, ipId: 0x3c4d };
+  const reply = { ...pkt, dst0: undefined, src: pkt.dst, dst: pkt.src, reply: true, ttl: dd.type === 'router' || dd.type === 'switch' ? 255 : hostTtl(dd), ipId: 0x3c4d };
   if (proto === 'tcp') {
     open = portOpen(dd, pkt.dport);
     // access-class trên VTY: chỉ cho phép nguồn nằm trong ACL quản trị
@@ -1932,7 +1939,7 @@ function stpBlockedFn(net) {
     const d = net.devices[dev];
     const name = d.ports[port] ? (effPort(net, d, port).bundle || port) : port;
     const sts = st.ports[dev + '|' + name]?.sts;
-    return !!sts && sts !== 'FWD'; // BLK, hoặc LSN/LRN khi đang hội tụ (đồng hồ mô phỏng)
+    return sts && sts !== 'FWD' ? sts : false; // 'BLK', hoặc 'LSN'/'LRN' khi đang hội tụ (đồng hồ mô phỏng) — truthy = bị chặn
   };
 }
 /**

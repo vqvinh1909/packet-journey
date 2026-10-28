@@ -176,7 +176,7 @@ export function summarize(p) {
   else if (L(p, 'ospf')) { const o = L(p, 'ospf'); info = OSPF_T[o.type] || 'OSPF'; }
   else if (L(p, 'eigrp')) { const e = L(p, 'eigrp'); info = e.hello || e.opcode === 5 ? 'Hello' : e.opcode === 1 ? 'Update' : `Opcode ${e.opcode}`; }
   else if (L(p, 'hsrp')) { const h = L(p, 'hsrp'); info = `Hello (state ${HSRP_S[h.state] || h.state})`; }
-  else if (L(p, 'stp')) { const s = L(p, 'stp'); info = `Conf. Root = ${s.rootPriority + (s.rootSysId || 0)}/${s.rootSysId || 0}/${s.rootMac}  Cost = ${s.rootPathCost}  Port = ${hex4(((s.portPriority ?? 128) << 8) | s.portNumber)}`; }
+  else if (L(p, 'stp')) { const s = L(p, 'stp'); info = `Conf. Root = ${s.rootPriority}/${s.rootSysId || 0}/${s.rootMac}  Cost = ${s.rootPathCost}  Port = ${hex4(((s.portPriority ?? 128) << 8) | s.portNumber)}`; }
   else if (t) { const fl = Object.keys(t.flags || {}).filter((k) => t.flags[k]).map((k) => k.toUpperCase()).join(', '); info = `${t.srcPort} → ${t.dstPort} [${fl}] Seq=${t.seq ?? 0}${t.flags?.ack ? ` Ack=${t.ack ?? 0}` : ''} Win=${t.window ?? 0} Len=0${t.mss ? ` MSS=${t.mss}` : ''}`; }
   else if (u) info = `${u.srcPort} → ${u.dstPort} Len=${Math.max(0, p.bytes.length - 42)}`;
   else if (ip?.protocol === 50) info = 'ESP (SPI=0x1a2b3c4d)';

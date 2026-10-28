@@ -1014,7 +1014,7 @@ export function openWorkspace({ onRun }) {
       a.download = 'packet-journey-cau-hinh.txt';
       a.click();
       setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-      if (skipped.length) alert(`Đã xuất cấu hình. ${skipped.join(', ')}: hãng này chưa hỗ trợ dạng văn bản — dùng ⬇ Xuất JSON để lưu cả mạng.`);
+      if (skipped.length) alert(`Đã xuất cấu hình. ${skipped.join(', ')}: hãng này chưa hỗ trợ dạng văn bản — dùng 📁 Lưu / Nạp… → ⬇ Xuất mạng (.json) để lưu cả mạng.`);
     } else if (v === 'imp') openCfgImport();
     else if (v === 'unl-exp') {
       const nm = (W.libId && getLib().labs[W.libId]?.name) || 'Packet Journey lab';

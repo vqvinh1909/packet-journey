@@ -236,3 +236,17 @@ test('Cloud / Internet: vẽ đám mây nhưng vẫn là server; tự nhận the
   S.wipeDevice(net, cl);
   assert.ok(net.devices[cl].cloud && !net.devices[cl].ip, 'Wipe giữ hình đám mây');
 });
+
+test('TTL gốc như thiết bị thật: VPCS 64 (qua 1 router còn 63), PC kiểu Windows 128 (còn 127)', () => {
+  const net = S.emptySandbox();
+  const r = S.addDevice(net, 'router', 300, 100), a = S.addDevice(net, 'pc', 100, 300), b = S.addDevice(net, 'pc', 500, 300);
+  S.connect(net, a, 'fa0', r, 'g0/0');
+  S.connect(net, b, 'fa0', r, 'g0/1');
+  const cli = createCli(net);
+  runScript(cli, r, ['enable', 'configure terminal', 'interface g0/0', 'ip address 10.1.0.1 255.255.255.0', 'no shutdown', 'interface g0/1', 'ip address 10.2.0.1 255.255.255.0', 'no shutdown', 'end']);
+  cli.exec(a, 'ip 10.1.0.10/24 10.1.0.1');
+  cli.exec(b, 'ip 10.2.0.10/24 10.2.0.1');
+  assert.match(cli.exec(a, 'ping 10.2.0.10').out.join('\n'), /ttl=63/);
+  delete net.devices[b].shell; // PC2 kiểu Windows trả lời với TTL gốc 128
+  assert.match(cli.exec(a, 'ping 10.2.0.10').out.join('\n'), /ttl=127/);
+});
