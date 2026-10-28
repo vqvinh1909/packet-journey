@@ -1,5 +1,14 @@
 # Ghi chú làm tiếp — Packet Journey
 
+## ✅ Thi thử song ngữ + câu sinh tự động + trình vẽ sơ đồ kiểu draw.io (2026-10-28)
+- Thi thử: `lab/ccna-exam-en.js` (BANK_EN cùng thứ tự BANK), `makeExam` gắn textEn/optionsEn/leftEn/rightEn/explainEn;
+  `ui/exam.js` có nút VI / EN / VI + EN (`pj_exam-lang`). `lab/ccna-gen.js`: 9 dạng câu sinh theo seed (GEN_PLAN full 12, quick 4),
+  đáp án tính bằng số học; test tính lại độc lập 400 seed/dạng.
+- ✏️ Vẽ mạng: `ui/canvas.js` (ping trên topology vẽ tay) đã xoá — người dùng chọn bỏ cấu hình/chạy ping ở đây vì đã có Lab CLI.
+  Mới: `lab/diagram.js` (hình, dây, nhóm, khoá, căn, dàn đều, copy/paste, history, SVG, JSON, mẫu) + `ui/diagram.js` + test `tests/diagram.test.js`.
+  `scenarios/graphsim.js` vẫn giữ (có test riêng, có thể dùng lại sau).
+- Cổng app mặc định giờ là 8008 (`Mở-Packet-Journey.bat`).
+
 ## ✅ Bổ sung theo CCNA 200-301 (2026-10-28)
 - So với sách lab CCNA (bản 2017): thêm các chủ đề đề 200-301 còn thiếu. Lab N01–N08 ở `lab/labs-n200.js` (nhóm `n2`).
 - `lab/ios.js`: LLDP (`d.lldpRun`, cổng `lldpTx/lldpRx`, show lldp*), `ip ospf network {point-to-point|broadcast}` (`f.ospfNet`),

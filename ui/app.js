@@ -9,7 +9,7 @@ import { openGlossary } from './glossary.js';
 import { openProgress } from './progress.js';
 import { openBuilder } from './builder.js';
 import { buildCustom } from '../scenarios/builder.js';
-import { openCanvas } from './canvas.js';
+import { openDiagram } from './diagram.js';
 import { openLab } from './lab.js';
 import { openSubnet } from './subnet.js';
 import { openWeak } from './weak.js';
@@ -82,7 +82,7 @@ function buildChrome() {
   $('btn-glossary').onclick = openGlossary;
   $('btn-progress').onclick = openProgress;
   $('btn-builder').onclick = () => openBuilder(loadCustom);
-  $('btn-canvas').onclick = () => openCanvas(loadSimResult);
+  $('btn-canvas').onclick = () => openDiagram();
   $('btn-lab').onclick = () => openLab(loadSimResult);
   $('btn-subnet').onclick = openSubnet;
   $('btn-cheat').onclick = openCheat;

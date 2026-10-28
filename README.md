@@ -7,7 +7,7 @@ và **xuất được `.pcap`** để mở bằng Wireshark đối chiếu.
 
 > Trạng thái: **đã phủ CCNA + CCNP** — 30 kịch bản byte-thật (23 giao thức, quiz đủ 30 bài),
 > chế độ học chủ động (đoán bước, thử thách sửa lỗi, từ điển, lưu tiến độ, PWA offline),
-> Builder + Canvas vẽ mạng, và **🧪 Lab CLI Cisco IOS với 109 lab** (27 lab giáo trình, 41 lab
+> Builder + ✏️ trình vẽ sơ đồ mạng kiểu draw.io, và **🧪 Lab CLI Cisco IOS với 109 lab** (27 lab giáo trình, 41 lab
 > CCNA trực quan, 5 lab chuyên đề, 17 lab bảo mật & firewall 7 hãng, 6 lab bảo mật L2 & thiết bị, 8 lab bổ sung theo CCNA 200-301, 5 lab tổng hợp doanh nghiệp) + chế độ thi thử + chế độ tự dựng mạng. Chi tiết xem [Lộ trình](#lộ-trình).
 
 ## Chạy app
@@ -133,7 +133,7 @@ node tools/ui-smoke.cjs   # tự bật server tĩnh, in PASS/FAIL từng mục
     - 🔗 Nối dây, ↶ hoàn tác / ↷ làm lại (Ctrl+Z/Ctrl+Y ngoài console), Delete xoá thiết bị đang chọn, 📐 5 mạng mẫu; tự lưu trong trình duyệt (`pj_sandbox-net`, khung nhìn `pj_sandbox-view`), ⬇ xuất / ⬆ nhập JSON (file cũ chưa có trạng thái bật/tắt vẫn mở được — thiết bị coi như đang chạy); 🧭 6 nhiệm vụ gợi ý lộ trình (LAN → VLAN → định tuyến → DHCP → OSPF/EIGRP).
   - Tiến độ + cấu hình đã gõ được lưu, mở lại vẫn còn; có gợi ý từng bước và lời giải mẫu (nút "▶ Gõ lời giải" chạy `applySolution` ngay trong console).
 - **🛠️ Tự tạo (Builder)**: nhập IP/mask/gateway cho PC1–PC2 (± router) → app tự dựng & chạy mô phỏng ping, đúng cho 3 trường hợp: cùng mạng, khác mạng (gateway đúng), và sai gateway (ping hỏng).
-- **✏️ Vẽ mạng (Canvas)**: kéo-thả thêm PC/Switch/Router, nối dây, cấu hình IP/gateway từng thiết bị, rồi chọn 2 PC bấm "Chạy ping" → app tìm đường (BFS) và mô phỏng gói tin trên topology BẤT KỲ bạn vẽ (ARP, định tuyến qua router, TTL−1), báo lỗi rõ nếu sai gateway/không nối dây/khác subnet.
+- **✏️ Vẽ mạng — trình vẽ sơ đồ topology kiểu draw.io** (`lab/diagram.js` lõi + `ui/diagram.js`; CHỈ để vẽ — cấu hình và chạy thử nằm ở 🧪 Lab CLI / 🧱 workspace): thư viện hình có tìm kiếm (router, switch, switch L3, firewall, server, PC, laptop, điện thoại IP, access point, WLC, máy in, Internet/cloud + chữ nhật, bo góc, elip, chữ, vùng/khung, ghi chú — icon tự vẽ), kéo thả hoặc bấm để thêm; chọn bằng bấm / Shift / quét khung; kéo di chuyển có lưới + bắt dính; 8 tay nắm đổi kích thước (Shift giữ tỉ lệ); nháy đúp sửa chữ tại chỗ; **nối dây** bằng cách rê lên hình rồi kéo chấm xanh sang hình khác — dây thẳng / gấp khúc / cong, nét liền / gạch / chấm, độ dày, màu, mũi tên 2 đầu, nhãn giữa và **nhãn cổng 2 đầu** (G0/0, Fa0/1…), đầu dây tránh đè lên tên thiết bị; bảng **Định dạng** (nền, viền, kiểu nét, màu chữ, cỡ chữ, đậm/nghiêng, độ mờ, vị trí, kích thước, khoá); menu chuột phải; nhóm / bỏ nhóm, khoá, căn lề 6 kiểu, dàn đều ngang/dọc, đưa lên trên / xuống dưới; copy / cắt / dán / nhân bản; hoàn tác / làm lại; phím tắt như draw.io (Delete, Ctrl+Z/Y/C/X/V/D/A/G, mũi tên, F2, Space+kéo, Ctrl+lăn); tự lưu (`pj_diagram`), 3 mẫu (LAN văn phòng, campus 3 lớp, HQ–chi nhánh qua WAN); **xuất PNG (2×) / SVG / JSON**, mở lại JSON.
 
 ## Thêm một kịch bản mới
 
@@ -212,7 +212,7 @@ Theo lộ trình CCNA → CCNP:
 - **CCNA Services (xong)**: DHCP (s09), DNS (s10), NAT/PAT (s11), ACL (s12), HSRP (s13), TCP 3-way (s14), traceroute (s15), fragmentation (s16) — thêm protocol UDP/DHCP/DNS/TCP/HSRP/raw.
 - **CCNP (xong)**: BGP eBGP (s17), OSPF multi-area/LSA (s18), RSTP (s19), QoS/DSCP (s20), redistribution (s21).
 - **Học chủ động (xong)**: 🎯 quiz chấm điểm, 🤔 đoán bước tiếp theo, 🔧 thử thách sửa lỗi (s22/s23), 📘 từ điển, 💾 lưu/khôi phục tiến độ, PWA offline.
-- **M5 (xong)**: 🛠️ Builder (nhập tham số) + ✏️ Canvas kéo-thả vẽ mạng bất kỳ rồi chạy mô phỏng.
+- **M5 (xong)**: 🛠️ Builder (nhập tham số) + ✏️ Canvas kéo-thả (nay thay bằng trình vẽ sơ đồ kiểu draw.io; mô phỏng mạng tự dựng chuyển sang 🧱 workspace).
 - **Chuyên sâu (xong)**: MST (s24), QoS nâng cao (s25), IPv6+NDP (s26), OSPFv3 (s27), SLAAC & DHCPv6 (s28), MPLS (s29), VXLAN (s30) — thêm protocol ipv6/icmpv6/ospfv3/mstp/dhcpv6/mpls/vxlan + checksum pseudo-header IPv6.
 - Đã phủ TRỌN spec gốc M1–M5 + học chủ động (quiz đủ 30/30 bài) + chuyên sâu CCNP/SP/DC. Mọi nhánh tùy chọn đã làm.
 - **Chế độ học chủ động**: "đoán bước", quiz, thử thách sửa lỗi, từ điển, PWA offline, lưu tiến độ.
