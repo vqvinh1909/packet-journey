@@ -446,6 +446,7 @@ export function openLab(onRun, o = {}) {
       }
       if (!s.net.devices[dev]) continue;
       toExec(dev);
+      if (isHost(s.net.devices[dev]) && s.net.clock) N.clockConverge(s.net); // máy trạm thử sau khi mạng đã hội tụ
       for (const c of cmds) exec(dev, c);
       s.dev = dev;
     }
@@ -818,7 +819,9 @@ export function openLab(onRun, o = {}) {
     for (const [dev] of steps) if (dev !== '@link') toExec(dev);
     const before = new Set(s.net.links.map((l) => l.id));
     // bọc cli để ghi lại prompt trước mỗi lệnh → console hiện giống như gõ tay
-    const outs = applySolution(lab, s.net, { exec: (dev, cmd) => ({ pr0: s.cli.prompt(dev), ...s.cli.exec(dev, cmd) }) });
+    // trước lệnh của máy trạm (ipconfig /renew, ping…) coi như đã chờ mạng hội tụ — như người thật gõ xong cấu hình rồi mới thử
+    const waitHost = (dev) => { const d = s.net.devices[dev]; if (d && isHost(d) && s.net.clock) N.clockConverge(s.net); };
+    const outs = applySolution(lab, s.net, { exec: (dev, cmd) => { waitHost(dev); return { pr0: s.cli.prompt(dev), ...s.cli.exec(dev, cmd) }; } });
     for (const l of s.net.links) if (!before.has(l.id)) logAct('@link', [l.a, l.ap, l.b, l.bp]);
     for (const o of outs) {
       pushOut(o.dev, o.cmd, o, o.pr0, false);

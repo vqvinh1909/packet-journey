@@ -364,7 +364,7 @@ const sameNet = (x, y) => x.prefix === y.prefix && N.netOf(x.ip, x.prefix) === N
 export const SANDBOX_LAB = {
   id: 'SBX', group: 'sbx', kind: 'sandbox', level: 1, lesson: 'Chế độ tự do',
   title: 'Tự dựng mạng riêng (sandbox)',
-  story: 'Thêm thiết bị từ bảng bên trái (chia theo hãng) hoặc chuột phải vào nền → Add node; thiết bị mới ở trạng thái TẮT — chuột phải → Start (hoặc ▶ Start all). 🔗 Nối dây: chọn 2 thiết bị rồi chọn cổng. Nháy đúp thiết bị để mở console (nhiều console cùng lúc, kéo/đổi kích thước được); Sophos / Check Point / pfSense mở trang quản trị web. Mạng được tự lưu trong trình duyệt; ⬇ Xuất / ⬆ Nhập JSON để chia sẻ. Các nhiệm vụ chỉ là gợi ý lộ trình — mạng của bạn, luật của bạn.',
+  story: 'Thêm thiết bị từ bảng bên trái (chia theo hãng) hoặc chuột phải vào nền → Add node; thiết bị mới ở trạng thái TẮT — chuột phải → Start (hoặc ▶ Start all). 🔗 Nối dây: chọn 2 thiết bị rồi chọn cổng. Nháy đúp thiết bị để mở console (nhiều console cùng lúc, kéo/đổi kích thước được); Sophos / Check Point / pfSense mở trang quản trị web. Mạng được tự lưu trong trình duyệt; 📚 Thư viện lưu nhiều lab, 📁 Lưu / Nạp… để xuất/nhập JSON, cấu hình .txt hoặc file .unl của EVE-NG. Các nhiệm vụ chỉ là gợi ý lộ trình — mạng của bạn, luật của bạn.',
   build: emptySandbox,
   tasks: [
     { text: 'Thêm ít nhất 2 PC và 1 switch, mọi PC đều đã cắm dây', verify: 'Bảng thiết bị: Host → PC, Cisco → Switch; 🔗 Nối dây', check: (a) => { const ds = Object.values(a.net.devices); const pcs = ds.filter((d) => d.type === 'pc'); return pcs.length >= 2 && ds.some((d) => d.type === 'switch') && pcs.every((d) => N.linkAt(a.net, d.id, 'fa0')); } },
