@@ -915,6 +915,7 @@ export function openWorkspace({ onRun }) {
       else if (e.key === 'ArrowDown') { e.preventDefault(); if (hpos < 0) return; hpos += 1; if (hpos >= h.length) { hpos = -1; input.value = ''; } else input.value = h[hpos]; }
       else if (e.key === 'Tab') { e.preventDefault(); const c = W.cli.complete(id, input.value); if (c) input.value = c; }
       else if ((e.key === 'z' || e.key === 'Z') && e.ctrlKey) { e.preventDefault(); input.value = ''; run('end'); }
+      else if ((e.key === 'Pause' || e.key === 'Cancel') && e.ctrlKey) { e.preventDefault(); input.value = ''; run('send break'); }
       else if (e.key === '?' && !pw) {
         const d = net().devices[id];
         if (d.type === 'router' || d.type === 'switch') {

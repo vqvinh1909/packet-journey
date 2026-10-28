@@ -11,6 +11,8 @@
 //   - Thông báo %LINK/%LINEPROTO/%OSPF-5-ADJCHG/%DUAL/%HSRP/%VRRP/%CDP-4-NATIVE_VLAN_MISMATCH.
 // Mọi thay đổi ghi trực tiếp vào model `net` (lab/net.js) → mạng được tính lại thật.
 
+import * as SN from './snmp.js';
+import * as ACL6 from './acl6.js';
 import * as N from './net.js';
 import * as A6 from './ip6.js';
 import * as V6 from './net6.js';
@@ -211,7 +213,7 @@ export const DESC = {
   'router-id': 'Đặt router ID', password: 'Đặt mật khẩu', login: 'Bắt đăng nhập', transport: 'Giao thức cho phép vào VTY', banner: 'Thông điệp đăng nhập', service: 'Dịch vụ hệ thống',
   crypto: 'Mã hoá: SSH (RSA) / VPN IPsec', 'domain-name': 'Tên miền (cần cho SSH)', clear: 'Xoá bảng/bộ đếm', vtp: 'VLAN Trunking Protocol', 'port-security': 'Giới hạn MAC trên cổng',
   'default-router': 'Gateway cấp cho client DHCP', 'dns-server': 'DNS cấp cho client DHCP', 'excluded-address': 'Dải không cấp qua DHCP', pool: 'Pool (DHCP / NAT)', do: 'Chạy lệnh EXEC trong chế độ cấu hình',
-  cdp: 'Cisco Discovery Protocol', 'private-vlan': 'Private VLAN', protected: 'Protected port (cổng cách ly)', boot: 'Chọn file IOS khi khởi động', reload: 'Khởi động lại thiết bị',
+  'snmp-server': 'Cấu hình SNMP agent (giám sát thiết bị)', community: 'Chuỗi community SNMP v1/v2c', traps: 'Bản tin cảnh báo SNMP gửi tới NMS', cdp: 'Cisco Discovery Protocol', lldp: 'Link Layer Discovery Protocol (chuẩn mở IEEE 802.1AB)', transmit: 'Gửi bản tin LLDP ra cổng', receive: 'Nhận bản tin LLDP từ cổng', name: 'Đặt tên / ghi chú', 'private-vlan': 'Private VLAN', protected: 'Protected port (cổng cách ly)', boot: 'Chọn file IOS khi khởi động', reload: 'Khởi động lại thiết bị',
   dir: 'Liệt kê file', verify: 'Kiểm tra file (MD5)', delete: 'Xoá file', 'access-class': 'Giới hạn nguồn được vào VTY', ppp: 'Point-to-Point Protocol',
 };
 const PH = { '<ip>': 'A.B.C.D', '<wild>': 'A.B.C.D  (wildcard)', '<mask>': 'A.B.C.D  (subnet mask)', '<num>': '<0-4294967295>', '<word>': 'WORD', '<if>': '<interface>  vd g0/0, fa0/1, s0/0/0, g0/0.10', '<vlist>': 'WORD  danh sách VLAN (vd 10,20,30-35)', '<rest>': 'LINE' };
@@ -255,6 +257,14 @@ export function createCli(net) {
     c('show clock', (x) => R([clockLine(x.d)])),
     c('show cdp neighbors', (x) => R(showCdp(x.d, false))),
     c('show cdp neighbors detail', (x) => R(showCdp(x.d, true))),
+    c('show lldp', (x) => R(showLldpGlobal(x.d))),
+    c('show snmp', (x) => R(SN.showSnmp(x.d))),
+    c('show ipv6 access-list', (x) => R(ACL6.showAcl6(x.d.acls6))),
+    c('show ipv6 access-list <word>', (x) => R(ACL6.showAcl6(x.d.acls6, x.a[0]))),
+    c('show snmp {community|user|group|host}', (x) => R(SN.showSnmp(x.d, x.a[0]))),
+    c('show lldp neighbors', (x) => R(showLldp(x.d, false))),
+    c('show lldp neighbors detail', (x) => R(showLldp(x.d, true))),
+    c('show lldp interface', (x) => R(showLldpIf(x.d))),
     c('show ip ssh', (x) => R(showSsh(x.d))),
     c('show ntp status', (x) => R(showNtp(x.d))),
     c('show ntp associations', (x) => R(showNtpAssoc(x.d))),
@@ -268,6 +278,8 @@ export function createCli(net) {
     c('show ip route {ospf|static|connected|eigrp|bgp}', (x) => R(showIpRoute(x.d, x.a[0]))),
     c('show ip ospf neighbor', (x) => R(showOspfNei(x.d))),
     c('show ip ospf interface brief', (x) => R(showOspfIntBr(x.d))),
+    c('show ip ospf interface', (x) => R(showOspfIf(x.d, null))),
+    c('show ip ospf interface <if>', (x) => R(showOspfIf(x.d, x.a[0]))),
     c('show ip ospf', (x) => R(showOspf(x.d))),
     c('show ip protocols', (x) => R(showProtocols(x.d))),
     c('show ip eigrp neighbors', (x) => R(showEigrpNei(x.d))),
@@ -361,6 +373,7 @@ export function createCli(net) {
     c('disable', (x) => { x.s.mode = 'user'; return R([]); }),
     c('configure terminal', (x) => { x.s.mode = 'config'; return R(['Enter configuration commands, one per line.  End with CNTL/Z.']); }),
     c('configure', (x) => { x.s.mode = 'config'; return R(['Configuring from terminal, memory, or network [terminal]? ', 'Enter configuration commands, one per line.  End with CNTL/Z.']); }),
+    c('copy startup-config running-config', (x) => ask(x, [{ p: 'Destination filename [running-config]? ', k: 'f' }], () => copyStartRun(x))),
     c('copy running-config startup-config', (x) => ask(x, [{ p: 'Destination filename [startup-config]? ', k: 'f' }], () => { saveCfg(x); return R(['Building configuration...', '[OK]']); })),
     c('copy running-config tftp:', (x) => ask(x, [{ p: 'Address or name of remote host []? ', k: 'host' }, { p: () => `Destination filename [${x.d.name.toLowerCase()}-confg]? `, k: 'dst', def: () => `${x.d.name.toLowerCase()}-confg` }], (dt) => tftpPut(x.d, dt))),
     c('copy tftp: flash:', (x) => copyTftpAsk(x)),
@@ -456,6 +469,34 @@ export function createCli(net) {
     c('logging <ip>', (x) => { if (!x.d.logging.includes(x.a[0])) x.d.logging.push(x.a[0]); return R([]); }),
     c('no logging host <ip>', (x) => { x.d.logging = x.d.logging.filter((s) => s !== x.a[0]); return R([]); }),
     c('cdp run', (x) => { x.d.cdpRun = true; return R([]); }),
+    c('lldp run', (x) => { x.d.lldpRun = true; return R([]); }),
+    c('config-register <word>', (x) => confregSet(x, x.a[0])),
+    c('ipv6 access-list <word>', (x) => { (x.d.acls6 ||= {})[x.a[0]] ||= { entries: [] }; x.s.mode = 'acl6'; x.s.acl6 = x.a[0]; return R([]); }),
+    c('no ipv6 access-list <word>', (x) => { delete (x.d.acls6 ||= {})[x.a[0]]; return R([]); }),
+    c('snmp-server community <word>', (x) => { SN.setCommunity(x.d, x.a[0], false, null); return R([]); }),
+    c('snmp-server community <word> {ro|rw}', (x) => { SN.setCommunity(x.d, x.a[0], x.a[1] === 'rw', null); return R([]); }),
+    c('snmp-server community <word> {ro|rw} <word>', (x) => { SN.setCommunity(x.d, x.a[0], x.a[1] === 'rw', x.a[2]); return R([]); }),
+    c('no snmp-server community <word>', (x) => { delete SN.snmpOf(x.d).comm[x.a[0]]; return R([]); }),
+    c('snmp-server location <rest>', (x) => { SN.snmpOf(x.d).location = x.a[0]; return R([]); }),
+    c('snmp-server contact <rest>', (x) => { SN.snmpOf(x.d).contact = x.a[0]; return R([]); }),
+    c('snmp-server enable traps', (x) => { SN.snmpOf(x.d).traps = true; return R([]); }),
+    c('snmp-server enable traps <rest>', (x) => { SN.snmpOf(x.d).traps = true; return R([]); }),
+    c('no snmp-server enable traps', (x) => { SN.snmpOf(x.d).traps = false; return R([]); }),
+    c('snmp-server host <ip> <word>', (x) => snmpHost(x, x.a[0], '1', null, x.a[1])),
+    c('snmp-server host <ip> version {1|2c} <word>', (x) => snmpHost(x, x.a[0], x.a[1], null, x.a[2])),
+    c('snmp-server host <ip> version 3 {noauth|auth|priv} <word>', (x) => snmpHost(x, x.a[0], '3', x.a[1], x.a[2])),
+    c('no snmp-server host <ip>', (x) => { const s0 = SN.snmpOf(x.d); s0.hosts = s0.hosts.filter((h) => h.ip !== x.a[0]); return R([]); }),
+    c('snmp-server group <word> v3 {noauth|auth|priv}', (x) => { SN.setGroup(x.d, x.a[0], x.a[1]); return R([]); }),
+    c('snmp-server group <word> v3 {noauth|auth|priv} <rest>', (x) => { SN.setGroup(x.d, x.a[0], x.a[1], x.a[2]); return R([]); }),
+    c('no snmp-server group <word> v3 {noauth|auth|priv}', (x) => { delete SN.snmpOf(x.d).groups[x.a[0]]; return R([]); }),
+    c('snmp-server user <word> <word> v3', (x) => snmpUser(x, null, null, null, null)),
+    c('snmp-server user <word> <word> v3 auth {md5|sha} <word>', (x) => snmpUser(x, x.a[2], x.a[3], null, null)),
+    c('snmp-server user <word> <word> v3 auth {md5|sha} <word> priv {des|3des} <word>', (x) => snmpUser(x, x.a[2], x.a[3], x.a[4], x.a[5])),
+    c('snmp-server user <word> <word> v3 auth {md5|sha} <word> priv aes {128|192|256} <word>', (x) => snmpUser(x, x.a[2], x.a[3], 'aes ' + x.a[4], x.a[5])),
+    c('no snmp-server user <word> <word> v3', (x) => { delete SN.snmpOf(x.d).users[x.a[0]]; return R([]); }),
+    c('no lldp run', (x) => { x.d.lldpRun = false; return R([]); }),
+    c('lldp timer <num>', (x) => { x.d.lldpTimer = x.a[0]; return R([]); }),
+    c('lldp holdtime <num>', (x) => { x.d.lldpHold = x.a[0]; return R([]); }),
     c('no cdp run', (x) => { x.d.cdpRun = false; return R([]); }),
     c('boot system <word>', (x) => bootSet(x, flashName(x.a[0]))),
     c('boot system flash <word>', (x) => bootSet(x, flashName(x.a[0]))),
@@ -473,6 +514,10 @@ export function createCli(net) {
     c('ip route <ip> <mask> <if>', (x) => routeAdd(x, x.a[0], x.a[1], null, x.a[2], 1)),
     c('ip route <ip> <mask> <if> <num>', (x) => routeAdd(x, x.a[0], x.a[1], null, x.a[2], x.a[3])),
     c('ip route <ip> <mask> <if> <ip>', (x) => routeAdd(x, x.a[0], x.a[1], x.a[3], x.a[2], 1)),
+    c('ip route <ip> <mask> <ip> name <word>', (x) => routeAdd(x, x.a[0], x.a[1], x.a[2], null, 1, x.a[3])),
+    c('ip route <ip> <mask> <ip> <num> name <word>', (x) => routeAdd(x, x.a[0], x.a[1], x.a[2], null, x.a[3], x.a[4])),
+    c('ip route <ip> <mask> <if> name <word>', (x) => routeAdd(x, x.a[0], x.a[1], null, x.a[2], 1, x.a[3])),
+    c('ip route <ip> <mask> <if> <ip> name <word>', (x) => routeAdd(x, x.a[0], x.a[1], x.a[3], x.a[2], 1, x.a[4])),
     c('no ip route <ip> <mask> <ip>', (x) => routeDel(x, x.a[0], x.a[1], x.a[2])),
     c('no ip route <ip> <mask> <ip> <num>', (x) => routeDel(x, x.a[0], x.a[1], x.a[2])),
     c('no ip route <ip> <mask> <if>', (x) => routeDel(x, x.a[0], x.a[1], x.a[2])),
@@ -621,6 +666,8 @@ export function createCli(net) {
     c('no ip ospf cost', (x) => ifAll(x, (f) => { f.ospfCost = null; })),
     c('ip ospf priority <num>', (x) => ifAll(x, (f) => { f.ospfPrio = x.a[0]; })),
     c('no ip ospf priority', (x) => ifAll(x, (f) => { f.ospfPrio = null; })),
+    c('ip ospf network {point-to-point|broadcast}', (x) => ifAll(x, (f) => { f.ospfNet = x.a[0] === 'point-to-point' ? 'p2p' : 'broadcast'; })),
+    c('no ip ospf network', (x) => ifAll(x, (f) => { f.ospfNet = null; })),
     c('ip ospf <num> area <num>', (x) => ifAll(x, (f) => { f.ospfPid = x.a[0]; f.ospfArea = x.a[1]; })),
     c('ip ospf hello-interval <num>', (x) => ifAll(x, (f) => { f.ospfHello = x.a[0]; })),
     c('no ip ospf hello-interval', (x) => ifAll(x, (f) => { f.ospfHello = null; })),
@@ -632,6 +679,8 @@ export function createCli(net) {
   const IF_ROUTER = [
     ...IF_L3,
     c('ipv6 address <ip6p>', (x) => addr6(x, x.a[0], false)),
+    c('ipv6 traffic-filter <word> {in|out}', (x) => ifAll(x, (f) => { (f.ipv6Filter ||= {})[x.a[1]] = x.a[0]; })),
+    c('no ipv6 traffic-filter <word> {in|out}', (x) => ifAll(x, (f) => { if (f.ipv6Filter) delete f.ipv6Filter[x.a[1]]; })),
     c('ipv6 address <ip6p> eui-64', (x) => addr6(x, x.a[0], true)),
     c('ipv6 address <ip6> link-local', (x) => ifAll(x, (f) => { if (!A6.isLinkLocal(x.a[0])) return ['% Lab: địa chỉ link-local phải thuộc FE80::/10']; f.ll = x.a[0]; })),
     c('no ipv6 address', (x) => ifAll(x, (f) => { f.ipv6 = []; f.ll = null; })),
@@ -654,6 +703,8 @@ export function createCli(net) {
     c('no crypto map <word>', (x) => ifAll(x, (f) => { f.cryptoMap = null; })),
     c('cdp enable', (x) => ifAll(x, (f) => { f.cdp = true; })),
     c('no cdp enable', (x) => ifAll(x, (f) => { f.cdp = false; })),
+    c('lldp {transmit|receive}', (x) => ifAll(x, (f) => { f[x.a[0] === 'transmit' ? 'lldpTx' : 'lldpRx'] = true; })),
+    c('no lldp {transmit|receive}', (x) => ifAll(x, (f) => { f[x.a[0] === 'transmit' ? 'lldpTx' : 'lldpRx'] = false; })),
     c('tunnel source <if>', (x) => tunSet(x, 'tunSrc', x.a[0])),
     c('tunnel source <ip>', (x) => tunSet(x, 'tunSrc', x.a[0])),
     c('tunnel destination <ip>', (x) => tunSet(x, 'tunDst', x.a[0])),
@@ -707,6 +758,8 @@ export function createCli(net) {
     c('no ip verify source', (x) => ports(x, (p) => { p.ipsg = false; })),
     c('cdp enable', (x) => ports(x, (p) => { p.cdp = true; })),
     c('no cdp enable', (x) => ports(x, (p) => { p.cdp = false; })),
+    c('lldp {transmit|receive}', (x) => ports(x, (p) => { p[x.a[0] === 'transmit' ? 'lldpTx' : 'lldpRx'] = true; })),
+    c('no lldp {transmit|receive}', (x) => ports(x, (p) => { p[x.a[0] === 'transmit' ? 'lldpTx' : 'lldpRx'] = false; })),
     c('shutdown', (x) => ports(x, (p) => { p.shutdown = true; }, null, (n) => [`%LINK-5-CHANGED: Interface ${longIf(n)}, changed state to administratively down`])),
     c('no shutdown', (x) => ports(x, (p) => { p.shutdown = false; p.errdis = false; }, null, (n) => (N.lineUp(net, x.d.id, n) ? [`%LINK-5-CHANGED: Interface ${longIf(n)}, changed state to up`, `%LINEPROTO-5-UPDOWN: Line protocol on Interface ${longIf(n)}, changed state to up`] : N.errDisabled(net, x.d, n) ? [`%PM-4-ERR_DISABLE: bpduguard error detected on ${shortIf(n)}, putting ${shortIf(n)} in err-disable state`] : []))),
     c('description <rest>', (x) => ports(x, (p) => { p.desc = x.a[0]; })),
@@ -938,6 +991,7 @@ export function createCli(net) {
       case 'router': return s.rp === 'eigrp' ? EIGRP_MODE : OSPF_MODE;
       case 'pool': return POOL_MODE;
       case 'acl-std': case 'acl-ext': return ACL_MODE;
+      case 'acl6': return ACL6_MODE;
       case 'line': return LINE_MODE;
       case 'isakmp': return ISAKMP_MODE;
       case 'tset': return TSET_MODE;
@@ -954,22 +1008,37 @@ export function createCli(net) {
       default: return [];
     }
   }
+  const ace6 = (x, words, seq) => {
+    const e = ACL6.parseAce6(words);
+    if (e.error) return R([e.error]);
+    ACL6.addAce6(x.d.acls6[x.s.acl6], e, seq);
+    return R([]);
+  };
+  const ACL6_MODE = [
+    c('{permit|deny} <rest>', (x) => ace6(x, [x.a[0], ...x.a[1].split(/\s+/)])),
+    c('sequence <num> {permit|deny} <rest>', (x) => ace6(x, [x.a[1], ...x.a[2].split(/\s+/)], x.a[0])),
+    c('no sequence <num>', (x) => { const a = x.d.acls6[x.s.acl6]; a.entries = a.entries.filter((e) => e.seq !== x.a[0]); return R([]); }),
+    c('remark <rest>', (x) => { ACL6.addAce6(x.d.acls6[x.s.acl6], { remark: x.a[0] }); return R([]); }),
+    c('exit', (x) => { x.s.mode = 'config'; return R([]); }),
+    c('end', (x) => toPriv(x)),
+    c('do <rest>', (x) => doExec(x)),
+  ];
   const cfgTable = (d) => (d.os === 'asa' ? ASA.cfgTable() : isRouter(d) ? CFG_ROUTER : CFG_SWITCH);
-  const SUB = new Set(['if', 'subif', 'range', 'vlan', 'router', 'pool', 'acl-std', 'acl-ext', 'line', 'isakmp', 'tset', 'cmap', 'vamap', 'bgp', 'mstcfg', 'ospf6', 'asaobj', 'pmap', 'pmapc', 'zone', 'cmapi', 'pmapi', 'pmapic', 'zpair']);
+  const SUB = new Set(['acl6', 'if', 'subif', 'range', 'vlan', 'router', 'pool', 'acl-std', 'acl-ext', 'line', 'isakmp', 'tset', 'cmap', 'vamap', 'bgp', 'mstcfg', 'ospf6', 'asaobj', 'pmap', 'pmapc', 'zone', 'cmapi', 'pmapi', 'pmapic', 'zpair']);
 
   // ================== Thực thi ==================
   function prompt(id) {
     const d = net.devices[id];
     const s = sess(id);
     if (d.type === 'pc' || d.type === 'server') return s.pw === 'ssh' ? 'Password: ' : d.shell === 'vpcs' ? `${d.name}> ` : 'C:\\>';
-    if (d.rommon) return 'rommon 1 > ';
+    if (d.rommon) return `rommon ${d.rommonUser ? s.rmn || 1 : 1} > `;
     if (s.ask) { const st = s.ask.steps[s.ask.i]; return typeof st.p === 'function' ? st.p(s.ask.data) : st.p; }
     if (s.pw) return s.pwPrompt || 'Password: ';
     if (s.loggedOut) return '';
     if (d.os === 'asa') return ASA.prompt(d, s);
     if (VENDOR[d.os]) return VENDOR[d.os].prompt(d, s);
     const h = d.name;
-    return ({ user: `${h}>`, priv: `${h}#`, config: `${h}(config)#`, if: `${h}(config-if)#`, subif: `${h}(config-subif)#`, range: `${h}(config-if-range)#`, vlan: `${h}(config-vlan)#`, router: `${h}(config-router)#`, pool: `${h}(dhcp-config)#`, 'acl-std': `${h}(config-std-nacl)#`, 'acl-ext': `${h}(config-ext-nacl)#`, line: `${h}(config-line)#`, isakmp: `${h}(config-isakmp)#`, tset: `${h}(cfg-crypto-trans)#`, cmap: `${h}(config-crypto-map)#`, vamap: `${h}(config-access-map)#`, bgp: `${h}(config-router)#`, mstcfg: `${h}(config-mst)#`, ospf6: `${h}(config-rtr)#`, zone: `${h}(config-sec-zone)#`, cmapi: `${h}(config-cmap)#`, pmapi: `${h}(config-pmap)#`, pmapic: `${h}(config-pmap-c)#`, zpair: `${h}(config-sec-zone-pair)#` })[s.mode] || `${h}#`;
+    return ({ user: `${h}>`, priv: `${h}#`, config: `${h}(config)#`, if: `${h}(config-if)#`, subif: `${h}(config-subif)#`, range: `${h}(config-if-range)#`, vlan: `${h}(config-vlan)#`, router: `${h}(config-router)#`, pool: `${h}(dhcp-config)#`, 'acl-std': `${h}(config-std-nacl)#`, 'acl-ext': `${h}(config-ext-nacl)#`, line: `${h}(config-line)#`, isakmp: `${h}(config-isakmp)#`, tset: `${h}(cfg-crypto-trans)#`, cmap: `${h}(config-crypto-map)#`, vamap: `${h}(config-access-map)#`, bgp: `${h}(config-router)#`, mstcfg: `${h}(config-mst)#`, ospf6: `${h}(config-rtr)#`, acl6: `${h}(config-ipv6-acl)#`, zone: `${h}(config-sec-zone)#`, cmapi: `${h}(config-cmap)#`, pmapi: `${h}(config-pmap)#`, pmapic: `${h}(config-pmap-c)#`, zpair: `${h}(config-sec-zone-pair)#` })[s.mode] || `${h}#`;
   }
 
   function exec(id, raw) {
@@ -977,7 +1046,17 @@ export function createCli(net) {
     const s = sess(id);
     const line = String(raw ?? '');
     let res;
+    const tl = line.trim().toLowerCase();
     if (d.off) res = R(['% Thiết bị đang TẮT — chuột phải → Start (hoặc ▶ Start all) để bật.']);
+    else if (tl === 'power-cycle' && (d.type === 'router' || d.type === 'switch') && !VENDOR[d.os] && d.os !== 'asa') {
+      Object.assign(s, { ask: null, pw: null, mode: 'user' });
+      d.rommon = false; d.rommonUser = false;
+      res = R(['(Lab: mô phỏng TẮT NGUỒN rồi BẬT lại — cấu hình chưa "copy run start" sẽ mất)', ...doReload(d, s)]);
+    } else if (d.bootWin && (tl === 'send break' || tl === 'break')) {
+      // nhấn Break trong ~60 giây đầu khi khởi động → bootstrap dừng nạp IOS, vào ROMMON
+      d.bootWin = false; d.rommon = true; d.rommonUser = true; s.loggedOut = false; s.rmn = 1;
+      res = R(['', 'monitor: command "boot" aborted due to user interrupt']);
+    } else if (d.rommon && d.rommonUser) res = rommonExec(d, s, line.trim());
     else if (d.type === 'pc' || d.type === 'server') res = s.pw === 'ssh' ? sshPw(d, s, line) : d.shell === 'vpcs' ? vpcsExec(d, line.trim()) : pcExec(d, line.trim());
     else if (VENDOR[d.os]) res = VENDOR[d.os].exec(d, s, line.trim());
     else if (d.rommon) res = R(['(Lab: thiết bị đang ở ROMMON vì không có file IOS khởi động được — bấm "↺ Làm lại" để khôi phục lab.)']);
@@ -990,7 +1069,7 @@ export function createCli(net) {
       if (a.i < a.steps.length) res = R([]);
       else { s.ask = null; res = a.done(a.data); }
     } else if (s.pw) res = pwInput(d, s, line);
-    else if (s.loggedOut) res = consoleLogin(d, s);
+    else if (s.loggedOut) { d.bootWin = false; res = consoleLogin(d, s); }
     else {
       const t = line.trim();
       if (!t || t.startsWith('!')) res = R([]); // "!" = dòng chú thích (như khi dán show run)
@@ -1292,7 +1371,7 @@ export function createCli(net) {
     return out;
   }
   function iosPing6(d, ip) {
-    const r = V6.ping6(net, d.id, ip);
+    const r = V6.ping6(net, d.id, ip, { record: true });
     const marks = r.ok ? '!!!!!' : '.....';
     const okN = r.ok ? 5 : 0;
     return R(['Type escape sequence to abort.', `Sending 5, 100-byte ICMP Echos to ${ip}, timeout is 2 seconds:`, marks, `Success rate is ${okN * 20} percent (${okN}/5)${okN ? ', round-trip min/avg/max = 0/1/1 ms' : ''}`], { why: r.ok ? null : r.fail?.why, ok: r.ok });
@@ -1434,13 +1513,25 @@ export function createCli(net) {
     s.track = (s.track || []).filter((t) => t.ifn !== ifn);
     s.track.push({ ifn, dec });
   }
-  function routeAdd(x, net0, mask, nh, iface, ad) {
+  function snmpHost(x, ip, ver, sec, name) {
+    const s0 = SN.snmpOf(x.d);
+    s0.hosts = [...s0.hosts.filter((h) => h.ip !== ip), { ip, ver, sec, name }];
+    return R([]);
+  }
+  function snmpUser(x, auth, authPw, priv, privPw) {
+    if (auth && String(authPw).length < 8) return R(['% Lab: mật khẩu xác thực SNMPv3 nên dài ≥ 8 ký tự (nhiều bản IOS từ chối mật khẩu ngắn hơn).']);
+    SN.setUser(x.d, x.a[0], x.a[1], auth, authPw, priv, privPw);
+    const out = [];
+    if (!SN.snmpOf(x.d).groups[x.a[1]]) out.push(`% Lab: nhóm "${x.a[1]}" chưa có — tạo bằng snmp-server group ${x.a[1]} v3 {noauth|auth|priv} thì user mới dùng được.`);
+    return R(out);
+  }
+  function routeAdd(x, net0, mask, nh, iface, ad, name = null) {
     const prefix = maskToPrefix(mask);
     const nn = netOf(net0, prefix);
     if (nn !== net0) return R(['%Inconsistent address and mask']);
     if (iface && !IFS(x.d)[iface]) return R(['% Invalid interface']);
     x.d.routes = x.d.routes.filter((r) => !(r.net === nn && r.prefix === prefix && r.nh === nh && r.iface === iface));
-    x.d.routes.push({ net: nn, prefix, nh, iface, ad });
+    x.d.routes.push({ net: nn, prefix, nh, iface, ad, ...(name ? { name } : {}) });
     const out = [];
     if (iface && !nh && /^(g|fa|e|vlan)/.test(iface)) out.push('%Default route without gateway, if not a point-to-point interface, may impact performance');
     return R(out);
@@ -1638,6 +1729,10 @@ export function createCli(net) {
   function vtpBump(d) { if (d.vtpMode === 'server') d.vtpRev += 1; }
   function vlanEnter(x, list) {
     if (x.d.vtpMode === 'client') return R(['VTP VLAN configuration not allowed when device is in CLIENT mode.']);
+    // VLAN mở rộng 1006–4094: VTPv1/v2 chỉ cho tạo khi switch ở chế độ transparent
+    const ext = list.filter((v) => v >= 1006 && !x.d.vlans[v]);
+    if (ext.length && x.d.vtpMode !== 'transparent') return R([`% Failed to create VLANs ${ext.join(',')}`, 'Extended VLAN(s) not allowed in current VTP mode.', '%Failed to commit extended VLAN(s) changes.']);
+    if (list.some((v) => v > 4094)) return R(['% Invalid input: VLAN 1–4094']);
     let created = false;
     for (const v of list) {
       if (v >= 1002 && v <= 1005) return R([`Default VLAN ${v} may not have its name changed.`]);
@@ -1655,6 +1750,9 @@ export function createCli(net) {
     return R([]);
   }
   function vtpMode(x, m) {
+    // VTPv1/v2 không quảng bá VLAN mở rộng 1006–4094 → không rời transparent được khi đang có VLAN mở rộng
+    const ext = Object.keys(x.d.vlans).map(Number).filter((v) => v >= 1006);
+    if (m !== 'transparent' && ext.length) return R([`Cannot set the device to VTP ${m.toUpperCase()} mode when extended VLANs exist (${ext.join(',')}).`, '(Lab: xoá VLAN mở rộng trước, hoặc giữ VTP transparent.)']);
     if (m === 'transparent' || x.d.vtpMode === 'transparent') x.d.vtpRev = 0;
     x.d.vtpMode = m;
     return R([`Setting device to VTP ${m.toUpperCase()} mode${m === 'transparent' ? '' : ' for VLANS'}.`]);
@@ -1877,12 +1975,50 @@ export function createCli(net) {
   // ---------- IOS / flash / NVRAM ----------
   function cfgSnap(d) {
     const o = JSON.parse(JSON.stringify(d));
-    for (const k of ['id', 'type', 'x', 'y', 'flash', 'flashSize', 'image', 'version', 'startupCfg', 'arp', 'macTable', 'natTable', 'rommon', 'logBuf', 'debug', 'off']) delete o[k];
+    for (const k of ['id', 'type', 'x', 'y', 'flash', 'flashSize', 'image', 'version', 'startupCfg', 'arp', 'macTable', 'natTable', 'rommon', 'rommonUser', 'bootWin', 'confreg', 'confregNext', 'logBuf', 'debug', 'off']) delete o[k];
     if (o.dhcp) o.dhcp.bindings = [];
     if (o.ports) for (const p of Object.values(o.ports)) p.errdis = false;
     for (const a of Object.values(o.acls || {})) for (const e of a.entries) e.matches = 0;
     if (o.crypto) for (const m of Object.values(o.crypto.maps)) for (const e of Object.values(m)) { delete e.encaps; delete e.decaps; delete e.tried; }
     return o;
+  }
+  /** config-register 0xNNNN — có hiệu lực ở lần khởi động sau (show version: "will be … at next reload"). */
+  function confregSet(x, v) {
+    if (!isRouter(x.d)) return R(['% Lab: config-register chỉ mô phỏng trên router']);
+    if (!/^0x[0-9a-f]{1,4}$/i.test(v)) return R(['% Invalid input: config-register dạng hex, vd 0x2102']);
+    x.d.confregNext = '0x' + v.slice(2).toLowerCase().padStart(4, '0');
+    return R([]);
+  }
+  /** copy startup-config running-config = GỘP vào cấu hình đang chạy: cổng đang shutdown vẫn shutdown (startup không có lệnh "no shutdown"). */
+  function copyStartRun(x) {
+    const d = x.d;
+    if (!d.startupCfg) return R(['%% Non-volatile configuration memory is not present']);
+    const was = {};
+    for (const [n, f] of Object.entries(isRouter(d) ? d.ifaces : d.ports)) was[n] = f.shutdown;
+    const keepName = d.name;
+    Object.assign(d, JSON.parse(JSON.stringify(d.startupCfg)));
+    for (const [n, f] of Object.entries(isRouter(d) ? d.ifaces : d.ports)) if (was[n]) f.shutdown = true;
+    return R([`${JSON.stringify(d.startupCfg).length} bytes copied in 0.312 secs`, ...(keepName !== d.name ? [] : []), ...(Object.values(was).some(Boolean) && isRouter(d) ? ['(Lab: lệnh copy chỉ GỘP — các cổng đang shutdown vẫn shutdown, nhớ "no shutdown" lại)'] : [])]);
+  }
+  /** ROMMON do người dùng vào bằng Break: confreg / reset / boot / dir / help. */
+  function rommonExec(d, s, line) {
+    s.rmn = (s.rmn || 1) + (line ? 1 : 0);
+    const w = line.split(/\s+/).filter(Boolean);
+    const cmd = (w[0] || '').toLowerCase();
+    if (!cmd) return R([]);
+    if (cmd === '?' || cmd === 'help' || /\?$/.test(line)) return R(['alias               set and display aliases command', 'boot                boot up an external process', 'confreg             configuration register utility', 'dir                 list files in file system', 'reset               system reset', 'set                 display the monitor variables', 'tftpdnld            tftp image download']);
+    if (cmd === 'confreg' && !w[1]) return R(['', `Configuration Summary (Virtual Configuration Register: ${d.confregNext || d.confreg || '0x2102'})`, 'enabled are:', 'load rom after netboot fails', 'console baud: 9600', 'boot: image specified by the boot system commands', '      or default to: cisco2-C2900', '', '(Lab: gõ "confreg 0x2142" để lần khởi động sau BỎ QUA startup-config, rồi "reset")']);
+    if (cmd === 'confreg') {
+      if (!/^0x[0-9a-f]{1,4}$/i.test(w[1])) return R(['monitor: invalid configuration register value']);
+      d.confregNext = '0x' + w[1].slice(2).toLowerCase().padStart(4, '0');
+      return R(['', 'You must reset or power cycle for new config to take effect']);
+    }
+    if (cmd === 'dir') { N.ensureFlash(d); return R([`File size           Checksum   File name`, ...d.flash.map((f) => `${String(f.size).padStart(9)} bytes (0x${f.size.toString(16)})   0x${(f.md5 || '0000').slice(0, 4)}   ${f.name}`)]); }
+    if (cmd === 'reset' || cmd === 'boot' || cmd === 'i') {
+      d.rommon = false; d.rommonUser = false;
+      return R(['', 'System Bootstrap, Version 15.0(1r)M15', ...doReload(d, s).slice(3)]);
+    }
+    return R([`monitor: command "${cmd}" not found`]);
   }
   function factory(d) {
     if (d.type === 'router') return N.router(d.id, 'Router', d.x, d.y, Object.keys(d.ifaces).filter((n) => !n.includes('.') && !n.startsWith('lo')));
@@ -1985,21 +2121,23 @@ export function createCli(net) {
     for (const b of d.startupCfg?.bootSystem || []) { if (d.flash.some((f) => f.name === b)) { img = b; break; } out.push(`%Boot image flash:${b} not found`); }
     if (!img) img = d.flash.find((f) => /\.bin$/.test(f.name))?.name;
     if (!img) { d.rommon = true; out.push('System Bootstrap, Version 15.0(1r)M15', 'boot: cannot determine first file name on device "flash:"', '', 'rommon 1 > ', '(Lab: KHÔNG có IOS nào trong flash → thiết bị kẹt ở ROMMON. Bấm "↺ Làm lại" để khôi phục lab.)'); return out; }
-    const keep = { id: d.id, type: d.type, x: d.x, y: d.y, flash: d.flash, flashSize: d.flashSize, startupCfg: d.startupCfg, image: img, version: N.verOf(img) || d.version };
+    const reg = d.confregNext || d.confreg || (d.type === 'router' ? '0x2102' : null);
+    const skipCfg = d.type === 'router' && (parseInt(reg, 16) & 0x40) !== 0; // bit 6 (0x2142): bỏ qua NVRAM khi khởi động
+    const keep = { id: d.id, type: d.type, x: d.x, y: d.y, flash: d.flash, flashSize: d.flashSize, startupCfg: d.startupCfg, image: img, version: N.verOf(img) || d.version, ...(reg ? { confreg: reg } : {}), bootWin: d.type === 'router' };
     const fresh = factory(d);
-    if (d.startupCfg) Object.assign(fresh, JSON.parse(JSON.stringify(d.startupCfg)));
+    if (d.startupCfg && !skipCfg) Object.assign(fresh, JSON.parse(JSON.stringify(d.startupCfg)));
     Object.assign(fresh, keep);
     if (d.type === 'switch') Object.assign(fresh, { vlans: d.vlans, vtpMode: d.vtpMode, vtpDomain: d.vtpDomain, vtpRev: d.vtpRev, vtpPw: d.vtpPw, model: d.model }); // vlan.dat nằm trong flash, không mất
     for (const k of Object.keys(d)) delete d[k];
     Object.assign(d, fresh);
-    out.push('System Bootstrap, Version 15.0(1r)M15, RELEASE SOFTWARE (fc1)', 'Technical Support: http://www.cisco.com/techsupport', '', 'program load complete, entry point: 0x80803000, size: 0x1b340', `Self decompressing the image : ${'#'.repeat(46)} [OK]`, '', `Cisco IOS Software, ${d.type === 'router' ? 'C2900' : 'C2960'} Software, Version ${d.version}, RELEASE SOFTWARE`, `System image file is "flash:${img}"`, '', d.startupCfg ? '' : '         --- System Configuration Dialog ---  (Lab: NVRAM trống — mọi cấu hình chưa "copy run start" đã MẤT)', '', 'Press RETURN to get started!');
+    out.push('System Bootstrap, Version 15.0(1r)M15, RELEASE SOFTWARE (fc1)', 'Technical Support: http://www.cisco.com/techsupport', ...(d.type === 'router' ? ['(Lab: trong ~60 giây đầu, gõ "send break" hoặc nhấn Ctrl+Break để dừng khởi động và vào ROMMON)'] : []), '', 'program load complete, entry point: 0x80803000, size: 0x1b340', `Self decompressing the image : ${'#'.repeat(46)} [OK]`, '', `Cisco IOS Software, ${d.type === 'router' ? 'C2900' : 'C2960'} Software, Version ${d.version}, RELEASE SOFTWARE`, `System image file is "flash:${img}"`, '', skipCfg && d.startupCfg ? `         --- System Configuration Dialog ---  (Lab: config-register ${reg} → BỎ QUA startup-config. Cấu hình cũ vẫn nằm trong NVRAM: "copy startup-config running-config" để nạp lại)` : d.startupCfg ? '' : '         --- System Configuration Dialog ---  (Lab: NVRAM trống — mọi cấu hình chưa "copy run start" đã MẤT)', '', 'Press RETURN to get started!');
     s.mode = 'user';
     s.loggedOut = true;
     return out;
   }
 
   // ---------- PC ----------
-  const PC_HELP = ['Available Commands:', '?         Display the list of available commands', 'arp       Display the arp table (arp -a)', 'ipconfig  Display network configuration / ipconfig <IP> <mask> [<gateway>] / ipconfig /renew /release /all', 'ipv6config <IPv6>/<prefix> [<gateway>] | ipv6config autoconfig (SLAAC)', 'ping      Send echo messages', 'ssh       Ssh client (ssh -l <user> <ip>)', 'telnet    Telnet client (telnet <ip> [port])', 'tracert   Trace route to destination'];
+  const PC_HELP = ['Available Commands:', '?         Display the list of available commands', 'arp       Display the arp table (arp -a)', 'ipconfig  Display network configuration / ipconfig <IP> <mask> [<gateway>] / ipconfig /renew /release /all', 'ipv6config <IPv6>/<prefix> [<gateway>] | ipv6config autoconfig (SLAAC)', 'ping      Send echo messages', 'ssh       Ssh client (ssh -l <user> <ip>)', 'telnet    Telnet client (telnet <ip> [port])', 'tracert   Trace route to destination', 'snmpget   SNMP get (snmpget -v2c -c <community> <ip> sysName.0 | -v3 -u <user> -l authPriv -a SHA -A <pass> -x AES -X <pass> <ip> <oid>)', 'snmpwalk  SNMP walk nhóm system', 'snmpset   SNMP set (snmpset -v2c -c <community> <ip> sysLocation.0 s "<giá trị>")'];
   function ipconfigOut(d, all) {
     const L = ['', 'FastEthernet0 Connection:(default port)', '', '   Connection-specific DNS Suffix..: '];
     if (all) L.push(`   Physical Address................: ${N.ciscoMac(N.epMac(net, { dev: d.id, ifn: 'fa0' })).toUpperCase()}`, `   DHCP Enabled....................: ${d.dhcp ? 'Yes' : 'No'}`);
@@ -2028,7 +2166,7 @@ export function createCli(net) {
     return R(L, { sim: r.sim, simLabel: `${d.name} ping ${ip}`, why: r.ok ? null : r.fail?.why, ok: r.ok });
   }
   function pcPing6(d, ip) {
-    const r = V6.ping6(net, d.id, ip);
+    const r = V6.ping6(net, d.id, ip, { record: true });
     const L = ['', `Pinging ${ip} with 32 bytes of data:`, ''];
     for (let i = 0; i < 4; i++) L.push(r.ok ? `Reply from ${ip}: bytes=32 time${i ? '<1ms' : '=1ms'}` : 'Request timed out.');
     L.push('', `Ping statistics for ${ip}:`, `    Packets: Sent = 4, Received = ${r.ok ? 4 : 0}, Lost = ${r.ok ? 0 : 4} (${r.ok ? 0 : 100}% loss),`, '');
@@ -2241,6 +2379,7 @@ export function createCli(net) {
       return R([]);
     }
     if (cmd === 'ping' && w[1] && A6.isIp6(w[1])) return pcPing6(d, A6.norm6(w[1]));
+    if (cmd === 'snmpget' || cmd === 'snmpwalk' || cmd === 'snmpset') return R(SN.snmpTool(net, d.id, line));
     if (cmd === 'ping') { const ip = w.slice(1).find(isIp); return ip ? pcPing(d, ip) : R(['Invalid Command.']); }
     if (cmd === 'tracert') { const ip = w.slice(1).find(isIp); return ip ? pcTrace(d, ip) : R(['Invalid Command.']); }
     if (cmd === 'telnet') { if (!isIp(w[1])) return R(['Invalid Command.']); return tcpConnect(d, w[1], w[2] ? +w[2] : 23); }
@@ -2368,10 +2507,36 @@ export function createCli(net) {
     for (const e of N.ospfIfaces(ctx, d.id)) {
       const cnt = nb.filter((n) => n.iface === e.ifn).length;
       let st = 'P2P';
-      if (!e.ifn.startsWith('s')) { const r = N.ospfRoles(ctx, d.id, e.ifn); st = r.dr === d.id ? 'DR' : r.bdr === d.id ? 'BDR' : e.prio === 0 ? 'DROTH' : cnt ? 'DROTH' : 'DR'; }
+      if (e.ntype !== 'p2p') { const r = N.ospfRoles(ctx, d.id, e.ifn); st = r.dr === d.id ? 'DR' : r.bdr === d.id ? 'BDR' : e.prio === 0 ? 'DROTH' : cnt ? 'DROTH' : 'DR'; }
       L.push(`${pad(shortIf(e.ifn), 13)}${pad(d.ospf.pid, 6)}${pad(e.area, 16)}${pad(`${e.ip}/${e.prefix}`, 19)}${pad(e.cost, 6)}${pad(st, 6)}${cnt}/${cnt}`);
     }
     return L;
+  }
+  function showOspfIf(d, only) {
+    if (!d.ospf) return [];
+    const ctx = ctxOf();
+    const o = N.ospfAll(ctx);
+    const nb = N.ospfNeighbors(ctx, d.id);
+    const L = [];
+    for (const e of N.ospfIfaces(ctx, d.id)) {
+      if (only && e.ifn !== only) continue;
+      const p2p = e.ntype === 'p2p';
+      const cnt = nb.filter((n) => n.iface === e.ifn), full = cnt.filter((n) => n.full);
+      L.push(`${longIf(e.ifn)} is up, line protocol is up`, `  Internet Address ${e.ip}/${e.prefix}, Area ${e.area}, Attached via Network Statement`,
+        `  Process ID ${d.ospf.pid}, Router ID ${o.rid[d.id]}, Network Type ${p2p ? 'POINT_TO_POINT' : 'BROADCAST'}, Cost: ${e.cost}`);
+      if (p2p) L.push('  Transmit Delay is 1 sec, State POINT_TO_POINT');
+      else {
+        const r = N.ospfRoles(ctx, d.id, e.ifn);
+        const ipOf = (id) => (id === d.id ? e.ip : nb.find((n) => n.dev === id)?.addr);
+        L.push(`  Transmit Delay is 1 sec, State ${r.dr === d.id ? 'DR' : r.bdr === d.id ? 'BDR' : 'DROTHER'}, Priority ${e.prio}`);
+        if (r.dr) L.push(`  Designated Router (ID) ${o.rid[r.dr]}, Interface address ${ipOf(r.dr)}`);
+        if (r.bdr) L.push(`  Backup Designated router (ID) ${o.rid[r.bdr]}, Interface address ${ipOf(r.bdr)}`);
+      }
+      L.push(`  Timer intervals configured, Hello ${e.hello}, Dead ${e.hello * 4}, Wait ${e.hello * 4}, Retransmit 5`);
+      if (e.passive) L.push('  No Hellos (Passive interface)');
+      else L.push(`  Neighbor Count is ${cnt.length}, Adjacent neighbor count is ${full.length}`, ...full.map((n) => `    Adjacent with neighbor ${n.rid}${n.role === 'DR' ? '  (Designated Router)' : n.role === 'BDR' ? '  (Backup Designated Router)' : ''}`));
+    }
+    return L.length ? L : only ? [`%OSPF: OSPF not enabled on ${longIf(only)}`] : [];
   }
   function showOspf(d) {
     if (!d.ospf) return ['%OSPF: No router process is configured'];
@@ -2865,7 +3030,7 @@ export function createCli(net) {
   function showVersion(d) {
     N.ensureFlash(d);
     return isRouter(d)
-      ? [`Cisco IOS Software, C2900 Software (C2900-UNIVERSALK9-M), Version ${d.version}, RELEASE SOFTWARE (fc2)`, 'Technical Support: http://www.cisco.com/techsupport', '', `${d.name} uptime is 1 hour, 12 minutes`, `System image file is "flash:${d.image}"`, '', 'Cisco CISCO2911/K9 (revision 1.0) with 491520K/32768K bytes of memory.', `${Object.keys(d.ifaces).filter((n) => !n.includes('.')).length} Gigabit Ethernet/Serial interfaces`, `${d.flashSize >> 10}K bytes of ATA System CompactFlash 0 (Read/Write)`, 'Configuration register is 0x2102']
+      ? [`Cisco IOS Software, C2900 Software (C2900-UNIVERSALK9-M), Version ${d.version}, RELEASE SOFTWARE (fc2)`, 'Technical Support: http://www.cisco.com/techsupport', '', `${d.name} uptime is 1 hour, 12 minutes`, `System image file is "flash:${d.image}"`, '', 'Cisco CISCO2911/K9 (revision 1.0) with 491520K/32768K bytes of memory.', `${Object.keys(d.ifaces).filter((n) => !n.includes('.')).length} Gigabit Ethernet/Serial interfaces`, `${d.flashSize >> 10}K bytes of ATA System CompactFlash 0 (Read/Write)`, `Configuration register is ${d.confreg || '0x2102'}${d.confregNext && d.confregNext !== (d.confreg || '0x2102') ? ` (will be ${d.confregNext} at next reload)` : ''}`]
       : [`Cisco IOS Software, C${d.model} Software (C${d.model}-LANBASEK9-M), Version ${d.version}, RELEASE SOFTWARE (fc1)`, `${d.name} uptime is 1 hour, 12 minutes`, `System image file is "flash:${d.image}"`, '', `cisco WS-C${d.model}-24TT-L (PowerPC405) processor with 65536K bytes of memory.`, `${Object.keys(d.ports).filter((n) => !n.startsWith('po')).length} FastEthernet/GigabitEthernet interfaces`, `Base ethernet MAC Address       : ${N.ciscoMac(N.switchMac(net, d.id)).toUpperCase()}`, 'Configuration register is 0xF'];
   }
   function ntpState(d, depth = 0) {
@@ -2910,6 +3075,49 @@ export function createCli(net) {
       if (pd.type === 'switch' && d.type === 'switch') { const e1 = N.effPort(net, d, n), e2 = N.effPort(net, pd, pe.port); if (e1.mode === 'trunk' && e2.mode === 'trunk') L.push(`Native VLAN: ${e2.native}`, ''); }
     }
     return L;
+  }
+  // ---- LLDP (IEEE 802.1AB): mặc định TẮT trên IOS, cần "lldp run"; mỗi cổng có transmit/receive riêng
+  const lldpPort = (d, p) => (isRouter(d) ? d.ifaces[p] : d.ports[p]) || {};
+  const lldpTx = (d, p) => !!d.lldpRun && lldpPort(d, p).lldpTx !== false;
+  const lldpRx = (d, p) => !!d.lldpRun && lldpPort(d, p).lldpRx !== false;
+  function showLldpGlobal(d) {
+    if (!d.lldpRun) return ['% LLDP is not enabled'];
+    return ['', 'Global LLDP Information:', '    Status: ACTIVE', `    LLDP advertisements are sent every ${d.lldpTimer || 30} seconds`, `    LLDP hold time advertised is ${d.lldpHold || 120} seconds`, '    LLDP interface reinitialisation delay is 2 seconds'];
+  }
+  function lldpNbrs(d) {
+    const names = isRouter(d) ? Object.keys(d.ifaces).filter((n) => !n.includes('.') && !/^(lo|tu)\d/.test(n)) : Object.keys(d.ports).filter((n) => !/^po\d/.test(n));
+    const out = [];
+    for (const n of names.sort(ifSort)) {
+      if (!N.lineUp(net, d.id, n) || !lldpRx(d, n)) continue;
+      const pe = N.peerOf(N.linkAt(net, d.id, n), d.id, n);
+      const pd = net.devices[pe.dev];
+      if ((pd.type !== 'router' && pd.type !== 'switch') || !lldpTx(pd, pe.port)) continue;
+      out.push({ n, pe, pd });
+    }
+    return out;
+  }
+  const lldpCap = (pd) => (pd.type === 'router' ? 'R' : pd.ipRouting ? 'B,R' : 'B');
+  function showLldp(d, detail) {
+    if (!d.lldpRun) return ['% LLDP is not enabled'];
+    const nb = lldpNbrs(d);
+    const sh = (x) => shortIf(x);
+    if (!detail) return ['Capability codes:', '    (R) Router, (B) Bridge, (T) Telephone, (C) DOCSIS Cable Device', '    (W) WLAN Access Point, (P) Repeater, (S) Station, (O) Other', '', 'Device ID           Local Intf     Hold-time  Capability      Port ID',
+      ...nb.map(({ n, pe, pd }) => `${pad(pd.name, 20)}${pad(sh(n), 15)}${pad(pd.lldpHold || 120, 11)}${pad(lldpCap(pd), 16)}${sh(pe.port)}`), '', `Total entries displayed: ${nb.length}`];
+    const L = [];
+    for (const { n, pe, pd } of nb) {
+      const ip = pd.type === 'router' ? pd.ifaces[pe.port]?.ip : Object.values(pd.svis).find((v) => v.ip)?.ip;
+      const desc = (pd.type === 'router' ? pd.ifaces[pe.port]?.desc : pd.ports[pe.port]?.desc) || '';
+      N.ensureFlash(pd);
+      L.push('------------------------------------------------', `Local Intf: ${sh(n)}`, `Chassis id: ${N.ciscoMac(pd.type === 'switch' ? N.switchMac(net, pd.id) : N.epMac(net, { dev: pd.id, ifn: pe.port }))}`, `Port id: ${sh(pe.port)}`, `Port Description: ${desc || longIf(pe.port)}`, `System Name: ${pd.name}`, '', 'System Description: ', `Cisco IOS Software, ${pd.type === 'router' ? 'C2900' : `C${pd.model}`} Software, Version ${pd.version}`, '',
+        `Time remaining: ${(pd.lldpHold || 120) - 12} seconds`, `System Capabilities: ${pd.type === 'router' ? 'R' : 'B,R'}`, `Enabled Capabilities: ${lldpCap(pd)}`, 'Management Addresses:', `    IP: ${ip || 'not advertised'}`, 'Auto Negotiation - supported, enabled', 'Physical media capabilities:', '    1000baseT(FD)', '    100base-TX(FD)', 'Media Attachment Unit type: 30', 'Vlan ID: - not advertised', '');
+    }
+    L.push(`Total entries displayed: ${nb.length}`);
+    return L;
+  }
+  function showLldpIf(d) {
+    if (!d.lldpRun) return ['% LLDP is not enabled'];
+    const names = isRouter(d) ? Object.keys(d.ifaces).filter((n) => !n.includes('.') && !/^(lo|tu)\d/.test(n)) : Object.keys(d.ports).filter((n) => !/^po\d/.test(n));
+    return names.sort(ifSort).flatMap((n) => [`${longIf(n)}:`, `    Tx: ${lldpTx(d, n) ? 'enabled' : 'disabled'}`, `    Rx: ${lldpRx(d, n) ? 'enabled' : 'disabled'}`, `    Tx state: ${lldpTx(d, n) ? 'IDLE' : 'INIT'}`, `    Rx state: ${lldpRx(d, n) ? 'WAIT FOR FRAME' : 'INIT'}`, '']);
   }
   function showSsh(d) {
     if (d.rsa >= 768) return [`SSH Enabled - version ${d.sshVer === 1 ? '1.5' : '2.0'}`, `Authentication timeout: ${d.sshTimeout || 120} secs; Authentication retries: ${d.sshRetries ?? 3}`];
@@ -2969,9 +3177,13 @@ export function createCli(net) {
   function tailBlock(d) {
     const L = [];
     if (!d.cdpRun) L.push('no cdp run');
+    if (d.lldpRun) L.push('lldp run');
+    if (d.lldpTimer) L.push(`lldp timer ${d.lldpTimer}`);
+    if (d.lldpHold) L.push(`lldp holdtime ${d.lldpHold}`);
     for (const s of d.ntp.servers) L.push(`ntp server ${s}`);
     if (d.ntp.master != null) L.push(d.ntp.master === 8 ? 'ntp master' : `ntp master ${d.ntp.master}`);
     for (const h of d.logging) L.push(`logging ${h}`);
+    L.push(...SN.snmpRunning(d));
     if (d.banner) L.push(`banner motd ^C${d.banner}^C`);
     L.push('!', ...linesBlock(d), 'end');
     return L;
@@ -3063,11 +3275,13 @@ export function createCli(net) {
     if (f.nat) L.push(` ip nat ${f.nat}`);
     if (f.ospfCost != null) L.push(` ip ospf cost ${f.ospfCost}`);
     if (f.ospfPrio != null) L.push(` ip ospf priority ${f.ospfPrio}`);
+    if (f.ospfNet) L.push(` ip ospf network ${f.ospfNet === 'p2p' ? 'point-to-point' : 'broadcast'}`);
     if (f.ospfHello != null) L.push(` ip ospf hello-interval ${f.ospfHello}`);
     if (f.ospfPid != null) L.push(` ip ospf ${f.ospfPid} area ${f.ospfArea}`);
     if (f.ll) L.push(` ipv6 address ${f.ll} link-local`);
     for (const a of f.ipv6 || []) L.push(a.eui ? ` ipv6 address ${A6.net6(a.ip, 64)}/64 eui-64` : ` ipv6 address ${a.ip}/${a.prefix}`);
     if (f.ipv6Enable) L.push(' ipv6 enable');
+    for (const dir of ['in', 'out']) if (f.ipv6Filter?.[dir]) L.push(` ipv6 traffic-filter ${f.ipv6Filter[dir]} ${dir}`);
     if (f.ospf6) L.push(` ipv6 ospf ${f.ospf6.pid} area ${f.ospf6.area}`);
     if (f.zone) L.push(` zone-member security ${f.zone}`);
     if (f.bw != null) L.push(` bandwidth ${f.bw}`);
@@ -3088,6 +3302,8 @@ export function createCli(net) {
     if (f.tunDst) L.push(` tunnel destination ${f.tunDst}`);
     if (f.cryptoMap) L.push(` crypto map ${f.cryptoMap}`);
     if (f.cdp === false) L.push(' no cdp enable');
+    if (f.lldpTx === false) L.push(' no lldp transmit');
+    if (f.lldpRx === false) L.push(' no lldp receive');
     if (n.startsWith('s') && f.clock) L.push(` clock rate ${f.clock}`);
     if (!n.includes('.') && !n.startsWith('lo') && !n.startsWith('s') && !n.startsWith('vlan')) L.push(' duplex auto', ' speed auto');
     if (f.shutdown) L.push(' shutdown');
@@ -3122,6 +3338,8 @@ export function createCli(net) {
     if (p.daiRate != null) L.push(` ip arp inspection limit rate ${p.daiRate}`);
     if (p.ipsg) L.push(' ip verify source');
     if (p.cdp === false) L.push(' no cdp enable');
+    if (p.lldpTx === false) L.push(' no lldp transmit');
+    if (p.lldpRx === false) L.push(' no lldp receive');
     if (p.group != null) L.push(` channel-group ${p.group} mode ${p.chMode}`);
     if (p.shutdown) L.push(' shutdown');
     if (p.portfast) L.push(' spanning-tree portfast');
@@ -3157,11 +3375,11 @@ export function createCli(net) {
       for (const [n, p] of Object.entries(d.nat.pools)) L.push(`ip nat pool ${n} ${p.start} ${p.end} netmask ${prefixToMask(p.prefix)}`);
       for (const s of d.nat.statics) L.push(s.proto ? `ip nat inside source static ${s.proto} ${s.local} ${s.lport} ${s.global} ${s.gport}` : `ip nat inside source static ${s.local} ${s.global}`);
       L.push('ip classless');
-      for (const r of d.routes) L.push(`ip route ${r.net} ${prefixToMask(r.prefix)} ${r.iface ? longIf(r.iface) + (r.nh ? ' ' + r.nh : '') : r.nh}${r.ad !== 1 ? ' ' + r.ad : ''}`);
+      for (const r of d.routes) L.push(`ip route ${r.net} ${prefixToMask(r.prefix)} ${r.iface ? longIf(r.iface) + (r.nh ? ' ' + r.nh : '') : r.nh}${r.ad !== 1 ? ' ' + r.ad : ''}${r.name ? ' name ' + r.name : ''}`);
       if (d.ipv6Routing) L.push('ipv6 unicast-routing');
       for (const r of d.routes6 || []) L.push(`ipv6 route ${r.net}/${r.prefix} ${r.iface ? longIf(r.iface) + (r.nh ? ' ' + r.nh : '') : r.nh}${(r.ad ?? 1) !== 1 ? ' ' + r.ad : ''}`);
       if (d.ospf6) L.push(`ipv6 router ospf ${d.ospf6.pid}`, ...(d.ospf6.rid ? [` router-id ${d.ospf6.rid}`] : []), ...d.ospf6.passive.map((n) => ` passive-interface ${longIf(n)}`), '!');
-      L.push('!', 'ip flow-export version 9', '!', ...aclBlock(d), '!');
+      L.push('!', 'ip flow-export version 9', '!', ...aclBlock(d), '!', ...ACL6.acl6Running(d.acls6));
     } else {
       L = headBlock(d);
       if (d.ipRouting) L.push('ip routing', '!');
@@ -3194,7 +3412,7 @@ export function createCli(net) {
       for (const n of Object.keys(d.ports).sort((a, b) => (a.startsWith('po') ? -1 : 0) - (b.startsWith('po') ? -1 : 0) || ifSort(a, b))) L.push(...runIfSwitch(d, n));
       for (const n of Object.keys(d.svis).sort(ifSort)) L.push(...runIfSwitch(d, n));
       L.push(...routingBlock(d));
-      for (const r of d.routes) L.push(`ip route ${r.net} ${prefixToMask(r.prefix)} ${r.iface ? longIf(r.iface) + (r.nh ? ' ' + r.nh : '') : r.nh}${r.ad !== 1 ? ' ' + r.ad : ''}`);
+      for (const r of d.routes) L.push(`ip route ${r.net} ${prefixToMask(r.prefix)} ${r.iface ? longIf(r.iface) + (r.nh ? ' ' + r.nh : '') : r.nh}${r.ad !== 1 ? ' ' + r.ad : ''}${r.name ? ' name ' + r.name : ''}`);
       if (d.defaultGateway) L.push(`ip default-gateway ${d.defaultGateway}`);
       L.push(...aclBlock(d));
       for (const [m, es] of Object.entries(d.vacl.maps)) for (const e of es) L.push(`vlan access-map ${m} ${e.seq}`, ...(e.acl ? [` match ip address ${e.acl}`] : []), ` action ${e.action}`);
