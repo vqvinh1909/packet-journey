@@ -461,6 +461,7 @@ export function openLab(onRun, o = {}) {
     else if (e.key === 'ArrowDown') { e.preventDefault(); if (s.hpos < 0) return; s.hpos += 1; if (s.hpos >= h.length) { s.hpos = -1; input.value = ''; } else input.value = h[s.hpos]; }
     else if (e.key === 'Tab') { e.preventDefault(); const c = s.cli.complete(s.dev, input.value); if (c) input.value = c; }
     else if ((e.key === 'z' || e.key === 'Z') && e.ctrlKey) { e.preventDefault(); input.value = ''; run('end'); }
+    else if ((e.key === 'Pause' || e.key === 'Cancel') && e.ctrlKey) { e.preventDefault(); input.value = ''; run('send break'); } // Ctrl+Break lúc khởi động → ROMMON
     else if (e.key === '?' && !s.password) {
       const d = s.net.devices[s.dev];
       if (d.type === 'router' || d.type === 'switch') {

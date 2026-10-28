@@ -1,5 +1,18 @@
 # Ghi chú làm tiếp — Packet Journey
 
+## ✅ Bổ sung theo CCNA 200-301 (2026-10-28)
+- So với sách lab CCNA (bản 2017): thêm các chủ đề đề 200-301 còn thiếu. Lab N01–N08 ở `lab/labs-n200.js` (nhóm `n2`).
+- `lab/ios.js`: LLDP (`d.lldpRun`, cổng `lldpTx/lldpRx`, show lldp*), `ip ospf network {point-to-point|broadcast}` (`f.ospfNet`),
+  `show ip ospf interface [<if>]`, `ip route … name X` (`r.name`), SNMP (gọi `lab/snmp.js`), ACL IPv6 (mode `acl6`, gọi `lab/acl6.js`,
+  cổng `f.ipv6Filter = {in,out}`), luật VLAN mở rộng trong `vlanEnter`/`vtpMode`, `config-register` (`d.confregNext` → `d.confreg`
+  khi reload; bit 0x40 = bỏ qua startup-config), `power-cycle` (lệnh lab), `send break` trong `d.bootWin` → ROMMON người dùng
+  (`d.rommonUser`, `rommonExec`: confreg/reset/boot/dir/?), `copy startup-config running-config` (`copyStartRun`: gộp, giữ shutdown).
+- `lab/net.js`: OSPF `ntype` mỗi cổng; lệch kiểu → adjacency có `mismatch`, bị loại khỏi SPF. `lab/net6.js`: `walk6` lọc ACL IPv6
+  in/out (gói router tự phát không lọc out), `ping6` chuẩn hoá địa chỉ, `{record}` để đếm match.
+- `lab/breaker.js`: thêm lỗi IPv6 (no ipv6 unicast-routing, cổng chỉ-IPv6 shutdown, gỡ traffic-filter). `lab/weak.js`: chủ đề SNMP/LLDP/ROMMON.
+- UI: Ctrl+Break (phím Pause) trong console lab và workspace gửi `send break`. Test `tests/n200.test.js`.
+- Chưa làm (ngoài 200-301 hoặc tuỳ chọn): RIPv2, EIGRP nâng cao (summary, topology, EIGRPv6), MLPPP, PPPoE, IP SLA, 802.1X đầy đủ.
+
 ## ✅ Việc 6–11 (xong 2026-10-27, làm tại máy sau khi cloud hết credit)
 - **6 xuất/nạp cấu hình**: đã có từ trước (`lab/configio.js`); kiểm lại trên trình duyệt — thanh công cụ workspace xuống 2 dòng
   ở màn hình 1024px là bình thường (nhiều nút), không che sơ đồ.

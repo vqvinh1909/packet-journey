@@ -2,8 +2,9 @@
 // bảng định tuyến (C/L/S/O/OI), OSPFv3, ping IPv6 đi thật 2 chiều qua L2 (dùng flood VLAN/trunk/STP
 // của net.js — tương đương NDP tìm láng giềng), và SLAAC cho PC (RA từ router có ipv6 unicast-routing).
 
-import { flood, ifUp, epMac } from './net.js';
-import { parse6, in6, net6, eui64, linkLocal, isLinkLocal } from './ip6.js';
+import { flood, ifUp, epMac, longIf } from './net.js';
+import { parse6, norm6, in6, net6, eui64, linkLocal, isLinkLocal } from './ip6.js';
+import { acl6Eval } from './acl6.js';
 
 const isHost = (d) => d.type === 'pc' || d.type === 'server';
 /** Cổng router có bật IPv6 không (có địa chỉ IPv6 hoặc "ipv6 enable"). */
@@ -137,12 +138,20 @@ function resolve6(net, src, ip) {
   for (const t of flood(net, src).values()) if (addrs6(net, t.dev, t.ifn).includes(ip) && ifUp(net, t.dev, t.ifn)) return t;
   return null;
 }
-function walk6(net, srcId, dst, o6) {
-  const fail = (dev, why) => ({ ok: false, fail: { dev, why }, hops });
+function walk6(net, srcId, dst, o6, pkt = null, record = false) {
+  const fail = (dev, why, kind) => ({ ok: false, fail: { dev, why, kind }, hops });
+  // ACL IPv6 (ipv6 traffic-filter) trên cổng router: lọc gói đi vào (in) và đi ra (out); gói router tự phát không lọc out
+  const filt = (d, ifn, dir) => {
+    const name = d.ifaces?.[ifn]?.ipv6Filter?.[dir];
+    if (!name || !pkt) return null;
+    const r = acl6Eval(d.acls6?.[name], { ...pkt, dst }, record);
+    return r.action === 'permit' ? null : fail(d.id, `${d.name}: ACL IPv6 "${name}" (${dir} trên ${longIf(ifn)}) ${r.implicit ? 'chặn bằng dòng ngầm định "deny ipv6 any any" ở cuối' : 'chặn bởi dòng "' + r.entry.action + ' ' + r.entry.proto + ' …"'} → hủy gói ${pkt.icmp || pkt.proto}.`, 'acl');
+  };
   const hops = [];
   let node = { dev: srcId, ifn: null, origin: true };
   for (let guard = 0; guard < 32; guard++) {
     const d = net.devices[node.dev];
+    if (!node.origin && d.type === 'router') { const f = filt(d, node.ifn, 'in'); if (f) return f; }
     if (!node.origin && owns6(net, d, dst)) return { ok: true, at: node, hops };
     let out, nh;
     if (isHost(d)) {
@@ -164,6 +173,7 @@ function walk6(net, srcId, dst, o6) {
       if (!rt) return fail(d.id, `${d.name}: KHÔNG có route IPv6 nào khớp ${dst} → hủy gói (ICMPv6 Destination Unreachable).`);
       out = { dev: d.id, ifn: rt.iface };
       nh = rt.nextHop || dst;
+      if (!node.origin) { const f = filt(d, rt.iface, 'out'); if (f) return f; }
     } else return fail(d.id, `${d.name} không định tuyến IPv6.`);
     const t = resolve6(net, out, nh);
     if (!t) return fail(out.dev, `${net.devices[out.dev].name}: không tìm được láng giềng ${nh} (NDP Neighbor Solicitation không ai trả lời) trên ${out.ifn}.`);
@@ -178,11 +188,13 @@ function srcAddr6(net, d, dst, o6) {
   return rt ? ((d.ifaces[rt.iface].ipv6 || [])[0]?.ip || llOf(net, d.id, rt.iface)) : null;
 }
 /** Ping IPv6 2 chiều: { ok, fail, hops }. */
-export function ping6(net, srcId, dst) {
+export function ping6(net, srcId, dst, opts = {}) {
+  dst = norm6(dst) || dst; // 2001:db8::1 và 2001:DB8::1 là một địa chỉ
   const o6 = ospf6All(net);
-  const go = walk6(net, srcId, dst, o6);
+  const src = srcAddr6(net, net.devices[srcId], dst, o6);
+  const go = walk6(net, srcId, dst, o6, { src, proto: 'icmp', icmp: 'echo-request' }, opts.record);
   if (!go.ok) return go;
-  const back = walk6(net, go.at.dev, srcAddr6(net, net.devices[srcId], dst, o6), o6);
+  const back = walk6(net, go.at.dev, src, o6, { src: dst, proto: 'icmp', icmp: 'echo-reply' }, opts.record);
   if (!back.ok) return { ok: false, fail: { ...back.fail, why: '(chiều VỀ) ' + back.fail.why }, hops: go.hops };
   return { ok: true, hops: go.hops };
 }

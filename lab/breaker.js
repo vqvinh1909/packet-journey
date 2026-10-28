@@ -86,6 +86,16 @@ export function faultCandidates(net) {
       }
     }
     // cổng L3 (router; SVI không tính) đang up
+    // IPv6: tắt định tuyến IPv6, cổng chỉ có IPv6 bị shutdown, ACL IPv6 bị gỡ khỏi cổng
+    if (d.type === 'router' && d.ipv6Routing) add({ key: `${d.id}|v6rt`, kind: 'ipv6-routing', dev: d.id, layer: L.l3, title: `${d.name}: tắt định tuyến IPv6`, detail: `${d.name} mất lệnh "ipv6 unicast-routing" → không chuyển tiếp gói IPv6`, brk: ['no ipv6 unicast-routing'], fix: ['ipv6 unicast-routing'] });
+    for (const [n, f] of Object.entries(d.ifaces || {})) {
+      if (f.ip || f.shutdown || !(f.ipv6 || []).length || n.includes('.') || !N.ifUp(net, d.id, n)) continue;
+      add({ key: `${d.id}|${n}|adm`, kind: 'shutdown', dev: d.id, layer: L.l1, title: `${d.name} ${sh(n)}: cổng bị shutdown`, detail: `${d.name} ${sh(n)} (${f.ipv6[0].ip}/${f.ipv6[0].prefix}) đang "shutdown"`, brk: [`interface ${n}`, 'shutdown'], fix: [`interface ${n}`, 'no shutdown'] });
+    }
+    for (const [n, f] of Object.entries(d.ifaces || {})) for (const dir of ['in', 'out']) {
+      const name = f.ipv6Filter?.[dir];
+      if (name) add({ key: `${d.id}|${n}|acl6${dir}`, kind: 'acl6', dev: d.id, layer: L.svc, title: `${d.name} ${sh(n)}: ACL IPv6 bị gỡ khỏi cổng`, detail: `${d.name} ${sh(n)} mất lệnh "ipv6 traffic-filter ${name} ${dir}" → chính sách lọc không còn hiệu lực`, brk: [`interface ${n}`, `no ipv6 traffic-filter ${name} ${dir}`], fix: [`interface ${n}`, `ipv6 traffic-filter ${name} ${dir}`] });
+    }
     for (const [n, f] of Object.entries(d.ifaces || {})) {
       if (!f.ip || f.shutdown || n.startsWith('lo') || n.startsWith('tu')) continue;
       if (!N.ifUp(net, d.id, n)) continue;

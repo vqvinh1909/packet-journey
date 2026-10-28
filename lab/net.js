@@ -722,7 +722,9 @@ export function ospfIfaces(ctx, rid) {
     }
     if (area == null) continue;
     const passive = r.ospf.passiveDefault ? !r.ospf.noPassive.includes(n) : r.ospf.passive.includes(n);
-    res.push({ ifn: n, ip: f.ip, prefix: f.prefix, area: String(area), cost: ospfCost(n, f), passive, hello: f.ospfHello ?? 10, prio: f.ospfPrio ?? 1 });
+    // kiểu mạng OSPF: Serial / tunnel mặc định point-to-point, Ethernet mặc định broadcast (đổi bằng "ip ospf network")
+    const ntype = f.ospfNet || (kindOf(n) === 's' || n.startsWith('tu') ? 'p2p' : 'broadcast');
+    res.push({ ifn: n, ip: f.ip, prefix: f.prefix, area: String(area), cost: ospfCost(n, f), passive, hello: f.ospfHello ?? 10, prio: f.ospfPrio ?? 1, ntype });
   }
   return res;
 }
@@ -754,14 +756,18 @@ export function ospfAll(ctx) {
         if (e.area !== e2.area) { issues[r.id].push(`${longIf(e.ifn)}: area ${e.area} ≠ area ${e2.area} của ${s.name} (mismatch area)`); continue; }
         if (e.hello !== e2.hello) { issues[r.id].push(`${longIf(e.ifn)}: hello ${e.hello}s ≠ ${e2.hello}s của ${s.name}`); continue; }
         if (rid[s.id] === rid[r.id]) { issues[r.id].push(`Trùng router-id ${rid[r.id]} với ${s.name}`); continue; }
-        adj[r.id].push({ to: s.id, cost: e.cost, nh: e2.ip, outIf: e.ifn, theirIf: t.ifn, area: e.area, serial: kindOf(e.ifn) === 's', prio: e2.prio, myPrio: e.prio });
+        // lệch kiểu mạng (point-to-point ↔ broadcast): hello cùng 10 s nên vẫn lên láng giềng, nhưng LSA hai bên mô tả
+        // link khác nhau → SPF không dùng được link này (route bị thiếu) — lỗi kinh điển khi chỉ đổi một đầu
+        const mismatch = e.ntype !== e2.ntype;
+        if (mismatch) issues[r.id].push(`${longIf(e.ifn)}: network type ${e.ntype === 'p2p' ? 'POINT_TO_POINT' : 'BROADCAST'} ≠ ${e2.ntype === 'p2p' ? 'POINT_TO_POINT' : 'BROADCAST'} của ${s.name} → láng giềng lên nhưng không có route qua link này`);
+        adj[r.id].push({ to: s.id, cost: e.cost, nh: e2.ip, outIf: e.ifn, theirIf: t.ifn, area: e.area, serial: kindOf(e.ifn) === 's', p2p: e.ntype === 'p2p', mismatch, prio: e2.prio, myPrio: e.prio });
       }
     }
   }
   for (const r of rs) adj[r.id] = adj[r.id].filter((a) => (adj[a.to] || []).some((b) => b.to === r.id));
   // ⏱ láng giềng chưa xong INIT → … → LOADING thì chưa dùng để tính route (adj vẫn giữ để show neighbor)
   const adjUp = {};
-  for (const r of rs) adjUp[r.id] = adj[r.id].filter((a) => !phaseOf(net, ospfKey(r.id, a), 'ospf', { dev: r.id, ifn: a.outIf, nbr: rid[a.to], pid: r.ospf.pid }));
+  for (const r of rs) adjUp[r.id] = adj[r.id].filter((a) => !a.mismatch && !phaseOf(net, ospfKey(r.id, a), 'ospf', { dev: r.id, ifn: a.outIf, nbr: rid[a.to], pid: r.ospf.pid }));
   for (const s of rs) ads[s.id] = en[s.id].map((e) => ({ net: netOf(e.ip, e.prefix), prefix: e.prefix, cost: e.cost, area: e.area }));
   const spf = {}, intRoutes = {}, myNetsOf = {};
   Object.assign(ctx.ospf, { spf, intRoutes });
@@ -849,6 +855,7 @@ const ospfKey = (rid, a) => `ospf|${rid}|${a.outIf}|${a.to}`;
 export function ospfRoles(ctx, rid, ifn) {
   const o = ospfAll(ctx);
   const me = (o.en[rid] || []).find((e) => e.ifn === ifn);
+  if (me?.ntype === 'p2p') return { dr: null, bdr: null }; // point-to-point: không bầu DR/BDR
   const seg = [{ id: rid, prio: me ? me.prio : 1 }, ...(o.adj[rid] || []).filter((x) => x.outIf === ifn).map((x) => ({ id: x.to, prio: x.prio }))];
   const cand = seg.filter((x) => x.prio > 0).sort((a, b) => b.prio - a.prio || ip2n(o.rid[b.id]) - ip2n(o.rid[a.id]));
   return { dr: cand[0]?.id || null, bdr: cand[1]?.id || null };
@@ -859,7 +866,7 @@ export function ospfNeighbors(ctx, rid) {
   const net = ctx.net;
   return (o.adj[rid] || []).map((a) => {
     let role = '-', full = true;
-    if (!a.serial && !a.outIf.startsWith('tu')) {
+    if (!a.p2p) {
       const r = ospfRoles(ctx, rid, a.outIf);
       role = r.dr === a.to ? 'DR' : r.bdr === a.to ? 'BDR' : 'DROTHER';
       // 2 router đều là DROTHER chỉ dừng ở 2-WAY (chỉ trao đổi LSDB với DR/BDR)

@@ -23,7 +23,7 @@ export const TOPICS = [
   ['Bảo mật L2', /port.?security|snooping|\bdai\b|arp inspection|arp giả|source guard|bảo mật l2|bảo mật lớp 2|private vlan|protected port/i],
   ['Firewall', /firewall|\basa\b|\bzbf\b|zone-based|fortigate|palo alto|sophos|check point|pfsense|ipsec|\bvpn\b/i],
   ['IPv6', /ipv6|ospfv3|slaac|dual-stack/i],
-  ['Quản trị thiết bị', /\bssh\b|\baaa\b|\bntp\b|syslog|nâng cấp ios|\bcdp\b|kiểm toán|mật khẩu|cấu hình cơ bản/i],
+  ['Quản trị thiết bị', /\bssh\b|\baaa\b|\bntp\b|syslog|nâng cấp ios|\bcdp\b|\blldp\b|\bsnmp|rommon|config-register|kiểm toán|mật khẩu|cấu hình cơ bản/i],
   ['WAN/Serial', /serial|\bppp\b|\bchap\b|\bgre\b/i],
 ];
 export const TOPIC_NAMES = TOPICS.map(([t]) => t);
