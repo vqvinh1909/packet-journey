@@ -1,14 +1,17 @@
 // ui/exam.js — "🎓 Thi thử CCNA": màn hình bắt đầu (lịch sử các lần thi), phòng thi (đồng hồ đếm ngược, lưới câu
 // hỏi, đánh dấu ⚑, câu lab có console thu nhỏ), nộp bài → điểm thang 1000, điểm từng mảng, xem lại câu sai.
+// Ngôn ngữ đề: VI / EN / VI+EN (song ngữ) — chọn ở góc trên, lưu "exam-lang"; mặc định theo ngôn ngữ của app.
 // Bài đang làm lưu trong localStorage ("ccna-exam-cur") nên tải lại trang vẫn làm tiếp được.
 import * as E from '../lab/ccna-exam.js';
 import { getLab, buildLab, checkLab } from '../lab/labs.js';
 import { createCli } from '../lab/ios.js';
 import { load, save } from './store.js';
+import { getLang } from './i18n.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[m]));
 const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 const isHost = (d) => d.type === 'pc' || d.type === 'server';
+const LANGS = [['vi', 'VI'], ['en', 'EN'], ['both', 'VI + EN']];
 
 export function openExam() {
   document.querySelector('.modal-backdrop')?.remove();
@@ -18,31 +21,47 @@ export function openExam() {
   modal.className = 'modal ex-modal';
   back.appendChild(modal);
   document.body.appendChild(back);
-  let timer = 0, cur = null, exam = null, k = 0, sims = {};
+  let timer = 0, cur = null, exam = null, k = 0, sims = {}, screen = null, last = null;
+  let lang = load('exam-lang', getLang() === 'en' ? 'en' : 'vi');
   const close = () => { clearInterval(timer); back.remove(); document.removeEventListener('keydown', onEsc); };
   function onEsc(e) { if (e.key === 'Escape' && !cur) close(); }
   document.addEventListener('keydown', onEsc);
 
+  // ---------------------------------------------------------------- song ngữ
+  /** Chữ giao diện: tiếng Anh khi chọn EN, còn lại tiếng Việt. */
+  const ui = (vi, en) => (lang === 'en' ? en : vi);
+  /** Nội dung câu hỏi (HTML): VI, EN, hoặc VI rồi dòng EN bên dưới. */
+  const tx = (vi, en) => (lang === 'en' ? esc(en ?? vi) : lang === 'both' && en && en !== vi ? `${esc(vi)}<span class="ex-en">${esc(en)}</span>` : esc(vi));
+  /** Chữ thường (trong <option>): VI / EN trên cùng một dòng. */
+  const tp = (vi, en) => (lang === 'en' ? en ?? vi : lang === 'both' && en && en !== vi ? `${vi} / ${en}` : vi);
+  const dom = (id) => { const d = E.DOMAINS.find((x) => x.id === id); return lang === 'en' ? d.name : lang === 'both' ? `${d.vi} (${d.name})` : d.vi; };
+  const langBar = () => `<span class="ex-lang" role="group" aria-label="Ngôn ngữ đề / Language">${LANGS.map(([l, t]) => `<button data-lang="${l}" class="${l === lang ? 'on' : ''}">${t}</button>`).join('')}</span>`;
+  function bindLang() {
+    modal.querySelectorAll('.ex-lang button').forEach((b) => (b.onclick = () => { lang = b.dataset.lang; save('exam-lang', lang); screen(); }));
+  }
+
   // ---------------------------------------------------------------- màn hình bắt đầu
   function home() {
+    screen = home;
     clearInterval(timer);
     cur = load('ccna-exam-cur', null);
     const hist = load('ccna-exam-hist', []);
     const full = E.makeExam(1, 'full'), quick = E.makeExam(1, 'quick');
-    modal.innerHTML = `<div class="modal-h"><span>🎓 Thi thử CCNA 200-301</span><button class="modal-x" aria-label="đóng">✕</button></div>` +
-      `<div class="modal-b ex-home"><p>Đề tự soạn theo 6 mảng kiến thức của CCNA 200-301 (không phải đề thật): trắc nghiệm một / nhiều đáp án, ghép cặp và câu <b>lab mô phỏng</b> gõ lệnh như Lab CLI. Chấm thang <b>300–1000</b>, đạt từ <b>${E.PASS}</b>. Không xem được đáp án cho tới khi nộp bài.</p>` +
-      `<table class="ex-dom"><tr><th>Mảng kiến thức</th><th>Tỉ trọng</th></tr>${E.DOMAINS.map((d) => `<tr><td>${esc(d.name)} — ${esc(d.vi)}</td><td>${d.w}%</td></tr>`).join('')}</table>` +
-      (cur ? `<div class="ex-resume">Bạn đang làm dở một đề (${cur.mode === 'quick' ? 'rút gọn' : 'đầy đủ'}). <button id="ex-cont" class="btn-accent">▶ Làm tiếp</button> <button id="ex-drop">Bỏ bài này</button></div>` : '') +
-      `<div class="ex-start"><button id="ex-full" class="btn-accent">Đề đầy đủ — ${full.qs.length} câu · ${full.minutes} phút</button><button id="ex-quick">Đề rút gọn — ${quick.qs.length} câu · ${quick.minutes} phút</button></div>` +
-      (hist.length ? `<h4>Lịch sử thi</h4><table class="ex-hist"><tr><th>Ngày</th><th>Đề</th><th>Điểm</th><th>Thời gian</th><th>Mảng yếu nhất</th></tr>${hist.slice(0, 10).map((h) => `<tr><td>${new Date(h.at).toLocaleString('vi-VN', { dateStyle: 'short', timeStyle: 'short' })}</td><td>${h.mode === 'quick' ? 'Rút gọn' : 'Đầy đủ'}</td><td class="${h.pass ? 'ok' : 'bad'}">${h.score}${h.pass ? ' ✓' : ''}</td><td>${fmt(h.secs)}</td><td>${esc(h.weak || '—')}</td></tr>`).join('')}</table>` : '') +
+    modal.innerHTML = `<div class="modal-h"><span>🎓 ${ui('Thi thử CCNA 200-301', 'CCNA 200-301 mock exam')}</span>${langBar()}<button class="modal-x" aria-label="đóng">✕</button></div>` +
+      `<div class="modal-b ex-home"><p>${ui(`Đề tự soạn theo 6 mảng kiến thức của CCNA 200-301 (không phải đề thật): trắc nghiệm một / nhiều đáp án, ghép cặp và câu <b>lab mô phỏng</b> gõ lệnh như Lab CLI. Mỗi đề có thêm các câu <b>sinh tự động với số liệu mới</b> (subnet, wildcard, bảng định tuyến, ACL…). Chấm thang <b>300–1000</b>, đạt từ <b>${E.PASS}</b>. Không xem được đáp án cho tới khi nộp bài.`, `Self-written questions covering the 6 CCNA 200-301 domains (not real exam questions): single / multiple answer, drag-and-drop matching and <b>simulation labs</b> typed in a CLI. Every exam also gets <b>auto-generated questions with fresh numbers</b> (subnetting, wildcards, routing tables, ACLs…). Scored <b>300–1000</b>, passing <b>${E.PASS}</b>. Answers are revealed only after you submit.`)}</p>` +
+      `<table class="ex-dom"><tr><th>${ui('Mảng kiến thức', 'Domain')}</th><th>${ui('Tỉ trọng', 'Weight')}</th></tr>${E.DOMAINS.map((d) => `<tr><td>${esc(dom(d.id))}</td><td>${d.w}%</td></tr>`).join('')}</table>` +
+      (cur ? `<div class="ex-resume">${ui(`Bạn đang làm dở một đề (${cur.mode === 'quick' ? 'rút gọn' : 'đầy đủ'}).`, `You have an unfinished ${cur.mode === 'quick' ? 'short' : 'full'} exam.`)} <button id="ex-cont" class="btn-accent">▶ ${ui('Làm tiếp', 'Resume')}</button> <button id="ex-drop">${ui('Bỏ bài này', 'Discard')}</button></div>` : '') +
+      `<div class="ex-start"><button id="ex-full" class="btn-accent">${ui('Đề đầy đủ', 'Full exam')} — ${full.qs.length} ${ui('câu', 'questions')} · ${full.minutes} ${ui('phút', 'min')}</button><button id="ex-quick">${ui('Đề rút gọn', 'Short exam')} — ${quick.qs.length} ${ui('câu', 'questions')} · ${quick.minutes} ${ui('phút', 'min')}</button></div>` +
+      (hist.length ? `<h4>${ui('Lịch sử thi', 'History')}</h4><table class="ex-hist"><tr><th>${ui('Ngày', 'Date')}</th><th>${ui('Đề', 'Exam')}</th><th>${ui('Điểm', 'Score')}</th><th>${ui('Thời gian', 'Time')}</th><th>${ui('Mảng yếu nhất', 'Weakest domain')}</th></tr>${hist.slice(0, 10).map((h) => `<tr><td>${new Date(h.at).toLocaleString(lang === 'en' ? 'en-GB' : 'vi-VN', { dateStyle: 'short', timeStyle: 'short' })}</td><td>${h.mode === 'quick' ? ui('Rút gọn', 'Short') : ui('Đầy đủ', 'Full')}</td><td class="${h.pass ? 'ok' : 'bad'}">${h.score}${h.pass ? ' ✓' : ''}</td><td>${fmt(h.secs)}</td><td>${esc(h.weakId ? dom(h.weakId) : h.weak || '—')}</td></tr>`).join('')}</table>` : '') +
       `</div>`;
     modal.querySelector('.modal-x').onclick = close;
-    const start = (mode) => { if (cur && !confirm('Bỏ bài đang làm dở và bắt đầu đề mới?')) return; begin({ seed: (Math.random() * 0x7fffffff) >>> 0 || 1, mode, t0: Date.now(), answers: {}, flags: {}, simlog: {} }); };
+    bindLang();
+    const start = (mode) => { if (cur && !confirm(ui('Bỏ bài đang làm dở và bắt đầu đề mới?', 'Discard the unfinished exam and start a new one?'))) return; begin({ seed: (Math.random() * 0x7fffffff) >>> 0 || 1, mode, t0: Date.now(), answers: {}, flags: {}, simlog: {} }); };
     modal.querySelector('#ex-full').onclick = () => start('full');
     modal.querySelector('#ex-quick').onclick = () => start('quick');
     if (cur) {
       modal.querySelector('#ex-cont').onclick = () => begin(cur);
-      modal.querySelector('#ex-drop').onclick = () => { if (confirm('Bỏ bài đang làm? Bài này không được tính điểm.')) { save('ccna-exam-cur', null); home(); } };
+      modal.querySelector('#ex-drop').onclick = () => { if (confirm(ui('Bỏ bài đang làm? Bài này không được tính điểm.', 'Discard this exam? It will not be scored.'))) { save('ccna-exam-cur', null); home(); } };
     }
   }
 
@@ -53,23 +72,32 @@ export function openExam() {
     exam = E.makeExam(cur.seed, cur.mode);
     sims = {};
     k = Math.min(cur.k || 0, exam.qs.length - 1);
-    modal.innerHTML = `<div class="modal-h ex-h"><span>🎓 Thi thử CCNA — ${cur.mode === 'quick' ? 'đề rút gọn' : 'đề đầy đủ'}</span><span class="ex-clock" id="ex-clock"></span><button id="ex-submit" class="btn-accent">📝 Nộp bài</button></div>` +
+    room();
+    clearInterval(timer);
+    timer = setInterval(tick, 1000);
+    tick();
+  }
+  function tick() {
+    if (!cur || !exam) return;
+    const left = cur.t0 + exam.minutes * 60000 - Date.now();
+    const el = modal.querySelector('#ex-clock');
+    if (!el) return;
+    el.textContent = '⏱ ' + fmt(Math.max(0, left / 1000));
+    el.classList.toggle('low', left < 5 * 60000);
+    if (left <= 0) { alert(ui('Hết giờ — bài được nộp tự động.', 'Time is up — the exam was submitted automatically.')); submit(); }
+  }
+  /** Khung phòng thi (vẽ lại khi đổi ngôn ngữ, không đụng đồng hồ / bài làm). */
+  function room() {
+    screen = room;
+    modal.innerHTML = `<div class="modal-h ex-h"><span>🎓 ${ui('Thi thử CCNA', 'CCNA mock exam')} — ${cur.mode === 'quick' ? ui('đề rút gọn', 'short') : ui('đề đầy đủ', 'full')}</span>${langBar()}<span class="ex-clock" id="ex-clock"></span><button id="ex-submit" class="btn-accent">📝 ${ui('Nộp bài', 'Submit')}</button></div>` +
       `<div class="ex-body"><nav class="ex-nav" id="ex-nav"></nav><section class="ex-q" id="ex-q"></section></div>` +
-      `<div class="ex-foot"><button id="ex-prev">← Câu trước</button><button id="ex-flag">⚑ Đánh dấu xem lại</button><button id="ex-next">Câu sau →</button></div>`;
-    modal.querySelector('#ex-submit').onclick = () => { const left = exam.qs.filter((q, i) => !answered(i)).length; if (confirm(left ? `Còn ${left} câu chưa trả lời. Nộp bài?` : 'Nộp bài?')) submit(); };
+      `<div class="ex-foot"><button id="ex-prev">← ${ui('Câu trước', 'Previous')}</button><button id="ex-flag">⚑ ${ui('Đánh dấu xem lại', 'Mark for review')}</button><button id="ex-next">${ui('Câu sau', 'Next')} →</button></div>`;
+    bindLang();
+    modal.querySelector('#ex-submit').onclick = () => { const left = exam.qs.filter((q, i) => !answered(i)).length; if (confirm(left ? ui(`Còn ${left} câu chưa trả lời. Nộp bài?`, `${left} questions are unanswered. Submit?`) : ui('Nộp bài?', 'Submit?'))) submit(); };
     modal.querySelector('#ex-prev').onclick = () => go(k - 1);
     modal.querySelector('#ex-next').onclick = () => go(k + 1);
     modal.querySelector('#ex-flag').onclick = () => { cur.flags[k] = !cur.flags[k]; persist(); renderNav(); renderQ(); };
-    const tick = () => {
-      const left = cur.t0 + exam.minutes * 60000 - Date.now();
-      const el = modal.querySelector('#ex-clock');
-      if (!el) return;
-      el.textContent = '⏱ ' + fmt(Math.max(0, left / 1000));
-      el.classList.toggle('low', left < 5 * 60000);
-      if (left <= 0) { alert('Hết giờ — bài được nộp tự động.'); submit(); }
-    };
     tick();
-    timer = setInterval(tick, 1000);
     renderNav();
     renderQ();
   }
@@ -78,25 +106,25 @@ export function openExam() {
   function go(i) { if (i < 0 || i >= exam.qs.length) return; k = i; persist(); renderNav(); renderQ(); }
   function renderNav() {
     const nav = modal.querySelector('#ex-nav');
-    nav.innerHTML = `<div class="ex-nav-h">${exam.qs.filter((q, i) => answered(i)).length}/${exam.qs.length} đã làm</div><div class="ex-grid">` +
-      exam.qs.map((q, i) => `<button data-i="${i}" class="${i === k ? 'cur ' : ''}${answered(i) ? 'done ' : ''}${cur.flags[i] ? 'flag' : ''}" title="${q.kind === 'sim' ? 'Câu lab mô phỏng' : ''}">${i + 1}${q.kind === 'sim' ? '🧪' : ''}</button>`).join('') + '</div>';
+    nav.innerHTML = `<div class="ex-nav-h">${exam.qs.filter((q, i) => answered(i)).length}/${exam.qs.length} ${ui('đã làm', 'answered')}</div><div class="ex-grid">` +
+      exam.qs.map((q, i) => `<button data-i="${i}" class="${i === k ? 'cur ' : ''}${answered(i) ? 'done ' : ''}${cur.flags[i] ? 'flag' : ''}" title="${q.kind === 'sim' ? ui('Câu lab mô phỏng', 'Simulation lab') : q.gen ? ui('Câu sinh tự động', 'Auto-generated') : ''}">${i + 1}${q.kind === 'sim' ? '🧪' : ''}</button>`).join('') + '</div>';
     nav.querySelectorAll('button').forEach((b) => (b.onclick = () => go(+b.dataset.i)));
   }
   function renderQ() {
     const q = exam.qs[k], box = modal.querySelector('#ex-q');
     modal.querySelector('#ex-flag').classList.toggle('on', !!cur.flags[k]);
-    const head = `<div class="ex-qh">Câu ${k + 1}/${exam.qs.length} · ${esc(E.DOMAINS.find((d) => d.id === q.domain).name)}${q.kind === 'multi' ? ` · <b>chọn ${q.answer.length} đáp án</b>` : ''}${q.kind === 'match' ? ' · ghép cặp' : ''}</div>`;
+    const head = `<div class="ex-qh">${ui('Câu', 'Question')} ${k + 1}/${exam.qs.length} · ${esc(dom(q.domain))}${q.kind === 'multi' ? ` · <b>${ui(`chọn ${q.answer.length} đáp án`, `choose ${q.answer.length}`)}</b>` : ''}${q.kind === 'match' ? ` · ${ui('ghép cặp', 'matching')}` : ''}${q.gen ? ` · <span class="ex-gen">${ui('số liệu mới', 'fresh numbers')}</span>` : ''}</div>`;
     const a = cur.answers[k];
     if (q.kind === 'one' || q.kind === 'multi') {
-      box.innerHTML = head + `<div class="ex-text">${esc(q.text)}</div><div class="ex-opts">` +
-        q.options.map((o, j) => `<label class="ex-opt"><input type="${q.kind === 'one' ? 'radio' : 'checkbox'}" name="exo" value="${j}"${(q.kind === 'one' ? a === j : (a || []).includes(j)) ? ' checked' : ''}> <span>${String.fromCharCode(65 + j)}. ${esc(o)}</span></label>`).join('') + '</div>';
+      box.innerHTML = head + `<div class="ex-text">${tx(q.text, q.textEn)}</div><div class="ex-opts">` +
+        q.options.map((o, j) => `<label class="ex-opt"><input type="${q.kind === 'one' ? 'radio' : 'checkbox'}" name="exo" value="${j}"${(q.kind === 'one' ? a === j : (a || []).includes(j)) ? ' checked' : ''}> <span>${String.fromCharCode(65 + j)}. ${tx(o, q.optionsEn?.[j])}</span></label>`).join('') + '</div>';
       box.querySelectorAll('input').forEach((inp) => (inp.onchange = () => {
         cur.answers[k] = q.kind === 'one' ? +inp.value : [...box.querySelectorAll('input:checked')].map((x) => +x.value);
         persist(); renderNav();
       }));
     } else if (q.kind === 'match') {
-      box.innerHTML = head + `<div class="ex-text">${esc(q.text)}</div><table class="ex-match">` +
-        q.left.map((l, j) => `<tr><td>${esc(l)}</td><td>→</td><td><select data-j="${j}"><option value="">— chọn —</option>${q.right.map((r, x) => `<option value="${x}"${a?.[j] === x ? ' selected' : ''}>${esc(r)}</option>`).join('')}</select></td></tr>`).join('') + '</table>';
+      box.innerHTML = head + `<div class="ex-text">${tx(q.text, q.textEn)}</div><table class="ex-match">` +
+        q.left.map((l, j) => `<tr><td>${tx(l, q.leftEn?.[j])}</td><td>→</td><td><select data-j="${j}"><option value="">— ${ui('chọn', 'choose')} —</option>${q.right.map((r, x) => `<option value="${x}"${a?.[j] === x ? ' selected' : ''}>${esc(tp(r, q.rightEn?.[x]))}</option>`).join('')}</select></td></tr>`).join('') + '</table>';
       box.querySelectorAll('select').forEach((s) => (s.onchange = () => {
         const arr = Array.isArray(cur.answers[k]) ? [...cur.answers[k]] : q.left.map(() => null);
         arr[+s.dataset.j] = s.value === '' ? null : +s.value;
@@ -119,10 +147,10 @@ export function openExam() {
     const S = simOf(k);
     const tasks = S.lab.tasks.filter((t) => !t.quiz);
     const ds = Object.values(S.net.devices);
-    box.innerHTML = head + `<div class="ex-text"><b>Câu lab mô phỏng:</b> ${esc(S.lab.title)}</div><div class="ex-story">${esc(S.lab.story)}</div>` +
-      `<div class="ex-tasks"><b>Yêu cầu (chấm khi nộp bài):</b><ol>${tasks.map((t) => `<li>${esc(t.text)}</li>`).join('')}</ol></div>` +
+    box.innerHTML = head + `<div class="ex-text"><b>${ui('Câu lab mô phỏng:', 'Simulation lab:')}</b> ${esc(S.lab.title)}</div>` + (lang !== 'vi' ? `<div class="ex-note">(${ui('Nội dung lab hiện chỉ có tiếng Việt; lệnh Cisco giống hệt đề thật.', 'Lab content is in Vietnamese only; the Cisco commands are the same as on the real exam.')})</div>` : '') + `<div class="ex-story">${esc(S.lab.story)}</div>` +
+      `<div class="ex-tasks"><b>${ui('Yêu cầu (chấm khi nộp bài):', 'Tasks (graded on submit):')}</b><ol>${tasks.map((t) => `<li>${esc(t.text)}</li>`).join('')}</ol></div>` +
       `<div class="ex-devs">${ds.map((d) => `<button data-d="${d.id}" class="${d.id === S.dev ? 'on' : ''}">${esc(d.name)}</button>`).join('')}</div>` +
-      `<pre class="ex-term" id="ex-term"></pre><div class="ex-in"><span id="ex-pr"></span><input id="ex-cmd" autocomplete="off" spellcheck="false" placeholder="gõ lệnh, Enter (Tab hoàn thành lệnh)"></div>`;
+      `<pre class="ex-term" id="ex-term"></pre><div class="ex-in"><span id="ex-pr"></span><input id="ex-cmd" autocomplete="off" spellcheck="false" placeholder="${ui('gõ lệnh, Enter (Tab hoàn thành lệnh)', 'type a command, Enter (Tab to complete)')}"></div>`;
     const term = box.querySelector('#ex-term'), inp = box.querySelector('#ex-cmd');
     const paint = () => {
       const lines = S.out[S.dev] || [];
@@ -160,33 +188,36 @@ export function openExam() {
     const g = E.gradeExam(exam, answers);
     const secs = Math.min(exam.minutes * 60, Math.round((Date.now() - cur.t0) / 1000));
     const weak = g.domains.filter((d) => d.pct != null).sort((a, b) => a.pct - b.pct)[0];
-    save('ccna-exam-hist', [{ at: Date.now(), mode: cur.mode, score: g.score, pass: g.pass, secs, weak: weak && weak.pct < 1 ? weak.name : '' }, ...load('ccna-exam-hist', [])].slice(0, 50));
+    save('ccna-exam-hist', [{ at: Date.now(), mode: cur.mode, score: g.score, pass: g.pass, secs, weakId: weak && weak.pct < 1 ? weak.id : null }, ...load('ccna-exam-hist', [])].slice(0, 50));
     save('ccna-exam-cur', null);
-    const done = cur;
+    last = { g, answers, st: cur, secs };
     cur = null;
-    showResult(g, answers, done, secs);
+    result();
   }
   function ansText(q, a) {
-    if (a == null || (Array.isArray(a) && !a.length)) return '<i>(bỏ trống)</i>';
-    if (q.kind === 'one') return esc(q.options[a]);
-    if (q.kind === 'multi') return a.map((x) => esc(q.options[x])).join(' + ');
-    if (q.kind === 'match') return q.left.map((l, j) => `${esc(l)} → ${a[j] == null ? '?' : esc(q.right[a[j]])}`).join('<br>');
-    return `${Math.round(a * 100)}% nhiệm vụ đạt`;
+    if (a == null || (Array.isArray(a) && !a.length)) return `<i>(${ui('bỏ trống', 'blank')})</i>`;
+    if (q.kind === 'one') return tx(q.options[a], q.optionsEn?.[a]);
+    if (q.kind === 'multi') return a.map((x) => tx(q.options[x], q.optionsEn?.[x])).join(' + ');
+    if (q.kind === 'match') return q.left.map((l, j) => `${esc(tp(l, q.leftEn?.[j]))} → ${a[j] == null ? '?' : esc(tp(q.right[a[j]], q.rightEn?.[a[j]]))}`).join('<br>');
+    return `${Math.round(a * 100)}% ${ui('nhiệm vụ đạt', 'of tasks done')}`;
   }
   function rightText(q) {
-    if (q.kind === 'one') return esc(q.options[q.answer]);
-    if (q.kind === 'multi') return q.answer.map((x) => esc(q.options[x])).join(' + ');
-    if (q.kind === 'match') return q.left.map((l, j) => `${esc(l)} → ${esc(q.right[q.rightAns[j]])}`).join('<br>');
-    return 'Đạt mọi nhiệm vụ của lab (mở lab ' + esc(q.lab) + ' trong 🧪 Lab CLI để xem lời giải)';
+    if (q.kind === 'one') return tx(q.options[q.answer], q.optionsEn?.[q.answer]);
+    if (q.kind === 'multi') return q.answer.map((x) => tx(q.options[x], q.optionsEn?.[x])).join(' + ');
+    if (q.kind === 'match') return q.left.map((l, j) => `${esc(tp(l, q.leftEn?.[j]))} → ${esc(tp(q.right[q.rightAns[j]], q.rightEn?.[q.rightAns[j]]))}`).join('<br>');
+    return ui(`Đạt mọi nhiệm vụ của lab (mở lab ${esc(q.lab)} trong 🧪 Lab CLI để xem lời giải)`, `Complete every task of the lab (open lab ${esc(q.lab)} in 🧪 Lab CLI to see the solution)`);
   }
-  function showResult(g, answers, st, secs) {
-    modal.innerHTML = `<div class="modal-h"><span>🎓 Kết quả thi thử</span><button class="modal-x" aria-label="đóng">✕</button></div>` +
-      `<div class="modal-b ex-res"><div class="ex-score ${g.pass ? 'ok' : 'bad'}"><b>${g.score}</b>/1000 · ${g.pass ? '✓ ĐẠT' : '✗ CHƯA ĐẠT'} (cần ${E.PASS}) · ${fmt(secs)}</div>` +
-      `<div class="ex-bars">${g.domains.filter((d) => d.max).map((d) => `<div class="ex-bar"><span>${esc(d.name)}</span><div class="ex-track"><div style="width:${Math.round(d.pct * 100)}%" class="${d.pct >= 0.8 ? 'ok' : d.pct >= 0.6 ? 'mid' : 'bad'}"></div></div><b>${Math.round(d.pct * 100)}%</b></div>`).join('')}</div>` +
-      `<h4>Xem lại ${g.wrong.length} câu chưa đạt trọn</h4>` +
-      (g.wrong.length ? `<ol class="ex-review">${g.wrong.map((i) => { const q = exam.qs[i]; return `<li value="${i + 1}"><div class="ex-text">${q.kind === 'sim' ? '🧪 Lab: ' + esc(getLab(q.lab).title) : esc(q.text)}</div><div class="ex-ra">Bạn: ${ansText(q, answers[i])}</div><div class="ex-rr">Đúng: ${rightText(q)}</div>${q.explain ? `<div class="ex-re">💬 ${esc(q.explain)}</div>` : ''}</li>`; }).join('')}</ol>` : '<p>Không sai câu nào 🎉</p>') +
-      `</div><div class="pg-foot"><button id="ex-again" class="btn-accent">Làm đề mới</button><button id="ex-home">Về trang đầu</button></div>`;
+  function result() {
+    screen = result;
+    const { g, answers, st, secs } = last;
+    modal.innerHTML = `<div class="modal-h"><span>🎓 ${ui('Kết quả thi thử', 'Exam result')}</span>${langBar()}<button class="modal-x" aria-label="đóng">✕</button></div>` +
+      `<div class="modal-b ex-res"><div class="ex-score ${g.pass ? 'ok' : 'bad'}"><b>${g.score}</b>/1000 · ${g.pass ? ui('✓ ĐẠT', '✓ PASS') : ui('✗ CHƯA ĐẠT', '✗ FAIL')} (${ui('cần', 'need')} ${E.PASS}) · ${fmt(secs)}</div>` +
+      `<div class="ex-bars">${g.domains.filter((d) => d.max).map((d) => `<div class="ex-bar"><span>${esc(dom(d.id))}</span><div class="ex-track"><div style="width:${Math.round(d.pct * 100)}%" class="${d.pct >= 0.8 ? 'ok' : d.pct >= 0.6 ? 'mid' : 'bad'}"></div></div><b>${Math.round(d.pct * 100)}%</b></div>`).join('')}</div>` +
+      `<h4>${ui(`Xem lại ${g.wrong.length} câu chưa đạt trọn`, `Review ${g.wrong.length} questions not fully correct`)}</h4>` +
+      (g.wrong.length ? `<ol class="ex-review">${g.wrong.map((i) => { const q = exam.qs[i]; return `<li value="${i + 1}"><div class="ex-text">${q.kind === 'sim' ? '🧪 Lab: ' + esc(getLab(q.lab).title) : tx(q.text, q.textEn)}</div><div class="ex-ra">${ui('Bạn', 'You')}: ${ansText(q, answers[i])}</div><div class="ex-rr">${ui('Đúng', 'Correct')}: ${rightText(q)}</div>${q.explain ? `<div class="ex-re">💬 ${tx(q.explain, q.explainEn)}</div>` : ''}</li>`; }).join('')}</ol>` : `<p>${ui('Không sai câu nào 🎉', 'No mistakes 🎉')}</p>`) +
+      `</div><div class="pg-foot"><button id="ex-again" class="btn-accent">${ui('Làm đề mới', 'New exam')}</button><button id="ex-home">${ui('Về trang đầu', 'Back to start')}</button></div>`;
     modal.querySelector('.modal-x').onclick = close;
+    bindLang();
     modal.querySelector('#ex-home').onclick = home;
     modal.querySelector('#ex-again').onclick = () => begin({ seed: (Math.random() * 0x7fffffff) >>> 0 || 1, mode: st.mode, t0: Date.now(), answers: {}, flags: {}, simlog: {} });
   }

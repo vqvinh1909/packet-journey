@@ -934,3 +934,14 @@ html, body {
 .ex-review .ex-text { font-size: 13.5px; margin: 0 0 2px; }
 .ex-ra { color: #d64545; font-size: 13px; } .ex-rr { color: var(--ok); font-size: 13px; } .ex-re { font-size: 12.5px; color: var(--muted); }
 @media (max-width: 760px) { .ex-body { grid-template-columns: 1fr; } .ex-nav { max-height: 120px; } .ex-bar { grid-template-columns: 1fr 1fr 40px; } }
+
+/* ---------- 🎓 Thi thử: chọn ngôn ngữ VI / EN / VI + EN ---------- */
+.ex-lang { display: inline-flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; margin-left: auto; margin-right: 8px; }
+.ex-h .ex-lang { margin-left: 12px; }
+.ex-lang button { border: 0; border-radius: 0; padding: 3px 9px; font-size: 12px; background: var(--panel-2, transparent); }
+.ex-lang button + button { border-left: 1px solid var(--border); }
+.ex-lang button.on { background: var(--accent, #2f6fde); color: #fff; }
+.ex-en { display: block; color: var(--muted); font-style: italic; font-weight: 400; font-size: 0.92em; margin-top: 2px; }
+.ex-opt .ex-en { display: block; }
+.ex-gen { color: #e67e22; font-weight: 600; }
+.ex-note { font-size: 12px; color: var(--muted); margin-bottom: 6px; }

@@ -5,6 +5,9 @@
 // Câu hỏi: [mảng, đề, phương án[], đáp án, giải thích]. Đáp án là chỉ số (1 đáp án) hoặc mảng chỉ số (chọn nhiều);
 // câu ghép cặp: phương án = { pairs: [[trái, phải]...] }, đáp án = null. Thứ tự phương án được xáo khi tạo đề.
 
+import { BANK_EN } from './ccna-exam-en.js';
+import { genQuestions } from './ccna-gen.js';
+
 export const DOMAINS = [
   { id: 'nf', name: 'Network Fundamentals', vi: 'Nền tảng mạng', w: 20 },
   { id: 'na', name: 'Network Access', vi: 'Truy cập mạng (switching, Wi-Fi)', w: 20 },
@@ -154,18 +157,27 @@ export function makeExam(seed = 1, mode = 'full') {
   const want = mode === 'quick' ? quota(30) : null;
   let pool = BANK.map((q, i) => ({ q, i }));
   if (want) pool = DOMAINS.flatMap((d) => shuffle(pool.filter((x) => x.q[0] === d.id), r).slice(0, want[d.id]));
+  // mỗi câu mang cả bản tiếng Việt và tiếng Anh (BANK_EN cùng thứ tự), xáo cùng một thứ tự → giao diện chọn VI / EN / VI + EN
   const qs = shuffle(pool, r).map(({ q: [domain, text, opts, ans, explain], i }) => {
+    const [textEn, optsEn, explainEn] = BANK_EN[i];
     if (opts?.pairs) {
-      const left = opts.pairs.map((p) => p[0]);
-      const right = shuffle(opts.pairs.map((p) => p[1]), r);
-      return { i, kind: 'match', domain, text, left, right, rightAns: opts.pairs.map((p) => right.indexOf(p[1])), pts: 1, explain };
+      const order = shuffle(opts.pairs.map((_, k) => k), r);
+      const left = opts.pairs.map((p) => p[0]), leftEn = optsEn.pairs.map((p) => p[0]);
+      const right = order.map((k) => opts.pairs[k][1]), rightEn = order.map((k) => optsEn.pairs[k][1]);
+      return { i, kind: 'match', domain, text, textEn, left, leftEn, right, rightEn, rightAns: opts.pairs.map((_, k) => order.indexOf(k)), pts: 1, explain, explainEn };
     }
     const order = shuffle(opts.map((_, k) => k), r);
-    const options = order.map((k) => opts[k]);
+    const options = order.map((k) => opts[k]), optionsEn = order.map((k) => optsEn[k]);
     const multi = Array.isArray(ans);
     const answer = multi ? ans.map((k) => order.indexOf(k)).sort((a, b) => a - b) : order.indexOf(ans);
-    return { i, kind: multi ? 'multi' : 'one', domain, text, options, answer, pts: 1, explain };
+    return { i, kind: multi ? 'multi' : 'one', domain, text, textEn, options, optionsEn, answer, pts: 1, explain, explainEn };
   });
+  // câu sinh tự động (số liệu mới theo seed) rải ngẫu nhiên trong đề
+  for (const g of genQuestions(r, mode)) {
+    const order = shuffle(g.opts.map((_, k) => k), r);
+    const q = { i: 'gen:' + g.gen, gen: g.gen, kind: 'one', domain: g.domain, text: g.text, textEn: g.textEn, options: order.map((k) => g.opts[k]), optionsEn: order.map((k) => (g.optsEn || g.opts)[k]), answer: order.indexOf(g.ans), pts: 1, explain: g.explain, explainEn: g.explainEn };
+    qs.splice(Math.floor(r() * (qs.length + 1)), 0, q);
+  }
   const sims = (mode === 'quick' ? shuffle(SIMS, r).slice(0, 1) : SIMS).map((s) => ({ i: 'sim:' + s.lab, kind: 'sim', domain: s.domain, lab: s.lab, pts: s.pts }));
   // chèn câu lab rải đều trong đề
   sims.forEach((s, k) => qs.splice(Math.min(qs.length, Math.round(((k + 1) * qs.length) / (sims.length + 1)) + k), 0, s));
