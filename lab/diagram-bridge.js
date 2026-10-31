@@ -7,7 +7,7 @@ const isSerial = (port) => /^s(e|erial)?\d/i.test(String(port || '').trim());
 const shapeType = (dev) => ({ router: 'router', switch: dev.model === '3560' ? 'l3switch' : 'switch', firewall: 'firewall', pc: 'pc', server: dev.cloud ? 'cloud' : 'server' }[dev.type] || 'pc');
 
 export function diagramFromSandbox(net) {
-  const out = D.emptyDiagram(), ids = new Map(), kindType = { router: 'router', sw2960: 'switch', sw3560: 'l3switch', asa: 'firewall', fortios: 'firewall', panos: 'firewall', sophos: 'firewall', checkpoint: 'firewall', pfsense: 'firewall', cloud: 'cloud', pc: 'pc', server: 'server' };
+  const out = D.emptyDiagram(), ids = new Map(), kindType = { router: 'router', sw2960: 'switch', sw3560: 'l3switch', asa: 'firewall', fortios: 'firewall', panos: 'firewall', sophos: 'firewall', checkpoint: 'firewall', pfsense: 'firewall', cloud: 'cloud', pc: 'pc', server: 'server', web: 'webServer', dns: 'dnsServer', db: 'database', syslog: 'logging', nms: 'monitor', wlc: 'wlc', ap: 'ap', lb: 'loadBalancer' };
   for (const dev of Object.values(net.devices)) {
     const t = kindType[dev.kind] || shapeType(dev), linked = new Set(net.links.filter((l) => l.a === dev.id || l.b === dev.id).map((l) => l.a === dev.id ? l.ap : l.bp));
     const ports0 = dev.type === 'switch' ? dev.ports || {} : dev.ifaces || {};
@@ -25,7 +25,7 @@ export function diagramFromSandbox(net) {
   return out;
 }
 
-const workspaceKind = (s) => ({ router: 'router', switch: 'sw2960', l3switch: 'sw3560', firewall: 'asa', pc: 'pc', laptop: 'pc', server: 'server', cloud: 'cloud' }[s.t] || 'server');
+const workspaceKind = (s) => ({ router: 'router', switch: 'sw2960', l3switch: 'sw3560', firewall: 'asa', pc: 'pc', laptop: 'pc', server: 'server', cloud: 'cloud', webServer: 'web', dnsServer: 'dns', database: 'db', logging: 'syslog', monitor: 'nms', wlc: 'wlc', ap: 'ap', loadBalancer: 'lb' }[s.t] || 'server');
 const portAlias = (label) => String(label || '').trim().toLowerCase().replace(/^gigabitethernet/, 'g').replace(/^gi(?=\d)/, 'g').replace(/^fastethernet/, 'fa').replace(/^ethernet/, 'e');
 function workspacePortName(shape, label, net, id, used, serial = false, reserved = new Set()) {
   const dev = net.devices[id], requested = String(label || '').trim().toLowerCase();

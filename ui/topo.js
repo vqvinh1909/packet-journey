@@ -24,9 +24,13 @@ export function drawGlyph(g, d) {
   } else if (d.type === 'switch') {
     g.appendChild(el('rect', { x: x - 28, y: y - 16, width: 56, height: 32, rx: 6, class: 'lab-g switch' + (d.model === '3560' ? ' l3' : '') }));
     g.appendChild(el('path', { d: `M${x - 16} ${y - 5}h28m-6 -5l6 5l-6 5 M${x + 16} ${y + 6}h-28m6 -5l-6 5l6 5`, class: 'lab-gl' }));
+  } else if (d.isAp) {
+    g.appendChild(el('rect', { x: x - 18, y: y + 2, width: 36, height: 13, rx: 3, class: 'lab-g host' }));
+    g.appendChild(el('path', { d: `M${x - 11} ${y - 8}a15 15 0 0 1 22 0 M${x - 6} ${y - 2}a8 8 0 0 1 12 0`, class: 'lab-gl' }));
   } else if (d.type === 'server') {
     g.appendChild(el('rect', { x: x - 15, y: y - 22, width: 30, height: 44, rx: 4, class: 'lab-g host' }));
-    for (const yy of [-12, -2, 8]) g.appendChild(el('line', { x1: x - 9, y1: y + yy, x2: x + 9, y2: y + yy, class: 'lab-gl' }));
+    for (const yy of d.badge ? [-12, 12] : [-12, -2, 8]) g.appendChild(el('line', { x1: x - 9, y1: y + yy, x2: x + 9, y2: y + yy, class: 'lab-gl' }));
+    if (d.badge) { const t = el('text', { x, y: y + 3.5, class: 'lab-gb' }); t.textContent = d.badge; g.appendChild(t); }
   } else {
     g.appendChild(el('rect', { x: x - 20, y: y - 18, width: 40, height: 27, rx: 3, class: 'lab-g host' }));
     g.appendChild(el('path', { d: `M${x - 9} ${y + 17}h18 M${x} ${y + 9}v8`, class: 'lab-gl' }));

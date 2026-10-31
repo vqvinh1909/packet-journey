@@ -238,7 +238,7 @@ export function sandboxToUnl(net, cfgOf = () => null, name = 'Packet Journey lab
   const cfgs = [];
   for (const { d, eth, ser } of nodes) {
     const kind = S.kindOf(d);
-    const T = EXPORT_TPL[kind] || EXPORT_TPL.router;
+    const T = EXPORT_TPL[kind] || (d.type === 'pc' ? EXPORT_TPL.pc : d.type === 'server' ? EXPORT_TPL.server : EXPORT_TPL.router);
     const lines = cfgOf(d.id);
     const nid = nodeId[d.id];
     if (lines && lines.length) cfgs.push(`      <config id="${nid}">${b64enc(lines.join('\n') + '\n')}</config>`);

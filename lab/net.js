@@ -1604,6 +1604,14 @@ function natRows(ctx, d) {
   const rows = ctx.nat.filter((e) => e.rid === d.id).map((e) => ({ insideLocal: e.il + (e.port != null ? ':' + e.port : ''), insideGlobal: e.ig + (e.port != null ? ':' + (e.gport ?? e.port) : ''), outside: e.outside, proto: e.proto }));
   return { nat: { title: `Bảng NAT ${d.name}`, rows } };
 }
+/** ufw: luật đầu tiên khớp quyết định, không khớp luật nào thì chặn (mặc định deny incoming). */
+export function ufwAllows(d, port, src) {
+  for (const r of d.ufw.rules) {
+    const [ip, len] = String(r.from || '').split('/');
+    if ((r.port == null || r.port === port) && (!r.from || inNet(src, ip, len == null ? 32 : +len))) return r.action === 'allow';
+  }
+  return false;
+}
 export function portOpen(d, port) {
   if (d.type === 'pc' || d.type === 'server') return (d.services || []).includes(port);
   const tr = d.lines.vty.transport || 'all';
@@ -1655,7 +1663,7 @@ function sendPacketInner(net, o) {
   // trả lời cho chính router không khớp nhầm entry PAT của máy bên trong (cùng IP global của cổng outside)
   const id0 = o.icmpId || (isHost ? 1 : 0x7a69);
   // TTL gốc: máy kiểu Windows / Packet Tracer 128, VPCS (EVE-NG/GNS3) 64, router/switch Cisco 255
-  const hostTtl = (d) => (d.shell === 'vpcs' ? 64 : 128);
+  const hostTtl = (d) => (d.shell ? 64 : 128);
   const pkt = { src: null, dst: o.dst, proto, ttl: isHost ? hostTtl(srcDev) : 255, ipId: 0x1a2b, icmpId: id0, seq: 1, reply: false, sport: 49152 + (id0 % 16384), dport: o.dport, flags: { syn: true }, tseq: 1000, tack: 0 };
   const wopts = { noCrypto: !!o.noCrypto };
   const done = (r) => {
@@ -1665,6 +1673,11 @@ function sendPacketInner(net, o) {
   const fwd = walk(ctx, R, pkt, { dev: o.src, ifn: null, origin: true }, wopts);
   if (!fwd.ok) return done({ ok: false, kind: fwd.fail.code === 'U' ? 'unreach' : 'timeout', fail: fwd.fail, hops: fwd.hops });
   const dd = net.devices[fwd.at.dev];
+  if (proto !== 'icmp' && dd.ufw?.on && !ufwAllows(dd, pkt.dport, pkt.src)) {
+    const why = `ufw trên ${dd.name} chặn cổng ${pkt.dport} từ ${pkt.src}: gói bị bỏ im lặng nên bên gửi chỉ thấy timeout, không thấy "refused".`;
+    R.proc(fwd.at.dev, { l: 4, side: 'decap', title: `✗ ufw trên ${dd.name} bỏ gói tới cổng ${pkt.dport}`, ex: why });
+    return done({ ok: false, kind: 'timeout', fail: { dev: dd.id, kind: 'hostfw', why, code: '.' }, hops: fwd.hops });
+  }
   let open = true;
   const reply = { ...pkt, dst0: undefined, src: pkt.dst, dst: pkt.src, reply: true, ttl: dd.type === 'router' || dd.type === 'switch' ? 255 : hostTtl(dd), ipId: 0x3c4d };
   if (proto === 'tcp') {

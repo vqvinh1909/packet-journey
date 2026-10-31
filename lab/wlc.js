@@ -20,6 +20,7 @@ const isPsk = (sec) => sec === 'wpa2-psk' || sec === 'wpa3-sae';
 export function wlcDevice(id, name, x, y) {
   const d = N.server(id, name, x, y, { services: [5246] });
   d.os = 'wlc';
+  d.badge = 'WLC';
   d.wlc = { ifs: {}, radius: {}, wlans: {}, aps: {} };
   return d;
 }
@@ -27,6 +28,7 @@ export function wlcDevice(id, name, x, y) {
 export function radiusServer(id, name, x, y, o) {
   const d = N.server(id, name, x, y, { ip: o.ip, gw: o.gw, services: [1812] });
   d.radius = { secret: o.secret, users: o.users };
+  d.badge = 'RAD';
   return d;
 }
 const apsOf = (net, d) => Object.values(net.devices).filter((x) => x.isAp).map((ap) => ({ ap, ...(d.wlc.aps[ap.id] || {}) }));
