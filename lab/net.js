@@ -21,6 +21,7 @@ import { pingData } from '../scenarios/_common.js';
 
 // Đang chạy thao tác "thật" của người học (ghi lại vi phạm port-security, MAC học được...)
 import { fwCheck, fwEstablished, persistFw, fwSnat } from './fw.js';
+import { sniffRecord, flowRecord } from './sniff.js';
 let RECORDING = false;
 
 // ======================================================================
@@ -1395,16 +1396,19 @@ function deliverL2(ctx, R, egress, nh, pkt) {
     }
     ctx.arpc[key] = res;
     // bảng ARP đã có MAC → thiết bị thật không hỏi lại: timeline vẫn minh hoạ ARP, nhưng capture trên dây bỏ qua
+    const serial = /^s\d/.test(egress.ifn); // HDLC/PPP điểm-điểm không dùng ARP
     const arpKnown = !!net.devices[egress.dev].arp[nh];
-    if (!arpKnown) ctx.firstArp = true;
+    if (!arpKnown && !serial) ctx.firstArp = true;
     if (ctx.record) {
-      net.devices[egress.dev].arp[nh] = { mac: res.mac, ifn: egress.ifn };
-      const od = net.devices[res.ep.dev];
-      if (srcIp) od.arp[srcIp] = { mac: srcMac, ifn: res.ep.ifn };
+      if (!serial) {
+        net.devices[egress.dev].arp[nh] = { mac: res.mac, ifn: egress.ifn };
+        const od = net.devices[res.ep.dev];
+        if (srcIp) od.arp[srcIp] = { mac: srcMac, ifn: res.ep.ifn };
+      }
       learnMacs(net, res.hops, srcMac);
       learnMacs(net, [...res.hops].reverse().map((h) => ({ ...h, from: h.to, to: h.from, fromPort: h.toPort, toPort: h.fromPort })), res.mac);
     }
-    if (R.on) {
+    if (R.on && !serial) {
       for (const h of res.hops) {
         const f = R.frame([...l2(h.tag, 0x0806, srcMac, 'ff:ff:ff:ff:ff:ff'), { proto: 'arp', fields: { opcode: 1, senderMac: srcMac, senderIp: srcIp, targetMac: '00:00:00:00:00:00', targetIp: nh } }]);
         if (h === res.hops[0]) R.cap(f, `ARP Who has ${nh}? Tell ${srcIp}`);
@@ -1542,6 +1546,7 @@ function walk(ctx, R, pkt, start, opts = {}) {
       let fwv = null;
       if (inIf && d.fw) {
         fwv = fwCheck(ctx, d, pkt, inIf, outIf);
+        if (R.on) flowRecord(ctx.net, d.id, pkt, inIf, outIf, fwv);
         if (!fwv.allow) return fail(node.dev, 'fw', `${d.name} (firewall) chặn gói ${pkt.src} → ${pkt.dst}${pkt.proto !== 'icmp' ? ' ' + pkt.proto + '/' + pkt.dport : ' (ICMP ' + (pkt.reply ? 'echo-reply' : 'echo') + ')'}: ${fwv.why}.`, '.', IF[inIf].ip);
         R.proc(node.dev, { l: 4, side: 'inspect', title: `${d.name} firewall: ${fwv.established ? 'phiên đã mở → cho qua' : 'cho qua'}`, ex: fwv.why + '.' });
         if (fwv.snat) {
@@ -1653,9 +1658,17 @@ export function sendPacket(net, o) {
   RECORDING = !!o.record;
   try { return sendPacketInner(net, o); } finally { RECORDING = prevRec; }
 }
+/** debug ip packet: router đang bật debug in từng gói IP mà nó gửi / nhận. */
+function debugPackets(net, pkts) {
+  for (const p of pkts) {
+    const ip = p.layers.find((l) => l.proto === 'ipv4')?.fields;
+    if (!ip) continue;
+    for (const [id, act] of [[p.from, 'sending'], [p.to, 'rcvd 3']]) if (net.devices[id]?.debug?.ipPacket) logPush(net, id, `IP: s=${ip.src}, d=${ip.dst}, len ${Math.max(0, p.len - 14)}, ${act}`, true);
+  }
+}
 function sendPacketInner(net, o) {
   const ctx = makeCtx(net, !!o.record);
-  const R = new Rec(net, !!o.anim);
+  const R = new Rec(net, !!o.anim || !!o.record); // lệnh có record mới vào nhật ký gói (tcpdump...), kiểm tra ngầm thì không
   const srcDev = net.devices[o.src];
   const isHost = srcDev.type === 'pc' || srcDev.type === 'server';
   const proto = o.proto || 'icmp';
@@ -1668,7 +1681,9 @@ function sendPacketInner(net, o) {
   const wopts = { noCrypto: !!o.noCrypto };
   const done = (r) => {
     if (o.record) { persistNat(net, ctx); persistFw(net, ctx); }
-    return { ...r, sim: R.on ? R.sim.result() : null, firstArp: ctx.firstArp };
+    const sim = R.on ? R.sim.result() : null;
+    if (sim) debugPackets(net, sniffRecord(net, sim.events));
+    return { ...r, sim: o.anim ? sim : null, firstArp: ctx.firstArp };
   };
   const fwd = walk(ctx, R, pkt, { dev: o.src, ifn: null, origin: true }, wopts);
   if (!fwd.ok) return done({ ok: false, kind: fwd.fail.code === 'U' ? 'unreach' : 'timeout', fail: fwd.fail, hops: fwd.hops });
@@ -2019,13 +2034,15 @@ export function ensureFlash(d) {
     d.flash = [{ name: 'c2900-universalk9-mz.SPA.151-4.M4.bin', size: 74711824, md5: 'a2b11d57e0f3cd2e0e6f6b1e9e5f0b3c' }];
     d.flashSize = 256 * 1024 * 1024;
   } else if (d.type === 'switch') {
-    d.flash = [{ name: 'c2960-lanbasek9-mz.150-2.SE4.bin', size: 11832978, md5: '1c2f8e4b7d0a3e9f5b6c7d8e9f0a1b2c' }, { name: 'vlan.dat', size: 616 }];
+    d.flash = [{ name: `${d.model === '3560' ? 'c3560-ipbasek9' : 'c2960-lanbasek9'}-mz.150-2.SE4.bin`, size: 11832978, md5: '1c2f8e4b7d0a3e9f5b6c7d8e9f0a1b2c' }, { name: 'vlan.dat', size: 616 }];
     d.flashSize = 64016384;
   } else return d;
   d.image ||= d.flash[0].name;
-  d.version ||= verOf(d.image) || (d.type === 'router' ? '15.1(4)M4' : '15.0(2)SE4');
+  d.version ||= verOf(d.image) || defaultVersion(d);
   return d;
 }
+/** Phiên bản IOS khi thiết bị chưa có flash riêng. */
+export const defaultVersion = (d) => (d.type === 'router' ? '15.1(4)M4' : '15.0(2)SE4');
 
 // ======================================================================
 // ⏱ Đồng hồ mô phỏng: hội tụ theo thời gian (tuỳ chọn, gắn bằng attachClock)

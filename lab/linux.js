@@ -2,6 +2,7 @@
 // (ip, ss, curl, nc, dig, systemctl, ufw...). Mọi kết nối đều đi qua N.sendPacket nên ACL, NAT, firewall trên đường vẫn có tác dụng.
 
 import * as N from './net.js';
+import { compileBpf, sniffQuery, tcpdumpLine } from './sniff.js';
 
 const UNITS = { ssh: { ports: [22], proc: 'sshd' }, nginx: { ports: [80, 443], proc: 'nginx' }, mysql: { ports: [3306], proc: 'mysqld' }, postgresql: { ports: [5432], proc: 'postgres' } };
 const PORT_NAMES = { ssh: 22, http: 80, https: 443, dns: 53, domain: 53, mysql: 3306, postgresql: 5432 };
@@ -36,8 +37,14 @@ const HELP = [
   '                             Dịch vụ: ' + Object.keys(UNITS).join(', '),
   'ufw status | enable | disable | reset',
   'ufw allow|deny <cổng> · ufw allow|deny from <IP[/len]> [to any port <cổng>] · ufw delete <số>',
+  'tcpdump [-i eth0|any] [-c n] [icmp|arp|tcp|udp] [host <IP>] [port <n>]',
+  'nmap [-p 22,80] <đích>       journalctl [-u <dịch vụ>] [-n số dòng]',
+  'iptables -L                  ps aux · df -h · free -m',
   'ssh <user>@<IP> · hostname · uname -a · whoami',
 ];
+const NMAP_PORTS = { 22: 'ssh', 23: 'telnet', 25: 'smtp', 49: 'tacacs', 53: 'domain', 80: 'http', 123: 'ntp', 161: 'snmp', 443: 'https', 514: 'syslog', 3000: 'ppp', 3306: 'mysql', 5432: 'postgresql' };
+const SAMPLE = '(Lab: số liệu mẫu, không đo từ mô phỏng)';
+const logTime = () => { const t = new Date(N.clock.now()); return `${t.toDateString().slice(4, 10)} ${t.toTimeString().slice(0, 8)}`; };
 const LB_HELP = [
   'lb add <cổng> <IP>[:cổng]    Thêm backend (cổng nghe tự mở) · lb del <cổng> <IP>[:cổng]',
   'lb algo <cổng> roundrobin|source   Cách chia tải · lb show   Xem backend UP/DOWN',
@@ -212,8 +219,57 @@ export function makeLinux({ net, R, sshConnect }) {
     else if (act === 'disable') s.enabled = false;
     else return R([`Unknown command verb ${act}.`]);
     syncServices(d);
+    const verb = { start: 'Started', restart: 'Restarted', stop: 'Stopped', enable: 'Enabled', disable: 'Disabled' }[act];
+    (d.journal ||= []).push({ u, line: `${logTime()} ${d.name} systemd[1]: ${verb} ${u}.service.` });
+    if (d.journal.length > 100) d.journal.shift();
     return R([]);
   }
+  function journalctl(d, w) {
+    const iu = w.indexOf('-u'), inn = w.indexOf('-n');
+    const u = iu > 0 ? String(w[iu + 1] || '').replace(/\.service$/, '').replace(/^sshd$/, 'ssh') : null;
+    if (u && !d.units[u]) return R(['-- No entries --']);
+    const boot = Object.entries(d.units).filter(([k, s]) => s.enabled && (!u || k === u)).map(([k]) => `${logTime()} ${d.name} systemd[1]: Started ${k}.service.`);
+    const L = [...boot, ...(d.journal || []).filter((e) => !u || e.u === u).map((e) => e.line)];
+    const n = inn > 0 && /^\d+$/.test(w[inn + 1] || '') ? +w[inn + 1] : L.length;
+    return R(L.length ? (n ? L.slice(-n) : []) : ['-- No entries --']);
+  }
+  function tcpdump(d, w) {
+    const pick = (flag) => { const i = w.indexOf(flag); return i > 0 ? w.splice(i, 2)[1] : null; };
+    w = [...w];
+    const ifn = pick('-i') || 'eth0', count = pick('-c');
+    if (ifn !== 'eth0' && ifn !== 'any') return R([`tcpdump: ${ifn}: No such device exists`]);
+    const fn = compileBpf(w.slice(1).filter((x) => !x.startsWith('-')));
+    if (!fn) return R(['tcpdump: can\'t parse filter expression: syntax error']);
+    const pkts = sniffQuery(net, d.id, null, fn, /^\d+$/.test(count || '') ? +count : 30);
+    return R(['tcpdump: verbose output suppressed, use -v[v]... for full protocol decode', `listening on ${ifn}, link-type EN10MB (Ethernet), snapshot length 262144 bytes`, ...pkts.map(tcpdumpLine), '', `${pkts.length} packets captured`, `${pkts.length} packets received by filter`, '0 packets dropped by kernel', '(Lab: in lại các gói gần đây qua máy này; tạo lưu lượng rồi gõ lại)']);
+  }
+  function nmap(d, w) {
+    w = [...w];
+    const ip = w.indexOf('-p'), list = ip > 0 ? w.splice(ip, 2)[1] : null;
+    const host = w.slice(1).find((x) => !x.startsWith('-'));
+    if (!host) return R(['Cú pháp: nmap [-p 22,80] <đích>']);
+    const h = resolveHost(d, host);
+    if (h.err) return R([`Failed to resolve "${host}".`, 'WARNING: No targets were specified, so 0 hosts scanned.'], { why: h.err, ok: false });
+    const ports = list ? list.split(',').map(parsePort) : Object.keys(NMAP_PORTS).map(Number);
+    if (ports.some((p) => !p)) return R(['Error #485: Your port specifications are illegal.']);
+    const res = ports.map((port) => ({ port, ...(isLocal(d, h.ip) ? tcp(d, h.ip, port) : N.sendPacket(net, { src: d.id, dst: h.ip, proto: 'tcp', dport: port })) }));
+    const st = (r) => (r.ok ? 'open' : r.kind === 'refused' ? 'closed' : 'filtered');
+    if (res.every((r) => st(r) === 'filtered')) return R([`Starting Nmap 7.94 ( https://nmap.org )`, 'Note: Host seems down or every port is filtered.', 'Nmap done: 1 IP address (0 hosts up) scanned'], { why: res[0].fail?.why, ok: false });
+    const shown = res.filter((r) => list || st(r) !== 'closed');
+    const hidden = res.length - shown.length;
+    return R(['Starting Nmap 7.94 ( https://nmap.org )', `Nmap scan report for ${host}${host === h.ip ? '' : ` (${h.ip})`}`, 'Host is up.', ...(hidden ? [`Not shown: ${hidden} closed tcp ports (conn-refused)`] : []), 'PORT     STATE    SERVICE', ...shown.map((r) => `${`${r.port}/tcp`.padEnd(9)}${st(r).padEnd(9)}${NMAP_PORTS[r.port] || 'unknown'}`), '', 'Nmap done: 1 IP address (1 host up) scanned']);
+  }
+  function iptables(d, w) {
+    if (!w.some((x) => /^-\w*L/.test(x))) return R(['(Lab: chỉ mô phỏng iptables -L để xem; đổi luật bằng ufw)']);
+    const rows = d.ufw.on ? d.ufw.rules.map((r) => `${r.action === 'allow' ? 'ACCEPT' : 'DROP'.padEnd(6)}  ${r.port ? 'tcp ' : 'all '} --  ${(r.from || 'anywhere').padEnd(19)} anywhere${r.port ? `   tcp dpt:${r.port}` : ''}`) : [];
+    return R([`Chain INPUT (policy ${d.ufw.on ? 'DROP' : 'ACCEPT'})`, 'target  prot opt source              destination', ...rows, '', 'Chain FORWARD (policy ACCEPT)', 'target  prot opt source              destination', '', 'Chain OUTPUT (policy ACCEPT)', 'target  prot opt source              destination']);
+  }
+  function ps(d) {
+    const procs = Object.entries(d.units).filter(([, s]) => s.active).map(([u], i) => `root      ${String(412 + i * 37).padStart(5)}  0.0  0.4  ${UNITS[u].proc}`);
+    return R(['USER        PID %CPU %MEM COMMAND', 'root          1  0.0  0.3  /sbin/init', ...procs, SAMPLE]);
+  }
+  const df = () => R(['Filesystem      Size  Used Avail Use% Mounted on', '/dev/sda1        20G  4.2G   15G  22% /', 'tmpfs           2.0G     0  2.0G   0% /run', SAMPLE]);
+  const free = () => R(['               total        used        free      shared  buff/cache   available', 'Mem:            2048         312        1402           1         334        1610', 'Swap:           1024           0        1024', SAMPLE]);
   function ss(d) {
     const row = (p, proc) => `tcp   LISTEN 0.0.0.0:${p}${' '.repeat(Math.max(1, 14 - String(p).length))}users:(("${proc}"))`;
     return R(['Netid State  Local Address:Port  Process', ...Object.entries(d.units).filter(([, s]) => s.active).flatMap(([u]) => UNITS[u].ports.map((p) => row(p, UNITS[u].proc))), ...Object.keys(d.lb || {}).map((p) => row(p, 'lb'))]);
@@ -261,6 +317,13 @@ export function makeLinux({ net, R, sshConnect }) {
     if (cmd === 'systemctl') return systemctl(d, w);
     if (cmd === 'ss' || cmd === 'netstat') return ss(d);
     if (cmd === 'ufw') return ufw(d, w);
+    if (cmd === 'tcpdump') return tcpdump(d, w);
+    if (cmd === 'journalctl') return journalctl(d, w);
+    if (cmd === 'nmap') return nmap(d, w);
+    if (cmd === 'iptables') return iptables(d, w);
+    if (cmd === 'ps') return ps(d);
+    if (cmd === 'df') return df();
+    if (cmd === 'free') return free();
     if (cmd === 'hostname') return R([d.name]);
     if (cmd === 'whoami') return R(['root']);
     if (cmd === 'uname') return R([`Linux ${d.name} (mô phỏng)`]);
