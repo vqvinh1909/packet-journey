@@ -958,6 +958,9 @@ html, body {
 .dg-dark .dg-stage { background: #171d28; }
 .dg-dark .dg-g1 { stroke: #242d3b; }
 .dg-dark .dg-g2 { stroke: #303b4c; }
+.dg-dark .dg-lab-out { fill: #e5e7eb; }
+.dg-dark .dg-edge [stroke="#34495e"] { stroke: #9fb3c8; }
+.dg-dark .dg-edge [fill="#34495e"] { fill: #9fb3c8; }
 .dg-dark .dg-status { color: #d2d9e4; text-shadow: 0 0 3px #171d28; }
 .dg-fullscreen .dg-body { grid-template-columns: 1fr; }
 .dg-fullscreen .dg-lib, .dg-fullscreen .dg-fmt { display: none; }

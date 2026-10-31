@@ -173,7 +173,7 @@ export function openDiagram(initial = null, onToWorkspace = null) {
     }
     if (st.hover && !st.drag) {
       const s = D.shapeOf(dg, st.hover);
-      if (s) for (const [side, pt] of [['n', D.portPoint(s, 'n')], ['e', D.portPoint(s, 'e')], ['s', D.portPoint(s, 's')], ['w', D.portPoint(s, 'w')]]) mk('circle', { cx: pt.x, cy: pt.y, r: 5, class: 'dg-port', 'data-port': s.id, 'data-side': side });
+      if (s) for (const side of D.portsOf(s)) { const pt = D.portPoint(s, side); mk('circle', { cx: pt.x, cy: pt.y, r: side[1] ? 4 : 5, class: 'dg-port', 'data-port': s.id, 'data-side': side }); }
     }
     if (st.rubber) { const r = st.rubber; mk('rect', { x: Math.min(r.x0, r.x1), y: Math.min(r.y0, r.y1), width: Math.abs(r.x1 - r.x0), height: Math.abs(r.y1 - r.y0), class: 'dg-rubber' }); }
     for (const g of st.guides || []) if (g.axis === 'x') mk('line', { x1: g.value, x2: g.value, y1: -5000, y2: 5000, class: 'dg-guide' }); else mk('line', { x1: -5000, x2: 5000, y1: g.value, y2: g.value, class: 'dg-guide' });
@@ -323,12 +323,7 @@ export function openDiagram(initial = null, onToWorkspace = null) {
       st.wire.to = id && id !== fromId && D.shapeOf(dg, id) ? id : null;
       if (st.wire.to) {
         const target = D.shapeOf(dg, id), explicit = t?.dataset?.side;
-        if (explicit) st.wire.toSide = explicit;
-        else {
-          const box = D.wireBox(target), px = q.x, py = q.y;
-          const distances = { n: Math.abs(py - box.y), e: Math.abs(px - box.x - box.w), s: Math.abs(py - box.y - box.h), w: Math.abs(px - box.x) };
-          st.wire.toSide = Object.keys(distances).reduce((a, b) => distances[a] <= distances[b] ? a : b);
-        }
+        st.wire.toSide = explicit || D.nearestPort(target, q.x, q.y);
       } else st.wire.toSide = null;
       Object.assign(st.wire, { x1: q.x, y1: q.y });
       drawOverlay();
@@ -373,9 +368,7 @@ export function openDiagram(initial = null, onToWorkspace = null) {
       const target = document.elementFromPoint(ev.clientX, ev.clientY), shapeId = target?.dataset?.port || hitId(target);
       const shape = D.shapeOf(dg, shapeId);
       if (shape && shape.id !== edge[endpoint]) {
-        const explicit = target.dataset?.side, box = D.wireBox(shape), q = toWorld(ev);
-        const ds = { n: Math.abs(q.y - box.y), e: Math.abs(q.x - box.x - box.w), s: Math.abs(q.y - box.y - box.h), w: Math.abs(q.x - box.x) };
-        const port = explicit || Object.keys(ds).reduce((a, b) => ds[a] <= ds[b] ? a : b);
+        const q = toWorld(ev), port = target.dataset?.side || D.nearestPort(shape, q.x, q.y);
         mut(() => { const labelKey = endpoint === 'a' ? 'la' : 'lb'; edge[labelKey] = ''; edge[endpoint] = shape.id; edge[endpoint === 'a' ? 'portA' : 'portB'] = port; edge[labelKey] = D.suggestPortName(dg, shape.id); });
       }
       render();
@@ -574,16 +567,23 @@ export function openDiagram(initial = null, onToWorkspace = null) {
     render();
   };
   $('dg-exp').onchange = async (e) => { const v = e.target.value; e.target.value = ''; if (v) await exportAs(v); };
+  // File 1 trang: thay trang đang mở, hoàn tác được. File nhiều trang: thay cả bộ trang nên phải hỏi trước.
+  function openPages(list) {
+    if (list.length === 1) { mut(() => Object.assign(dg, list[0].d)); st.sel = []; render(); fit(); return; }
+    if ((pages.length > 1 || dg.shapes.length) && !confirm(`File có ${list.length} trang. Toàn bộ ${pages.length} trang hiện tại sẽ bị thay và KHÔNG hoàn tác được.\nMuốn giữ thì bấm Huỷ rồi ⬇ Xuất file trước.`)) return;
+    pages = list.map((p) => ({ name: p.name, json: D.exportJson(p.d) })); pageIndex = 0; dg = D.importJson(pages[0].json); hist = D.createHistory(); st.sel = [];
+    save('diagram-page-index', 0); persist(); renderPages(); render(); fit();
+  }
   $('dg-file').onchange = async (e) => {
     const f = e.target.files?.[0]; e.target.value = '';
     if (!f) return;
-    try { const raw=JSON.parse(await f.text()); if(raw?.format==='packet-journey-multipage'&&Array.isArray(raw.pages)&&raw.pages.length){pages=raw.pages.map((p,i)=>({name:String(p.name||`Page-${i+1}`),json:D.exportJson(D.importJson(p.json))}));pageIndex=0;dg=D.importJson(pages[0].json);hist=D.createHistory();st.sel=[];save('diagram-pages',pages);save('diagram-page-index',0);renderPages();render();fit();return;} const n = D.importJson(raw); mut(() => Object.assign(dg, n)); st.sel = []; render(); fit(); }
+    try { const raw=JSON.parse(await f.text()); openPages(raw?.format==='packet-journey-multipage'&&Array.isArray(raw.pages)&&raw.pages.length?raw.pages.map((p,i)=>({name:String(p.name||`Page-${i+1}`),d:D.importJson(p.json)})):[{d:D.importJson(raw)}]); }
     catch (err) { alert('Không mở được file: ' + err.message); }
   };
   $('dg-drawio-file').onchange = async (e) => {
     const f = e.target.files?.[0]; e.target.value = '';
     if (!f) return;
-    try { const n = await D.importDrawioFile(await f.text()); mut(() => Object.assign(dg, n)); st.sel = []; render(); fit(); }
+    try { openPages(await D.importDrawioPages(await f.text())); }
     catch (err) { alert('Không mở được file draw.io: ' + err.message); }
   };
   $('dg-grid').checked = st.grid; $('dg-snap').checked = st.snap;
@@ -599,7 +599,7 @@ export function openDiagram(initial = null, onToWorkspace = null) {
   }
   async function exportAs(kind) {
     if (kind === 'json') { pages[pageIndex].json=D.exportJson(dg); const bundle={format:'packet-journey-multipage',version:1,pages}; return download(new Blob([JSON.stringify(bundle,null,1)], { type: 'application/json' }), 'so-do-mang.json'); }
-    if (kind === 'drawio') return download(new Blob([D.exportDrawio(dg)], { type: 'application/xml;charset=utf-8' }), 'so-do-mang.drawio');
+    if (kind === 'drawio') { pages[pageIndex].json=D.exportJson(dg); return download(new Blob([D.exportDrawioPages(pages.map((p)=>({name:p.name,d:D.importJson(p.json)})))], { type: 'application/xml;charset=utf-8' }), 'so-do-mang.drawio'); }
     const text = D.toSvg(dg);
     if (kind === 'svg') return download(new Blob([text], { type: 'image/svg+xml' }), 'so-do-mang.svg');
     const b = D.bounds(dg), scale = 2;

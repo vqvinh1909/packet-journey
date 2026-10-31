@@ -26,16 +26,23 @@ export function diagramFromSandbox(net) {
 }
 
 const workspaceKind = (s) => ({ router: 'router', switch: 'sw2960', l3switch: 'sw3560', firewall: 'asa', pc: 'pc', laptop: 'pc', server: 'server', cloud: 'cloud' }[s.t] || 'server');
-function workspacePortName(shape, label, net, id, used, serial = false) {
+const portAlias = (label) => String(label || '').trim().toLowerCase().replace(/^gigabitethernet/, 'g').replace(/^gi(?=\d)/, 'g').replace(/^fastethernet/, 'fa').replace(/^ethernet/, 'e');
+function workspacePortName(shape, label, net, id, used, serial = false, reserved = new Set()) {
   const dev = net.devices[id], requested = String(label || '').trim().toLowerCase();
-  if (serial && dev.type === 'router') { const want = requested.replace(/^se(rial)?/, 's'); if (dev.ifaces[want] && !used.has(want) && !N.linkAt(net, id, want)) return want; const port = Object.keys(dev.ifaces).filter((p) => p.startsWith('s')).find((p) => !used.has(p) && !N.linkAt(net, id, p)); if (port) return port; const p = `s0/0/${Object.keys(dev.ifaces).filter((x) => x.startsWith('s')).length}`; dev.ifaces[p] = structuredClone(Object.values(dev.ifaces)[0]); return p; }
-  const alias = requested.replace(/^gigabitethernet/, 'g').replace(/^gi(?=\d)/, 'g').replace(/^fastethernet/, 'fa').replace(/^ethernet/, 'e');
+  if (serial && dev.type === 'router') { const want = requested.replace(/^se(rial)?/, 's'); if (!used.has(want) && !N.linkAt(net, id, want)) { if (!dev.ifaces[want] && /^s\d+(\/\d+)+$/.test(want)) dev.ifaces[want] = structuredClone(Object.values(dev.ifaces)[0]); if (dev.ifaces[want]) return want; } const port = Object.keys(dev.ifaces).filter((p) => p.startsWith('s')).find((p) => !used.has(p) && !N.linkAt(net, id, p)); if (port) return port; const p = `s0/0/${Object.keys(dev.ifaces).filter((x) => x.startsWith('s')).length}`; dev.ifaces[p] = structuredClone(Object.values(dev.ifaces)[0]); return p; }
+  const alias = portAlias(label);
   const ports = S.physPorts(dev);
   if (alias && ports.includes(alias) && !used.has(alias)) return alias;
-  const free = S.freePorts(net, id).find((p) => !used.has(p));
+  // Tên cổng hợp lệ mà thiết bị chưa có thì tạo đúng tên đó, không đổi sang cổng khác.
+  if (/^(g|fa|e)\d+\/\d+$/.test(alias) && !used.has(alias)) {
+    if (dev.type === 'switch') { dev.ports[alias] = N.newPort(); return alias; }
+    if (S.kindOf(dev) === 'router') { dev.ifaces[alias] = structuredClone(Object.values(dev.ifaces)[0]); return alias; }
+  }
+  const freePorts = S.freePorts(net, id).filter((p) => !used.has(p)), free = freePorts.find((p) => !reserved.has(p)) || freePorts[0];
   if (free) return free;
-  if (dev.type === 'switch') { const p = `f0/${ports.length + 1}`; dev.ports[p] = N.newPort(); return p; }
-  if (dev.type === 'router') { const p = `g0/${ports.length}`; dev.ifaces[p] = structuredClone(Object.values(dev.ifaces)[0]); return p; }
+  const unused = (make) => { for (let i = 0; ; i++) if (!ports.includes(make(i)) && !reserved.has(make(i))) return make(i); };
+  if (dev.type === 'switch') { const p = unused((i) => `fa0/${i + 1}`); dev.ports[p] = N.newPort(); return p; }
+  if (dev.type === 'router') { const p = unused((i) => `g0/${i}`); dev.ifaces[p] = structuredClone(Object.values(dev.ifaces)[0]); return p; }
   return 'fa0';
 }
 
@@ -47,9 +54,11 @@ export function sandboxFromDiagram(diagram) {
     const id = S.addDevice(net, kind, s.x + s.w / 2, s.y + s.h / 2, { off: true, ports });
     net.devices[id].name = (s.label || net.devices[id].name).slice(0, 30); ids.set(s.id, id); used.set(s.id, new Set());
   }
+  // Cổng được ghi tên trên dây nào thì để dành cho dây đó; dây không ghi tên chỉ lấy cổng còn lại.
+  const reserved = (shapeId) => new Set(d.edges.flatMap((e) => [e.a === shapeId ? portAlias(e.la) : '', e.b === shapeId ? portAlias(e.lb) : '']).filter(Boolean));
   for (const e of d.edges) {
     const a = ids.get(e.a), b = ids.get(e.b); if (!a || !b) continue;
-    const sa = D.shapeOf(d, e.a), sb = D.shapeOf(d, e.b), serial = (e.cable === 'serial' || isSerial(e.la) || isSerial(e.lb)) && net.devices[a].type === 'router' && net.devices[b].type === 'router', ap = workspacePortName(sa, e.la, net, a, used.get(e.a), serial), bp = workspacePortName(sb, e.lb, net, b, used.get(e.b), serial);
+    const sa = D.shapeOf(d, e.a), sb = D.shapeOf(d, e.b), serial = (e.cable === 'serial' || isSerial(e.la) || isSerial(e.lb)) && net.devices[a].type === 'router' && net.devices[b].type === 'router', ap = workspacePortName(sa, e.la, net, a, used.get(e.a), serial, reserved(e.a)), bp = workspacePortName(sb, e.lb, net, b, used.get(e.b), serial, reserved(e.b));
     used.get(e.a).add(ap); used.get(e.b).add(bp);
     const error = S.connect(net, a, ap, b, bp); if (error) throw new Error(`Không thể tạo dây ${sa.label || sa.t} ↔ ${sb.label || sb.t}: ${error}`);
   }
