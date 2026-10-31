@@ -173,7 +173,7 @@ export function openLab(onRun, o = {}) {
   function termOf(x, id) {
     if (!x.term[id]) {
       const d = x.net.devices[id];
-      x.term[id] = [{ t: isHost(d) ? 'Packet Tracer PC Command Line 1.0  (gõ ? để xem lệnh)' : `${d.name} con0 — gõ ? để trợ giúp, Tab hoàn thành lệnh, ↑/↓ lịch sử, Ctrl+Z = end, Ctrl+V dán nhiều dòng cấu hình`, c: 'sys' }];
+      x.term[id] = [{ t: d.shell === 'linux' ? 'Linux (mô phỏng), gõ ? để xem lệnh' : isHost(d) ? 'Packet Tracer PC Command Line 1.0  (gõ ? để xem lệnh)' : `${d.name} con0 — gõ ? để trợ giúp, Tab hoàn thành lệnh, ↑/↓ lịch sử, Ctrl+Z = end, Ctrl+V dán nhiều dòng cấu hình`, c: 'sys' }];
     }
     return x.term[id];
   }

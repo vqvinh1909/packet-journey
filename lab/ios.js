@@ -21,7 +21,7 @@ import { makeForti } from './fortios.js';
 import { makePan } from './panos.js';
 import { makeGuiFw } from './guifw.js';
 import { makeWlc } from './wlc.js';
-import { makeLinux } from './linux.js';
+import { makeLinux, DNS_TYPES } from './linux.js';
 
 const { longIf, shortIf, normIf, isIp, maskToPrefix, prefixToMask, netOf, ifSort } = N;
 
@@ -339,6 +339,7 @@ export function createCli(net) {
     c('show vlan filter', (x) => R(showVaclFilter(x.d))),
     c('show interfaces trunk', (x) => R(showTrunk(x.d))),
     c('show interfaces status', (x) => R(showIfStatus(x.d, false))),
+    c('show power inline', (x) => R(showPower(x.d))),
     c('show interfaces status err-disabled', (x) => R(showIfStatus(x.d, true))),
     c('show interfaces <if> switchport', (x) => R(showSwitchport(x.d, x.a[0]))),
     c('show interfaces <if>', (x) => R(showIfSwitch(x.d, x.a[0]))),
@@ -726,8 +727,8 @@ export function createCli(net) {
     c('bandwidth <num>', (x) => ifAll(x, (f) => { f.bw = x.a[0]; })),
     c('no bandwidth', (x) => ifAll(x, (f) => { f.bw = null; })),
     c('clock rate <num>', (x) => ifAll(x, (f) => { f.clock = x.a[0]; })),
-    c('duplex {auto|full|half}', () => R([])),
-    c('speed <word>', () => R([])),
+    c('duplex {auto|full|half}', (x) => ifAll(x, (f) => { f.duplex = x.a[0] === 'auto' ? null : x.a[0]; })),
+    c('speed {auto|10|100|1000}', (x) => ifAll(x, (f, n) => setSpeed(f, n, x.a[0]))),
   ];
   const IF_SWITCH = [
     c('switchport mode {access|trunk}', (x) => ports(x, (p) => { p.mode = x.a[0]; p.modeSet = true; })),
@@ -777,8 +778,11 @@ export function createCli(net) {
     c('no shutdown', (x) => ports(x, (p) => { p.shutdown = false; p.errdis = false; }, null, (n) => (N.lineUp(net, x.d.id, n) ? [`%LINK-5-CHANGED: Interface ${longIf(n)}, changed state to up`, `%LINEPROTO-5-UPDOWN: Line protocol on Interface ${longIf(n)}, changed state to up`] : N.errDisabled(net, x.d, n) ? [`%PM-4-ERR_DISABLE: bpduguard error detected on ${shortIf(n)}, putting ${shortIf(n)} in err-disable state`] : []))),
     c('description <rest>', (x) => ports(x, (p) => { p.desc = x.a[0]; })),
     c('no description', (x) => ports(x, (p) => { p.desc = ''; })),
-    c('duplex {auto|full|half}', () => R([])),
-    c('speed <word>', () => R([])),
+    c('duplex {auto|full|half}', (x) => ports(x, (p) => { p.duplex = x.a[0] === 'auto' ? null : x.a[0]; })),
+    c('speed {auto|10|100|1000}', (x) => ports(x, (p, n) => setSpeed(p, n, x.a[0]))),
+    c('switchport voice vlan <num>', (x) => ports(x, (p) => { p.voiceVlan = x.a[0]; }, x.d.vlans[x.a[0]] ? null : voiceVlanNew(x))),
+    c('no switchport voice vlan', (x) => ports(x, (p) => { p.voiceVlan = null; })),
+    c('power inline {auto|never}', (x) => ports(x, (p) => { p.power = x.a[0]; })),
     ...SUBMODE_TAIL,
   ];
   const IF_SVI = IF_L3;
@@ -1467,6 +1471,15 @@ export function createCli(net) {
     if (!list || !list.length || list.some((n) => !(isRouter(x.d) ? x.d.ifaces[n] : x.d.ports[n]))) return R(['% Invalid interface range', '']);
     x.s.mode = 'range'; x.s.ifs = list;
     return R([]);
+  }
+  function setSpeed(c, n, v) {
+    if (v !== 'auto' && +v > (n.startsWith('g') ? 1000 : 100)) return ['% Invalid input detected: cổng này không hỗ trợ tốc độ đó'];
+    c.speed = v === 'auto' ? null : +v;
+    return null;
+  }
+  function voiceVlanNew(x) {
+    x.d.vlans[x.a[0]] = 'VLAN' + String(x.a[0]).padStart(4, '0');
+    return [`% Voice VLAN does not exist. Creating vlan ${x.a[0]}`];
   }
   function ifAll(x, fn) {
     const out = [];
@@ -2348,13 +2361,23 @@ export function createCli(net) {
     const w = line.split(/\s+/).filter(Boolean);
     const cmd = (w[0] || '').toLowerCase();
     if (!cmd) return R([]);
-    if (cmd === '?' || cmd === 'help') return R(d.radius ? [...PC_HELP, 'radius    radius secret <chuỗi> | radius user <tên> <mật khẩu> | radius show'] : d.zone ? [...PC_HELP, 'dns       dns add <tên> <IP> | dns del <tên> | dns show'] : PC_HELP);
+    if (cmd === '?' || cmd === 'help') return R(d.radius ? [...PC_HELP, 'radius    radius secret <chuỗi> | radius user <tên> <mật khẩu> | radius show'] : d.zone ? [...PC_HELP, 'dns       dns add <tên> <IP> | dns add <tên> AAAA|CNAME|MX|NS|PTR <giá trị> | dns del <tên> [kiểu] | dns show'] : PC_HELP);
     if (cmd === 'dns' && d.zone) {
       const a = (w[1] || '').toLowerCase(), name = (w[2] || '').toLowerCase().replace(/\.$/, '');
+      const type = (w[3] || '').toUpperCase(), value = w.slice(4).join(' ').toLowerCase().replace(/\.$/, '');
+      const usage = 'Cú pháp: dns add <tên> <IP> | dns add <tên> AAAA|CNAME|NS|PTR <giá trị> | dns add <tên> MX <ưu tiên> <máy chủ> | dns del <tên> [kiểu] | dns show';
+      const drop = (ty) => { d.rr = (d.rr || []).filter((r) => !(r.name === name && (!ty || r.type === ty))); };
       if (a === 'add' && name && isIp(w[3])) { d.zone[name] = w[3]; return R([]); }
-      if (a === 'del' && name) { delete d.zone[name]; return R([]); }
-      if (a === 'show') return R(Object.entries(d.zone).map(([n, ip]) => `${n}  A  ${ip}`));
-      return R(['Cú pháp: dns add <tên> <IP> | dns del <tên> | dns show']);
+      if (a === 'add' && name && type === 'A' && isIp(w[4])) { d.zone[name] = w[4]; return R([]); }
+      if (a === 'add' && name && value && DNS_TYPES.includes(type) && type !== 'A') {
+        if (type === 'AAAA' ? !A6.isIp6(value) : type === 'MX' ? !/^\d+ \S+$/.test(value) : /\s/.test(value)) return R([usage]);
+        drop(type); // shortcut: mỗi tên + kiểu giữ một bản ghi; cần nhiều MX/NS cùng tên thì bỏ dòng này với hai kiểu đó.
+        d.rr.push({ name, type, value });
+        return R([]);
+      }
+      if (a === 'del' && name) { if (!type || type === 'A') delete d.zone[name]; drop(type || null); return R([]); }
+      if (a === 'show') return R([...Object.entries(d.zone).map(([n, ip]) => `${n}  A  ${ip}`), ...(d.rr || []).map((r) => `${r.name}  ${r.type}  ${r.value}`)]);
+      return R([usage]);
     }
     if (cmd === 'radius' && d.radius) {
       const a = (w[1] || '').toLowerCase();
@@ -2730,7 +2753,9 @@ export function createCli(net) {
     const L = [`${longIf(n)} is ${st}, line protocol is ${pr}`, `  Hardware is ${n.startsWith('s') ? 'WIC MBRD Serial' : 'CN Gigabit Ethernet'}, address is ${N.ciscoMac(N.epMac(net, { dev: d.id, ifn: n }))} (bia ${N.ciscoMac(N.epMac(net, { dev: d.id, ifn: n }))})`];
     if (f.desc) L.push(`  Description: ${f.desc}`);
     if (f.ip) L.push(`  Internet address is ${f.ip}/${f.prefix}`);
-    L.push(`  MTU 1500 bytes, BW ${f.bw ?? (n.startsWith('s') ? 1544 : 1000000)} Kbit/sec, DLY ${n.startsWith('s') ? 20000 : 10} usec,`, '     reliability 255/255, txload 1/255, rxload 1/255');
+    const eth = n.startsWith('g') ? N.ethMode(net, d.id, n) : null;
+    L.push(`  MTU 1500 bytes, BW ${f.bw ?? (eth ? eth.speed * 1000 : n.startsWith('s') ? 1544 : 1000000)} Kbit/sec, DLY ${n.startsWith('s') ? 20000 : 10} usec,`, '     reliability 255/255, txload 1/255, rxload 1/255');
+    if (eth) L.push(...ethLines(eth));
     if (n.startsWith('tu')) {
       L.push('  Encapsulation TUNNEL, loopback not set', `  Tunnel source ${f.tunSrc ? (isIp(f.tunSrc) ? f.tunSrc : `${N.tunnelSrcIp(d, f) || 'unknown'} (${longIf(f.tunSrc)})`) : '(chưa đặt)'}, destination ${f.tunDst || '(chưa đặt)'}`, '  Tunnel protocol/transport GRE/IP', '    Key disabled, sequencing disabled', '  Tunnel TTL 255, Fast tunneling enabled');
       if (pr === 'down') L.push('  (Lab: tunnel down khi thiếu source/destination, cổng source down, hoặc KHÔNG có route tới destination qua underlay)');
@@ -2838,7 +2863,7 @@ export function createCli(net) {
 
   // ---- switch shows ----
   function accessPortsOfVlan(d, v) {
-    return Object.keys(d.ports).filter((n) => !n.startsWith('po')).sort(ifSort).filter((n) => { const e = N.effPort(net, d, n); return e.mode === 'access' && e.vlan === v && !e.bundle; });
+    return Object.keys(d.ports).filter((n) => !n.startsWith('po')).sort(ifSort).filter((n) => { const e = N.effPort(net, d, n); return e.mode === 'access' && (e.vlan === v || d.ports[n].vlan === v || d.ports[n].voiceVlan === v) && !e.bundle; });
   }
   function showVlanBrief(d) {
     const L = ['', 'VLAN Name                             Status    Ports', '---- -------------------------------- --------- -------------------------------'];
@@ -2906,7 +2931,9 @@ export function createCli(net) {
       if (onlyErr && !err) continue;
       const st = p.shutdown ? 'disabled' : err ? 'err-disabled' : n.startsWith('po') ? (swPortStatus(d, n)[0] === 'up' ? 'connected' : 'notconnect') : N.lineUp(net, d.id, n) ? 'connected' : 'notconnect';
       const vl = e.mode === 'trunk' ? 'trunk' : e.mode === 'private-vlan' ? `${e.pv?.primary ?? '?'},${e.pv?.secondary ?? (e.pv?.mapping || []).join('')}` : d.vlans[e.vlan] ? e.vlan : `${e.vlan}*`;
-      L.push(`${pad(shortIf(n), 10)}${pad(p.desc.slice(0, 18), 19)}${pad(st, 13)}${pad(vl, 11)}${pad('auto', 8)}${pad('auto', 6)}${n.startsWith('g') ? '10/100/1000BaseTX' : n.startsWith('po') ? '' : '10/100BaseTX'}`);
+      const m = N.ethMode(net, d.id, n), up = st === 'connected' && !n.startsWith('po');
+      const dx = up ? `${m.autoDuplex ? 'a-' : ''}${m.duplex}` : p.duplex || 'auto', sp = up ? `${m.autoSpeed ? 'a-' : ''}${m.speed}` : p.speed || 'auto';
+      L.push(`${pad(shortIf(n), 10)}${pad(p.desc.slice(0, 18), 19)}${pad(st, 13)}${pad(vl, 11)}${pad(dx, 8)}${pad(sp, 6)}${n.startsWith('g') ? '10/100/1000BaseTX' : n.startsWith('po') ? '' : '10/100BaseTX'}`);
     }
     if (!onlyErr && Object.values(d.ports).some((p) => !d.vlans[p.vlan] && p.mode === 'access')) L.push('', '(Lab: dấu * = VLAN được gán cho cổng nhưng CHƯA tồn tại trong VLAN database → cổng không chuyển frame)');
     return L;
@@ -2917,7 +2944,7 @@ export function createCli(net) {
     const e = N.effPort(net, d, n);
     const oper = !N.lineUp(net, d.id, n) ? 'down' : e.mode === 'trunk' ? 'trunk' : e.mode === 'private-vlan' ? `private-vlan ${e.pv?.mode}` : 'static access';
     const admin = p.mode === 'private-vlan' ? `private-vlan ${p.pv?.mode}` : p.modeSet ? (p.mode === 'trunk' ? 'trunk' : 'static access') : `dynamic ${p.dyn || 'auto'}`;
-    return [`Name: ${shortIf(n)}`, 'Switchport: Enabled', `Administrative Mode: ${admin}`, `Operational Mode: ${oper}`, 'Administrative Trunking Encapsulation: dot1q', `Operational Trunking Encapsulation: ${oper === 'trunk' ? 'dot1q' : 'native'}`, `Negotiation of Trunking: ${p.nonegotiate ? 'Off' : 'On'}`, `Access Mode VLAN: ${p.vlan} (${d.vlans[p.vlan] || 'Inactive'})`, `Trunking Native Mode VLAN: ${p.native} (${d.vlans[p.native] || 'Inactive'})`, `Protected: ${p.protected ? 'true' : 'false'}`, `Trunking VLANs Enabled: ${p.allowed == null ? 'ALL' : fmtVlist(p.allowed)}`, ...(p.pv ? [`Administrative private-vlan host-association: ${p.pv.primary ?? 'none'} (${p.pv.secondary ?? 'none'})`, `Administrative private-vlan mapping: ${p.pv.primary ?? 'none'} (${(p.pv.mapping || []).join(',') || 'none'})`] : []), ...(e.bundle ? [`(Lab: cổng thuộc ${longIf(e.bundle)} — cấu hình trunk/VLAN lấy theo Port-channel)`] : [])];
+    return [`Name: ${shortIf(n)}`, 'Switchport: Enabled', `Administrative Mode: ${admin}`, `Operational Mode: ${oper}`, 'Administrative Trunking Encapsulation: dot1q', `Operational Trunking Encapsulation: ${oper === 'trunk' ? 'dot1q' : 'native'}`, `Negotiation of Trunking: ${p.nonegotiate ? 'Off' : 'On'}`, `Access Mode VLAN: ${p.vlan} (${d.vlans[p.vlan] || 'Inactive'})`, `Trunking Native Mode VLAN: ${p.native} (${d.vlans[p.native] || 'Inactive'})`, `Protected: ${p.protected ? 'true' : 'false'}`, `Voice VLAN: ${p.voiceVlan ? `${p.voiceVlan} (${d.vlans[p.voiceVlan] || 'Inactive'})` : 'none'}`, `Trunking VLANs Enabled: ${p.allowed == null ? 'ALL' : fmtVlist(p.allowed)}`, ...(p.pv ? [`Administrative private-vlan host-association: ${p.pv.primary ?? 'none'} (${p.pv.secondary ?? 'none'})`, `Administrative private-vlan mapping: ${p.pv.primary ?? 'none'} (${(p.pv.mapping || []).join(',') || 'none'})`] : []), ...(e.bundle ? [`(Lab: cổng thuộc ${longIf(e.bundle)} — cấu hình trunk/VLAN lấy theo Port-channel)`] : [])];
   }
   function showDtp(d, n) {
     const p = d.ports[n];
@@ -2925,6 +2952,24 @@ export function createCli(net) {
     const e = N.effPort(net, d, n);
     const tos = p.modeSet ? (p.mode === 'trunk' ? (p.nonegotiate ? 'TRUNK/ON (không gửi DTP)' : 'TRUNK/ON') : 'ACCESS/OFF') : p.dyn === 'desirable' ? 'DESIRABLE' : 'AUTO';
     return ['DTP information for ' + longIf(n) + ':', `  TOS/TAS/TNS:                              ${tos}/${e.mode === 'trunk' ? 'TRUNK' : 'ACCESS'}`, `  TOT/TAT/TNT:                              802.1Q/802.1Q/${e.mode === 'trunk' ? '802.1Q' : 'NATIVE'}`, `  Neighbor address 1:                       ${N.lineUp(net, d.id, n) ? '00D0BA00' : '000000000000'}`, '  Hello timer expiration (sec/state):       12/RUNNING', '  (Lab: AUTO + AUTO = không lên trunk; DESIRABLE + AUTO/DESIRABLE hoặc TRUNK + AUTO = lên trunk)'];
+  }
+  /** Dòng duplex/tốc độ và bộ đếm lỗi của show interfaces. Lệch duplex: đầu full đếm CRC, đầu half đếm late collision. */
+  function ethLines(m) {
+    const bad = m.mismatch && m.duplex === 'full', late = m.mismatch && m.duplex === 'half';
+    return [`  ${m.duplex === 'full' ? 'Full' : 'Half'}-duplex, ${m.speed}Mb/s, media type is ${m.speed >= 1000 ? '10/100/1000BaseTX' : '10/100BaseTX'}`,
+      `     ${bad ? 1842 : 0} input errors, ${bad ? 1842 : 0} CRC, 0 frame, 0 overrun, 0 ignored`, `     ${bad ? 913 : 0} runts, 0 giants, 0 throttles`,
+      `     ${late ? 517 : 0} output errors, ${late ? 2204 : 0} collisions, 1 interface resets`, `     0 babbles, ${late ? 517 : 0} late collision, 0 deferred`,
+      ...(m.mismatch ? ['  (Lab: số liệu mẫu, thể hiện lỗi do lệch duplex; ping vẫn qua nhưng thực tế rất chậm)'] : [])];
+  }
+  /** shortcut: công suất là số mẫu theo loại máy, không đo; cần giới hạn ngân sách PoE thì lưu công suất từng cổng. */
+  function showPower(d) {
+    const rows = Object.keys(d.ports).filter((n) => !n.startsWith('po')).sort(ifSort).map((n) => {
+      const on = d.ports[n].power !== 'never' && N.statusUp(net, d.id, n) && net.devices[N.peerOf(N.linkAt(net, d.id, n), d.id, n).dev].phone;
+      return { n, admin: d.ports[n].power || 'auto', on };
+    });
+    const used = rows.filter((r) => r.on).length * 6.3;
+    return [`Available:370.0(w)  Used:${used.toFixed(1)}(w)  Remaining:${(370 - used).toFixed(1)}(w)`, '', 'Interface Admin  Oper       Power   Device              Class Max', '--------- ------ ---------- ------- ------------------- ----- ----',
+      ...rows.map((r) => `${pad(shortIf(r.n), 10)}${pad(r.admin, 7)}${pad(r.on ? 'on' : 'off', 11)}${pad(r.on ? '6.3' : '0.0', 8)}${pad(r.on ? 'IP Phone' : 'n/a', 20)}${pad(r.on ? '2' : 'n/a', 6)}30.0`)];
   }
   function showIfSwitch(d, n) {
     if (n.startsWith('vlan')) {
@@ -2937,7 +2982,7 @@ export function createCli(net) {
     if (!p) return ['% Invalid input detected.'];
     const [st, pr] = swPortStatus(d, n);
     const err = N.errDisabled(net, d, n);
-    return [`${longIf(n)} is ${err ? 'down' : st}, line protocol is ${pr} (${err ? 'err-disabled' : st === 'up' ? 'connected' : p.shutdown ? 'disabled' : 'notconnect'})`, `  Hardware is Lance, address is ${N.ciscoMac(N.switchMac(net, d.id))}`, ...(p.desc ? [`  Description: ${p.desc}`] : []), '  MTU 1500 bytes, BW 100000 Kbit/sec, DLY 100 usec,', '  Encapsulation ARPA, loopback not set'];
+    return [`${longIf(n)} is ${err ? 'down' : st}, line protocol is ${pr} (${err ? 'err-disabled' : st === 'up' ? 'connected' : p.shutdown ? 'disabled' : 'notconnect'})`, `  Hardware is Lance, address is ${N.ciscoMac(N.switchMac(net, d.id))}`, ...(p.desc ? [`  Description: ${p.desc}`] : []), `  MTU 1500 bytes, BW ${(n.startsWith('po') ? 100 : N.ethMode(net, d.id, n).speed) * 1000} Kbit/sec, DLY 100 usec,`, '  Encapsulation ARPA, loopback not set', ...(n.startsWith('po') ? [] : ethLines(N.ethMode(net, d.id, n)))];
   }
   function showEtherSummary(d) {
     const groups = {};
@@ -3364,7 +3409,7 @@ export function createCli(net) {
     if (f.lldpTx === false) L.push(' no lldp transmit');
     if (f.lldpRx === false) L.push(' no lldp receive');
     if (n.startsWith('s') && f.clock) L.push(` clock rate ${f.clock}`);
-    if (!n.includes('.') && !n.startsWith('lo') && !n.startsWith('s') && !n.startsWith('vlan')) L.push(' duplex auto', ' speed auto');
+    if (!n.includes('.') && !n.startsWith('lo') && !n.startsWith('s') && !n.startsWith('vlan')) L.push(` duplex ${f.duplex || 'auto'}`, ` speed ${f.speed || 'auto'}`);
     if (f.shutdown) L.push(' shutdown');
     L.push('!');
     return L;
@@ -3384,6 +3429,10 @@ export function createCli(net) {
     else if (p.dyn === 'desirable') L.push(' switchport mode dynamic desirable');
     if (p.nonegotiate) L.push(' switchport nonegotiate');
     if (p.protected) L.push(' switchport protected');
+    if (p.voiceVlan) L.push(` switchport voice vlan ${p.voiceVlan}`);
+    if (p.power === 'never') L.push(' power inline never');
+    if (p.duplex) L.push(` duplex ${p.duplex}`);
+    if (p.speed) L.push(` speed ${p.speed}`);
     if (p.ps) {
       if (p.ps.enabled) L.push(' switchport port-security');
       if (p.ps.max !== 1) L.push(` switchport port-security maximum ${p.ps.max}`);

@@ -34,7 +34,7 @@ export const SANDBOX_KINDS = {
   server: { vendor: 'host', label: 'Server', prefix: 'SRV', ports: null, make: (id, name, x, y) => N.server(id, name, x, y) },
   linux: { vendor: 'host', label: 'Linux Server', prefix: 'LNX', ports: null, note: ['Linux (mô phỏng) đang khởi động ...', 'Started OpenSSH server (cổng 22).', 'Gõ ? để xem lệnh: ip, ss, curl, nc, dig, systemctl, ufw...', 'Đặt IP: ip addr add 10.0.0.10/24 dev eth0 rồi ip route add default via 10.0.0.1', 'SSH vào máy này: tài khoản admin, mật khẩu admin'], make: linuxDevice },
   web: svc('service', 'Web (80, 443)', 'WEB', 'WEB', [80, 443]),
-  dns: svc('service', 'DNS (53)', 'DNS', 'DNS', [53], ['Khai báo tên miền: dns add <tên> <IP> · dns show. Máy Linux hỏi bằng dig hoặc curl.'], () => ({ zone: {} })),
+  dns: svc('service', 'DNS (53)', 'DNS', 'DNS', [53], ['Khai báo tên miền: dns add <tên> <IP> · dns add <tên> AAAA|CNAME|MX|NS|PTR <giá trị> · dns show. Máy Linux hỏi bằng dig hoặc curl.'], () => ({ zone: {} })),
   ssh: svc('service', 'SSH (22)', 'SSH', 'SSH', [22], ['Thử đăng nhập: ssh -l admin <IP>, mật khẩu admin'], () => ({ users: { admin: { pw: 'admin' } } })),
   db: svc('service', 'Database (3306, 5432)', 'DB', 'DB', [3306, 5432]),
   lb: { vendor: 'service', label: 'Load Balancer', prefix: 'LB', ports: null, note: ['Load Balancer (mô phỏng) đang khởi động ...', 'Đặt IP: ip addr add 10.0.1.100/24 dev eth0 rồi ip route add default via 10.0.1.1', 'Thêm backend: lb add 80 10.0.2.11 · lb add 80 10.0.2.12 · lb show', 'Thử từ máy khác: curl <IP của LB>, gọi nhiều lần để thấy chia tải.'], make: lbDevice },

@@ -6,6 +6,7 @@ import { createCli, runScript } from '../lab/ios.js';
 import * as S from '../lab/sandbox.js';
 import * as N from '../lab/net.js';
 import * as V6 from '../lab/net6.js';
+import { linuxDevice } from '../lab/linux.js';
 
 const cfg = (...l) => ['enable', 'configure terminal', ...l, 'end'];
 function mk(kinds, links) {
@@ -143,4 +144,105 @@ test('khôi phục mật khẩu: power-cycle → send break → ROMMON confreg 0
   assert.equal(net.devices[r].enableSecret, 'Moi@123', 'lần khởi động sau đọc lại startup-config');
   assert.equal(net.devices[r].confreg, '0x2102');
   assert.ok(!net.devices[r].ifaces['g0/0'].shutdown);
+});
+
+const dnsNet = () => {
+  const net = N.makeNet([
+    N.sw('sw', 'SW', 0, 0, ['fa0/1', 'fa0/2']),
+    Object.assign(linuxDevice('c', 'C', 0, 0), { ip: '10.0.0.5', dns: '10.0.0.1' }),
+    Object.assign(N.server('d', 'D', 0, 0, { ip: '10.0.0.1', services: [53] }), { zone: {} }),
+  ], [['c', 'fa0', 'sw', 'fa0/1'], ['d', 'fa0', 'sw', 'fa0/2']]);
+  return { net, cli: createCli(net) };
+};
+const lines = (cli, id, c) => cli.exec(id, c).out;
+
+test('DNS: đủ 6 kiểu bản ghi, đi theo CNAME, tra ngược, NXDOMAIN và NODATA', () => {
+  const { cli } = dnsNet();
+  for (const c of ['dns add a.x 10.0.0.9', 'dns add w.x CNAME a.x', 'dns add a.x AAAA 2001:db8::9', 'dns add x MX 10 a.x', 'dns add x NS a.x', 'dns add 9.0.0.10.in-addr.arpa PTR a.x']) assert.deepEqual(lines(cli, 'd', c), [], c);
+  assert.deepEqual(lines(cli, 'c', 'dig w.x +short'), ['a.x', '10.0.0.9']);
+  assert.deepEqual(lines(cli, 'c', 'dig a.x AAAA +short'), ['2001:db8::9']);
+  assert.deepEqual(lines(cli, 'c', 'dig MX x +short'), ['10 a.x']);
+  assert.deepEqual(lines(cli, 'c', 'dig x NS +short'), ['a.x']);
+  assert.deepEqual(lines(cli, 'c', 'dig -x 10.0.0.9 +short'), ['a.x']);
+  assert.ok(lines(cli, 'c', 'nslookup 10.0.0.9').some((l) => l.includes('name = a.x')));
+  assert.ok(lines(cli, 'c', 'nslookup -type=mx x').some((l) => l.includes('mail exchanger = 10 a.x')));
+  assert.match(lines(cli, 'c', 'dig none.x').join('\n'), /NXDOMAIN/);
+  const nodata = lines(cli, 'c', 'dig a.x MX').join('\n');
+  assert.match(nodata, /NOERROR/);
+  assert.doesNotMatch(nodata, /ANSWER/);
+  // dữ liệu sai bị từ chối, xoá theo kiểu không đụng kiểu khác
+  assert.match(lines(cli, 'd', 'dns add a.x AAAA 10.0.0.9')[0], /Cú pháp/);
+  lines(cli, 'd', 'dns del a.x AAAA');
+  assert.deepEqual(lines(cli, 'c', 'dig a.x +short'), ['10.0.0.9']);
+  assert.deepEqual(lines(cli, 'c', 'dig a.x AAAA +short'), []);
+});
+
+test('DNS: CNAME vòng tròn không treo; CNAME treo báo NXDOMAIN và curl báo lỗi tên', () => {
+  const { cli } = dnsNet();
+  lines(cli, 'd', 'dns add a.x CNAME b.x');
+  lines(cli, 'd', 'dns add b.x CNAME a.x');
+  assert.ok(lines(cli, 'c', 'dig a.x +short').length <= 8);
+  lines(cli, 'd', 'dns add z.x CNAME gone.x');
+  assert.match(lines(cli, 'c', 'dig z.x').join('\n'), /NXDOMAIN[\s\S]*CNAME/);
+  const c = cli.exec('c', 'curl http://z.x');
+  assert.ok(c.out.length && c.why !== '', 'curl báo lỗi');
+  assert.match([...c.out, c.why].join(' '), /z\.x/);
+});
+
+const swPair = (pa = 'g0/1', pb = 'g0/1') => {
+  const net = N.makeNet([N.sw('a', 'A', 0, 0, [pa]), N.sw('b', 'B', 0, 0, [pb])], [['a', pa, 'b', pb]]);
+  return { net, cli: createCli(net) };
+};
+
+test('Ethernet: auto hai đầu, lệch tốc độ thì down, đặt cứng một đầu thì đầu kia rơi về half', () => {
+  const { net, cli } = swPair();
+  assert.deepEqual([N.ethMode(net, 'a', 'g0/1').speed, N.ethMode(net, 'a', 'g0/1').duplex], [1000, 'full']);
+  assert.match(out(cli, 'a', 'show interfaces status'), /a-full\s+a-1000/);
+
+  runScript(cli, 'a', cfg('interface g0/1', 'speed 100', 'duplex full'));
+  assert.equal(N.ethMode(net, 'b', 'g0/1').duplex, 'half');
+  assert.equal(N.ethMode(net, 'b', 'g0/1').speed, 100);
+  assert.ok(N.ethMode(net, 'a', 'g0/1').mismatch && N.lineUp(net, 'a', 'g0/1'), 'lệch duplex: link vẫn lên');
+  assert.match(out(cli, 'a', 'show interfaces g0/1'), /1842 CRC/);
+  assert.match(out(cli, 'b', 'show interfaces g0/1'), /517 late collision/);
+  assert.match(out(cli, 'a', 'show running-config'), / speed 100/);
+
+  runScript(cli, 'b', cfg('interface g0/1', 'speed 1000'));
+  assert.ok(!N.statusUp(net, 'a', 'g0/1') && !N.statusUp(net, 'b', 'g0/1'), 'lệch tốc độ: link xuống');
+  runScript(cli, 'a', cfg('interface g0/1', 'speed auto', 'duplex auto'));
+  runScript(cli, 'b', cfg('interface g0/1', 'speed auto'));
+  assert.ok(N.statusUp(net, 'a', 'g0/1') && !N.ethMode(net, 'a', 'g0/1').mismatch);
+});
+
+test('Ethernet: cổng Fa từ chối speed 1000, Gi nối Fa chạy theo Fa, 1000 auto không rơi về half', () => {
+  const { net, cli } = swPair('fa0/1', 'g0/1');
+  const r = runScript(cli, 'a', cfg('interface fa0/1', 'speed 1000')).map((o) => o.out.join(' ')).join(' ');
+  assert.match(r, /không hỗ trợ/);
+  assert.equal(N.ethMode(net, 'b', 'g0/1').speed, 100);
+  const p = swPair();
+  runScript(p.cli, 'a', cfg('interface g0/1', 'speed 1000', 'duplex full'));
+  assert.equal(N.ethMode(p.net, 'b', 'g0/1').duplex, 'full');
+});
+
+test('Voice VLAN và PoE: điện thoại vào VLAN thoại, PC cùng cấu hình ở VLAN dữ liệu, tắt PoE thì mất link', () => {
+  const net = N.makeNet([
+    N.sw('s', 'S', 0, 0, ['fa0/1', 'fa0/2', 'fa0/3']),
+    Object.assign(N.server('ph', 'PH', 0, 0, { ip: '10.0.0.1', services: [], cloud: false }), { phone: true }),
+    N.pc('pc', 'PC', 0, 0, { ip: '10.0.0.2' }),
+    N.server('c', 'C', 0, 0, { ip: '10.0.0.3' }),
+  ], [['ph', 'fa0', 's', 'fa0/1'], ['pc', 'fa0', 's', 'fa0/2'], ['c', 'fa0', 's', 'fa0/3']]);
+  const cli = createCli(net), set = 'switchport voice vlan 20';
+  const r = runScript(cli, 's', cfg('vlan 10', 'exit', 'interface range fa0/1 - 2', 'switchport mode access', 'switchport access vlan 10', set, 'interface fa0/3', 'switchport access vlan 20'));
+  assert.match(r.map((o) => o.out.join(' ')).join(' '), /Voice VLAN does not exist/);
+  assert.equal(N.effPort(net, net.devices.s, 'fa0/1').vlan, 20, 'điện thoại');
+  assert.equal(N.effPort(net, net.devices.s, 'fa0/2').vlan, 10, 'PC không gắn thẻ');
+  assert.match(out(cli, 's', 'show interfaces fa0/1 switchport'), /Voice VLAN: 20/);
+  assert.match(out(cli, 's', 'show running-config'), /switchport voice vlan 20/);
+  assert.match(out(cli, 's', 'show power inline'), /Fa0\/1\s+auto\s+on\s+6\.3/);
+  assert.match(out(cli, 's', 'show power inline'), /Fa0\/2\s+auto\s+off/);
+  assert.equal(cli.exec('ph', 'ping 10.0.0.3').out.some((l) => /Reply from 10\.0\.0\.3/.test(l)), true);
+  runScript(cli, 's', cfg('interface fa0/1', 'power inline never'));
+  assert.ok(!N.statusUp(net, 's', 'fa0/1'), 'điện thoại mất nguồn');
+  assert.ok(N.statusUp(net, 's', 'fa0/2'), 'PC không cần PoE');
+  assert.match(out(cli, 's', 'show running-config'), /power inline never/);
 });
