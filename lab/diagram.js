@@ -810,6 +810,39 @@ export function shapeSvg(s) {
   return `<g data-id="${s.id}" class="dg-shape"${s.op != null && s.op < 1 ? ` opacity="${s.op}"` : ''}${s.shadow ? ' filter="url(#dg-shadow)"' : ''}>${body}</g>`;
 }
 /** SVG của 1 dây: đường, vùng bấm rộng, mũi tên, nhãn giữa, nhãn cổng 2 đầu. */
+const tagSpotCache = new WeakMap();
+/**
+ * Vị trí mọi nhãn cổng của sơ đồ: cách đầu dây ~28px theo hướng đi của dây, lùi xa dần hoặc đứng cạnh dây nếu đè thiết bị
+ * hay nhãn khác. Trả Map 'idDây|a' / 'idDây|b' → điểm. Tính một lần cho cả lượt vẽ.
+ */
+function portTagSpots(d) {
+  if (tagSpotCache.has(d)) return tagSpotCache.get(d);
+  const hit = (a, b) => a.l < b.r && b.l < a.r && a.t < b.b && b.t < a.b;
+  const box = (x, y, w, h = 15) => ({ l: x - w / 2, r: x + w / 2, t: y - h / 2, b: y + h / 2 });
+  const placed = d.shapes.filter((s) => !isContainer(s) && s.t !== 'note' && s.t !== 'text').map((s) => ({ l: s.x, r: s.x + s.w, t: s.y, b: s.y + s.h + 16 }));
+  const paths = d.edges.map((e) => [e, edgePath(d, e)]).filter(([, p]) => p);
+  for (const [e, p] of paths) if (e.label) placed.push(box(p.mid.x, p.mid.y, String(e.label).length * 6.4 + 8));
+  const out = new Map();
+  for (const [e, p] of paths) {
+    for (const [end, text, from, far] of [['a', e.la, p.a, e.style === 'straight' ? p.b : p.mid], ['b', e.lb, p.b, e.style === 'straight' ? p.a : p.mid]]) {
+      if (!text) continue;
+      const w = String(text).length * 6.4 + 8, dx = far.x - from.x, dy = far.y - from.y, len = Math.hypot(dx, dy) || 1, ux = dx / len, uy = dy / len;
+      const at = (s, side) => ({ x: from.x + ux * s - uy * side, y: from.y + uy * s + ux * side });
+      const base = Math.min(28, len * 0.3), max = e.style === 'straight' ? len / 2 : len, side = Math.abs(ux) * 18 + Math.abs(uy) * (w / 2 + 5);
+      let spot = null;
+      for (const sd of [0, side, -side]) {
+        for (let s = base; !spot && s <= max; s += 4) { const q = at(s, sd); if (!placed.some((b) => hit(box(q.x, q.y, w), b))) spot = q; }
+        if (spot) break;
+      }
+      spot ||= at(base, 0);
+      placed.push(box(spot.x, spot.y, w));
+      out.set(`${e.id}|${end}`, spot);
+    }
+  }
+  tagSpotCache.set(d, out);
+  queueMicrotask(() => tagSpotCache.delete(d)); // sơ đồ có thể đổi sau lượt vẽ này
+  return out;
+}
 export function edgeSvg(d, e, options = {}) {
   const p = edgePath(d, e);
   if (!p) return '';
@@ -840,9 +873,7 @@ export function edgeSvg(d, e, options = {}) {
     return `<g transform="translate(${r1(pt.x)} ${r1(pt.y)}) rotate(${r1(deg)})" class="dg-arrow dg-arrow-${type}">${mark}</g>`;
   };
   const tag = (txt, x, y, bold) => { if (!txt) return ''; const w = String(txt).length * 6.4 + 8; return `<rect x="${r1(x - w / 2)}" y="${r1(y - 8)}" width="${r1(w)}" height="15" rx="3" fill="#ffffff" fill-opacity="0.92" stroke="${col}" stroke-width="0.6"/><text x="${r1(x)}" y="${r1(y + 3.5)}" text-anchor="middle" font-size="10.5" font-weight="${bold ? 700 : 400}" fill="#1f2933">${esc(txt)}</text>`; };
-  // nhãn cổng đặt cách đầu dây ~28px (dây ngắn thì 30% chiều dài) theo hướng đi của dây
-  const toward = (from, to) => { const dx = to.x - from.x, dy = to.y - from.y, len = Math.hypot(dx, dy) || 1, k = Math.min(28, len * 0.3) / len; return { x: from.x + dx * k, y: from.y + dy * k }; };
-  const nearA = toward(p.a, e.style === 'straight' ? p.b : p.mid), nearB = toward(p.b, e.style === 'straight' ? p.a : p.mid);
+  const spots = portTagSpots(d), nearA = spots.get(e.id + '|a') || p.a, nearB = spots.get(e.id + '|b') || p.b;
   const dash = cableDash[e.cable] || DASH[e.dash];
   const waves = e.cable === 'wifi' ? `<path d="M${r1(p.mid.x - 10)} ${r1(p.mid.y - 7)}Q${r1(p.mid.x)} ${r1(p.mid.y - 16)} ${r1(p.mid.x + 10)} ${r1(p.mid.y - 7)}M${r1(p.mid.x - 6)} ${r1(p.mid.y - 3)}Q${r1(p.mid.x)} ${r1(p.mid.y - 8)} ${r1(p.mid.x + 6)} ${r1(p.mid.y - 3)}" fill="none" stroke="${col}" stroke-width="1.5"/>` : '';
   return `<g data-id="${e.id}" class="dg-edge"><path d="${p.d}" fill="none" stroke="transparent" stroke-width="14" class="dg-hit"/>` +
@@ -1005,7 +1036,17 @@ export function importJson(text) {
   return diagram;
 }
 // ---------------------------------------------------------------- mẫu
-const T = (build) => () => { const d = emptyDiagram(); build(d); return d; };
+/** Đặt tên cổng cho dây vật lý giữa thiết bị mạng; dây luồng ứng dụng và Wi-Fi không có cổng, đầu mây Internet cũng vậy. */
+function namePorts(d) {
+  const net = (s) => SHAPES[s?.t]?.group === 'net';
+  for (const e of d.edges) {
+    const a = shapeOf(d, e.a), b = shapeOf(d, e.b);
+    if (!net(a) || !net(b) || e.cable === 'wifi') continue;
+    if (!e.la && a.t !== 'cloud') e.la = suggestPortName(d, a.id);
+    if (!e.lb && b.t !== 'cloud') e.lb = suggestPortName(d, b.id);
+  }
+}
+const T = (build) => () => { const d = emptyDiagram(); build(d); namePorts(d); return d; };
 const link = (d, a, b, o) => addEdge(d, a.id, b.id, o);
 export const TEMPLATES = [
   { id: 'lan', group: 'Doanh nghiệp & văn phòng', vi: 'LAN văn phòng', en: 'Office LAN', build: T((d) => {
@@ -1031,11 +1072,11 @@ export const TEMPLATES = [
     a.forEach((x, i) => link(d, x, addShape(d, i % 2 ? 'laptop' : 'pc', x.x + 4, 410, { label: `VLAN ${10 * (i + 1)}` })));
   }) },
   { id: 'wan', group: 'Doanh nghiệp & văn phòng', vi: 'HQ – chi nhánh qua WAN', en: 'HQ – branch over WAN', build: T((d) => {
-    addShape(d, 'zone', 30, 60, { w: 300, h: 320, label: 'HQ — 10.1.0.0/16' });
-    addShape(d, 'zone', 620, 60, { w: 260, h: 320, label: 'CHI NHÁNH — 10.2.0.0/16', stroke: '#2e9e57', fill: '#2e9e57' });
+    addShape(d, 'zone', 30, 60, { w: 300, h: 360, label: 'HQ — 10.1.0.0/16' });
+    addShape(d, 'zone', 620, 60, { w: 260, h: 360, label: 'CHI NHÁNH — 10.2.0.0/16', stroke: '#2e9e57', fill: '#2e9e57' });
     const fw = addShape(d, 'firewall', 220, 110), r1x = addShape(d, 'router', 640, 110, { label: 'R-CN' });
-    const core = addShape(d, 'l3switch', 70, 200), srv = addShape(d, 'server', 90, 300, { label: 'SRV-AD' });
-    const sw = addShape(d, 'switch', 650, 220), pc = addShape(d, 'pc', 660, 300);
+    const core = addShape(d, 'l3switch', 70, 200), srv = addShape(d, 'server', 90, 335, { label: 'SRV-AD' });
+    const sw = addShape(d, 'switch', 650, 220), pc = addShape(d, 'pc', 660, 340);
     const net = addShape(d, 'cloud', 400, 90, { label: 'INTERNET / MPLS' });
     link(d, fw, net, { label: 'IPsec VPN', dash: 'dash', color: '#d64545', style: 'curve' });
     link(d, net, r1x, { dash: 'dash', color: '#d64545', style: 'curve' });
@@ -1159,10 +1200,10 @@ TEMPLATES.push(
     ['hq', 'building', 400, 10, 'HQ'], ['r', 'router', 400, 120, 'R-HQ'], ['m', 'mplsCloud', 80, 250, 'MPLS|Đường chính'], ['n', 'cloud', 700, 250, 'INTERNET|VPN dự phòng'], ['b1', 'router', 400, 230, 'R-CN1'], ['b2', 'router', 400, 340, 'R-CN2'], ['b3', 'router', 400, 450, 'R-CN3'],
   ], [['hq', 'r'], ['r', 'm', FO], ['r', 'n', VPN], ['m', 'b1', FO], ['m', 'b2', FO], ['m', 'b3', FO], ['n', 'b1', VPN], ['n', 'b2', VPN], ['n', 'b3', VPN]]),
   G(GE, 'ent-school', 'Trường học', 'School', [
-    ['fw', 'firewall', 400, 40, 'FW|Lọc nội dung'], ['c', 'l3switch', 400, 150, 'SW-CORE'], ['s1', 'switch', 110, 280, 'SW-LAB|VLAN 10'], ['s2', 'switch', 310, 280, 'SW-GV|VLAN 20'], ['s3', 'switch', 510, 280, 'SW-WIFI|VLAN 30, 40'], ['sv', 'server', 740, 270, 'SRV|LMS, AD, DHCP'], ['p1', 'pc', 110, 410, 'Phòng máy'], ['p2', 'laptop', 310, 415, 'Giáo viên'], ['a', 'ap', 510, 410, 'AP'], ['m', 'tablet', 700, 410, 'Học sinh'],
+    ['fw', 'firewall', 400, 10, 'FW|Lọc nội dung'], ['c', 'l3switch', 400, 150, 'SW-CORE'], ['s1', 'switch', 110, 280, 'SW-LAB|VLAN 10'], ['s2', 'switch', 310, 280, 'SW-GV|VLAN 20'], ['s3', 'switch', 510, 280, 'SW-WIFI|VLAN 30, 40'], ['sv', 'server', 740, 270, 'SRV|LMS, AD, DHCP'], ['p1', 'pc', 110, 410, 'Phòng máy'], ['p2', 'laptop', 310, 415, 'Giáo viên'], ['a', 'ap', 510, 410, 'AP'], ['m', 'tablet', 700, 410, 'Học sinh'],
   ], [['fw', 'c'], ['c', 's1'], ['c', 's2'], ['c', 's3'], ['c', 'sv'], ['s1', 'p1'], ['s2', 'p2'], ['s3', 'a'], ['a', 'm', WIFI]]),
   G(GE, 'ent-hospital', 'Bệnh viện · tách mạng y tế', 'Hospital · segmented network', [
-    ['fw', 'firewall', 400, 40, 'FW|Chặn giữa các vùng'], ['c', 'l3switch', 400, 150, 'SW-CORE|Dự phòng kép'], ['s1', 'switch', 80, 290, 'SW-KHOA|VLAN nhân viên'], ['s2', 'switch', 300, 290, 'SW-YTE|VLAN thiết bị y tế'], ['s3', 'switch', 520, 290, 'SW-DC|VLAN máy chủ'], ['a', 'ap', 740, 290, 'AP|Bác sĩ + bệnh nhân'], ['p', 'pc', 80, 420, 'Máy trạm'], ['i', 'iot', 300, 420, 'Máy xét nghiệm'], ['h', 'database', 450, 420, 'HIS'], ['x', 'nas', 600, 420, 'PACS'], ['t', 'tablet', 740, 420, 'Máy bảng'],
+    ['fw', 'firewall', 400, 10, 'FW|Chặn giữa các vùng'], ['c', 'l3switch', 400, 150, 'SW-CORE|Dự phòng kép'], ['s1', 'switch', 80, 290, 'SW-KHOA|VLAN nhân viên'], ['s2', 'switch', 300, 290, 'SW-YTE|VLAN thiết bị y tế'], ['s3', 'switch', 520, 290, 'SW-DC|VLAN máy chủ'], ['a', 'ap', 740, 290, 'AP|Bác sĩ + bệnh nhân'], ['p', 'pc', 80, 420, 'Máy trạm'], ['i', 'iot', 300, 420, 'Máy xét nghiệm'], ['h', 'database', 450, 420, 'HIS'], ['x', 'nas', 600, 420, 'PACS'], ['t', 'tablet', 740, 420, 'Máy bảng'],
   ], [['fw', 'c'], ['c', 's1'], ['c', 's2'], ['c', 's3'], ['c', 'a'], ['s1', 'p'], ['s2', 'i'], ['s3', 'h'], ['s3', 'x'], ['a', 't', WIFI]]),
   G(GE, 'ent-hotel', 'Khách sạn · khách, IPTV, tổng đài', 'Hotel · guests, IPTV, PBX', [
     ['net', 'cloud', 40, 60, 'INTERNET'], ['fw', 'firewall', 240, 70, 'FW|Portal đăng nhập'], ['c', 'l3switch', 430, 70, 'SW-CORE'], ['pbx', 'ipPbx', 680, 70, 'PBX'], ['sf', 'switch', 110, 240, 'SW-TANG|Khách · VLAN 100'], ['sb', 'switch', 430, 240, 'SW-LETAN|POS · VLAN 20'], ['st', 'switch', 680, 240, 'SW-PHONG|Thoại, IPTV'], ['a', 'ap', 60, 400, 'AP-Tầng'], ['m', 'mobile', 210, 400, 'Khách'], ['pos', 'pc', 430, 400, 'POS'], ['ph', 'phone', 610, 400, 'Điện thoại'], ['tv', 'television', 760, 400, 'IPTV'],

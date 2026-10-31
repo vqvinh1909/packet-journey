@@ -306,7 +306,8 @@ html, body {
 .lab-link.serial.up { stroke: #e67e22; }
 .lab-link.admin { stroke: #c0392b; stroke-dasharray: 6 5; }
 .lab-port-bg { fill: var(--panel); stroke: var(--border); }
-.lab-port { font-family: var(--mono); font-size: 10px; fill: var(--muted); }
+.lab-port { font-family: var(--mono); font-size: 10px; fill: var(--muted); pointer-events: none; }
+.lab-port-bg:not(.blk) { pointer-events: none; }
 .lab-port-bg.blk { fill: var(--changed-soft); stroke: var(--warn); }
 .lab-port.blk { fill: var(--warn); font-weight: 700; }
 .lab-node { cursor: pointer; outline: none; }
