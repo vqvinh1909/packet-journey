@@ -10,6 +10,8 @@ import { openProgress } from './progress.js';
 import { openBuilder } from './builder.js';
 import { buildCustom } from '../scenarios/builder.js';
 import { openDiagram } from './diagram.js';
+import { openWorkspace } from './workspace.js';
+import { sandboxFromDiagram } from '../lab/diagram-bridge.js';
 import { openLab } from './lab.js';
 import { openSubnet } from './subnet.js';
 import { openWeak } from './weak.js';
@@ -82,7 +84,7 @@ function buildChrome() {
   $('btn-glossary').onclick = openGlossary;
   $('btn-progress').onclick = openProgress;
   $('btn-builder').onclick = () => openBuilder(loadCustom);
-  $('btn-canvas').onclick = () => openDiagram();
+  $('btn-canvas').onclick = () => openDiagram(null, (json) => openWorkspace({ onRun: loadSimResult, initialNet: sandboxFromDiagram(json) }));
   $('btn-lab').onclick = () => openLab(loadSimResult);
   $('btn-subnet').onclick = openSubnet;
   $('btn-cheat').onclick = openCheat;

@@ -10,6 +10,7 @@
 
 import { createCli } from '../lab/ios.js';
 import * as N from '../lab/net.js';
+import { diagramFromSandbox, sandboxFromDiagram } from '../lab/diagram-bridge.js';
 import { checkLab } from '../lab/labs.js';
 import * as S from '../lab/sandbox.js';
 import { GUI_VENDORS } from '../lab/guifw.js';
@@ -24,6 +25,7 @@ import * as C from '../lab/capture.js';
 import { flattenFields } from '../packet/serialize.js';
 import { renderFieldTree, highlightFieldRow, clearFieldHighlight } from './fieldtree.js';
 import { renderHex, highlightRange, clearHexHighlight } from './hexview.js';
+import { openDiagram } from './diagram.js';
 
 const MAX_LINES = 800;
 const BOOT_MS = 160; // mỗi dòng log khởi động
@@ -38,8 +40,14 @@ function freshState() {
   return { net, cli: createCli(net), undo: S.createHistory(), term: {}, hist: {}, gui: {}, wins: [], z: 20, view: load('sandbox-view', null), sel: null, tool: null, pick: [], boot: {}, side: false, hintN: 0, cap: C.createCapture(), capUi: {}, pal: typeof window === 'undefined' || window.innerWidth > 760, noPorts: load('sandbox-noports', false), selNote: null };
 }
 
-export function openWorkspace({ onRun }) {
+export function openWorkspace({ onRun, initialNet = null }) {
+  if (initialNet) {
+    W ||= freshState();
+    const n = Object.keys(W.net.devices).length;
+    if (n && !confirm(`Workspace đang có ${n} thiết bị. Mạng này và cấu hình của nó sẽ bị thay bằng mạng trống từ sơ đồ.\nMuốn giữ thì bấm Huỷ rồi lưu vào 📚 Thư viện hoặc xuất file trước.`)) return false;
+  }
   document.querySelector('.ws')?.remove();
+  if (initialNet) { const restored = S.importSandbox(initialNet); W = { ...freshState(), net: restored, cli: createCli(restored) }; save('sandbox-net', S.exportSandbox(W.net)); }
   W ||= freshState();
   const root = document.createElement('div');
   root.className = 'ws';
@@ -59,6 +67,7 @@ export function openWorkspace({ onRun }) {
     `<optgroup label="Cấu hình dạng văn bản"><option value="exp">⬇ Xuất tất cả cấu hình (.txt)</option><option value="imp">⬆ Nạp cấu hình (dán / file)…</option><option value="save">💾 Đặt làm startup-config (mọi thiết bị)</option></optgroup>` +
     `<optgroup label="EVE-NG"><option value="unl-exp">⬇ Xuất file .unl (EVE-NG)</option><option value="unl-imp">⬆ Nhập file .unl (EVE-NG)…</option></optgroup></select>` +
     `<button id="ws-lib" title="Thư viện lab: lưu nhiều mạng có tên, xếp theo thư mục, mở nhanh lab gần đây">📚 Thư viện</button>` +
+    `<button id="ws-diagram" title="Mở topology hiện tại trong trình vẽ để chỉnh đẹp và xuất tài liệu">✏️ Mở trong trình vẽ</button>` +
     `<button id="ws-clr" title="Bắt đầu lại từ mạng trống">🧹 Xoá hết</button>` +
     `<span class="ws-grow"></span><button id="ws-side-t" title="Nhiệm vụ gợi ý lộ trình"></button><button id="ws-close" title="Đóng workspace (mạng vẫn được lưu)">✕ Đóng</button>` +
     `<input type="file" id="ws-file" accept=".json,application/json" hidden><input type="file" id="ws-unl" accept=".unl,.xml" hidden></div>` +
@@ -973,6 +982,7 @@ export function openWorkspace({ onRun }) {
   }
   $('ws-pal-t').onclick = () => { W.pal = !W.pal; renderPalette(); };
   $('ws-add').onclick = () => openAddDialog(null, viewCenter());
+  $('ws-diagram').onclick = () => openDiagram(diagramFromSandbox(W.net), (json) => openWorkspace({ onRun, initialNet: sandboxFromDiagram(json) }));
   $('ws-wire').onclick = () => { W.tool = W.tool === 'wire' ? null : 'wire'; W.pick = []; draw(); };
   $('ws-start').onclick = () => powerAll(true);
   $('ws-stop').onclick = () => powerAll(false);
