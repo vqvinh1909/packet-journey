@@ -16,7 +16,7 @@ import * as S from '../lab/sandbox.js';
 import { GUI_VENDORS } from '../lab/guifw.js';
 import { renderGuiFw } from './guifw.js';
 import { load, save } from './store.js';
-import { el, esc, isHost, drawGlyph, adminUp, classifyLine, stpBlocked, linkEnd } from './topo.js';
+import { el, esc, isHost, drawGlyph, adminUp, classifyLine, stpBlocked, linkEnd, layoutPortLabels, portText } from './topo.js';
 import { clockStep, afterCommand, pullLogs as pullClockLogs, renderClockBar, TICK_MS } from './clock.js';
 import * as IO from '../lab/configio.js';
 import * as LIB from '../lab/labstore.js';
@@ -185,7 +185,8 @@ export function openWorkspace({ onRun, initialNet = null }) {
     for (const l of n.links) { const k = [l.a, l.b].sort().join('|'); pairN[k] = (pairN[k] || 0) + 1; }
     const blk = ds.length ? stpBlocked(n) : new Map();
     const gS = el('g', {}), gL = el('g', {}), gA = el('g', {}), gT = el('g', {}), gN = el('g', {});
-    world.append(gS, gL, gA, gT, gN);
+    world.append(gS, gL, gA, gN, gT);
+    const spots = W.noPorts ? {} : layoutPortLabels(n, (D, port) => portText(blk, D, port), () => true);
     drawNotes(gS, gA);
     for (const l of n.links) {
       const A = n.devices[l.a], B = n.devices[l.b];
@@ -195,7 +196,7 @@ export function openWorkspace({ onRun, initialNet = null }) {
       const dx = B.x - A.x, dy = B.y - A.y, len = Math.hypot(dx, dy) || 1;
       const ox = (-dy / len) * off, oy = (dx / len) * off;
       // đám mây "Internet": đầu dây cắm vào mép đám mây thay vì tâm
-      const PA = linkEnd(A, B.x, B.y), PB = linkEnd(B, A.x, A.y), ex = PB.x - PA.x, ey = PB.y - PA.y;
+      const PA = linkEnd(A, B.x, B.y), PB = linkEnd(B, A.x, A.y);
       const up = N.lineUp(n, l.a, l.ap) && N.lineUp(n, l.b, l.bp);
       // dây: lên = xanh; thiết bị tắt = xám; cổng shutdown = đỏ đứt nét; đã cắm nhưng chưa lên (sai encap, err-disabled…) = đỏ
       const cls = (up ? 'up' : S.isOff(A) || S.isOff(B) ? 'off' : !adminUp(n, l.a, l.ap) || !adminUp(n, l.b, l.bp) ? 'admin' : 'down') + (/^s/.test(l.ap) ? ' serial' : '');
@@ -217,12 +218,11 @@ export function openWorkspace({ onRun, initialNet = null }) {
       tt.textContent = `${A.name} ${N.shortIf(l.ap)} ↔ ${B.name} ${N.shortIf(l.bp)} — chuột phải để xoá dây`;
       hit.appendChild(tt);
       gL.appendChild(hit);
-      for (const [D, port, t] of W.noPorts ? [] : [[A, l.ap, 0.24], [B, l.bp, 0.76]]) {
-        const px = PA.x + ex * t + ox, py = PA.y + ey * t + oy;
+      for (const [D, port, spot] of W.noPorts ? [] : [[A, l.ap, spots[l.id][0]], [B, l.bp, spots[l.id][1]]]) {
+        const { x: px, y: py, w } = spot;
         const bv = blk.get(D.id + '|' + port);
         const tr = bv && bv.sts !== 'BLK';
-        const label = (isHost(D) ? 'Fa0' : N.shortIf(port)) + (bv ? (tr ? ' ' + bv.sts : ' ✕') : '');
-        const w = label.length * 6.6 + 8;
+        const label = portText(blk, D, port);
         gT.appendChild(el('rect', { x: px - w / 2, y: py - 8, width: w, height: 15, rx: 4, class: 'lab-port-bg' + (bv ? ' blk' : '') + (tr ? ' lsn' : '') }));
         const tx = el('text', { x: px, y: py + 3.5, 'text-anchor': 'middle', class: 'lab-port' + (bv ? ' blk' : '') + (tr ? ' lsn' : '') });
         tx.textContent = label;

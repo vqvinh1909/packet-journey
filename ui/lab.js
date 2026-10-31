@@ -23,7 +23,7 @@ import { miniMd } from '../lab/cheat.js';
 import { diagnose } from '../lab/diagnose.js';
 import { diffLab } from '../lab/cfgdiff.js';
 import { lessonHref } from './i18n.js';
-import { SVG, el, esc, isHost, drawGlyph, adminUp, classifyLine, stpBlocked, linkEnd } from './topo.js';
+import { SVG, el, esc, isHost, drawGlyph, adminUp, classifyLine, stpBlocked, linkEnd, layoutPortLabels, portText } from './topo.js';
 
 const live = new Map(); // labId -> phiên đang làm (giữ nguyên khi đóng/mở lại modal)
 const MAX_LINES = 800;
@@ -260,7 +260,8 @@ export function openLab(onRun, o = {}) {
     for (const l of net.links) { const k = [l.a, l.b].sort().join('|'); pairN[k] = (pairN[k] || 0) + 1; }
     const blk = stpBlocked(net);
     const layerLinks = el('g', {}), layerLabels = el('g', {}), layerNodes = el('g', {});
-    svg.append(layerLinks, layerLabels, layerNodes);
+    svg.append(layerLinks, layerNodes, layerLabels);
+    const spots = layoutPortLabels(net, (D, port) => portText(blk, D, port));
     for (const l of net.links) {
       const A = net.devices[l.a], B = net.devices[l.b];
       const k = [l.a, l.b].sort().join('|');
@@ -269,7 +270,7 @@ export function openLab(onRun, o = {}) {
       const dx = B.x - A.x, dy = B.y - A.y, len = Math.hypot(dx, dy) || 1;
       const ox = (-dy / len) * off, oy = (dx / len) * off;
       // đám mây "Internet": đầu dây cắm vào mép đám mây thay vì tâm
-      const PA = linkEnd(A, B.x, B.y), PB = linkEnd(B, A.x, A.y), ex = PB.x - PA.x, ey = PB.y - PA.y;
+      const PA = linkEnd(A, B.x, B.y), PB = linkEnd(B, A.x, A.y);
       const upA = N.lineUp(net, l.a, l.ap), upB = N.lineUp(net, l.b, l.bp);
       const adminDown = !adminUp(net, l.a, l.ap) || !adminUp(net, l.b, l.bp);
       const cls = upA && upB ? 'up' : adminDown ? 'admin' : 'down';
@@ -283,12 +284,11 @@ export function openLab(onRun, o = {}) {
         hit.onclick = () => { disconnect(net, l.id); logAct('@unlink', l.id); renderAll(); };
         layerLinks.appendChild(hit);
       }
-      for (const [D, port, t] of [[A, l.ap, 0.24], [B, l.bp, 0.76]]) {
-        const px = PA.x + ex * t + ox, py = PA.y + ey * t + oy;
+      for (const [D, port, spot] of [[A, l.ap, spots[l.id][0]], [B, l.bp, spots[l.id][1]]]) {
+        const { x: px, y: py, w } = spot;
         const bv = blk.get(D.id + '|' + port);
         const tr = bv && bv.sts !== 'BLK';
-        const label = (isHost(D) ? 'Fa0' : N.shortIf(port)) + (bv ? (tr ? ' ' + bv.sts : ' ✕') : '');
-        const w = label.length * 6.6 + 8;
+        const label = portText(blk, D, port);
         const bg = el('rect', { x: px - w / 2, y: py - 8, width: w, height: 15, rx: 4, class: 'lab-port-bg' + (bv ? ' blk' : '') + (tr ? ' lsn' : '') });
         if (bv) { const tt = el('title', {}); tt.textContent = `STP ${STP_STS[bv.sts]} — VLAN ${bv.join(', ')}`; bg.appendChild(tt); }
         layerLabels.appendChild(bg);

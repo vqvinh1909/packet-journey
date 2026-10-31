@@ -53,6 +53,54 @@ export function linkEnd(d, tx, ty) {
   const r = Math.min(len, 1 / Math.hypot(ux / a, uy / b));
   return { x: cx + ux * r, y: cy + uy * r };
 }
+/** Chữ trên nhãn cổng: tên cổng + trạng thái STP nếu đang chặn. blk = kết quả stpBlocked. */
+export function portText(blk, D, port) {
+  const bv = blk.get(D.id + '|' + port);
+  return (isHost(D) ? 'Fa0' : N.shortIf(port)) + (bv ? (bv.sts !== 'BLK' ? ' ' + bv.sts : ' ✕') : '');
+}
+/** Chỗ icon và chữ của thiết bị chiếm trên sơ đồ, để nhãn cổng tránh ra. withSub: có dòng phụ dưới tên. */
+export function nodeBoxes(d, withSub = isHost(d)) {
+  const textW = Math.max(d.name.length * 8, withSub ? 110 : 0) + 8, iconW = N.isCloud(d) ? 36 : 30;
+  return [
+    { l: d.x - iconW, r: d.x + iconW, t: d.y - 27, b: d.y + 33 },
+    { l: d.x - textW / 2, r: d.x + textW / 2, t: d.y + 32, b: d.y + (withSub ? 63 : 49) },
+  ];
+}
+export const rectsHit = (a, b) => a.l < b.r && b.l < a.r && a.t < b.b && b.t < a.b;
+export const labelRect = (p, w) => ({ l: p.x - w / 2, r: p.x + w / 2, t: p.y - 8, b: p.y + 7 });
+/**
+ * Đặt mọi nhãn cổng: mỗi nhãn nằm trên dây, sát thiết bị của nó nhất mà không đè icon, tên thiết bị hay nhãn khác;
+ * dây quá ngắn thì nhãn đứng cạnh dây. textOf(thiết bị, cổng) → chữ, withSub(thiết bị): có dòng phụ dưới tên.
+ * Trả { linkId: [nhãn phía a, nhãn phía b] }, mỗi nhãn { x, y, w }.
+ */
+export function layoutPortLabels(net, textOf, withSub = isHost) {
+  const solid = Object.values(net.devices).flatMap((d) => nodeBoxes(d, withSub(d)));
+  const placed = [], out = {}, pairN = {}, pairI = {};
+  const free = (r) => !solid.some((b) => rectsHit(r, b)) && !placed.some((b) => rectsHit(r, b));
+  for (const l of net.links) { const k = [l.a, l.b].sort().join('|'); pairN[k] = (pairN[k] || 0) + 1; }
+  for (const l of net.links) {
+    const A = net.devices[l.a], B = net.devices[l.b], k = [l.a, l.b].sort().join('|');
+    const i = (pairI[k] = (pairI[k] ?? -1) + 1), off = (i - (pairN[k] - 1) / 2) * 16;
+    const PA = linkEnd(A, B.x, B.y), PB = linkEnd(B, A.x, A.y);
+    const dx = PB.x - PA.x, dy = PB.y - PA.y, len = Math.hypot(dx, dy) || 1, ux = dx / len, uy = dy / len;
+    const at = (s, side) => ({ x: PA.x + ux * s - uy * (off + side), y: PA.y + uy * s + ux * (off + side) });
+    const place = (text, fromB) => {
+      const w = text.length * 6.6 + 8, sideGap = Math.abs(ux) * 18 + Math.abs(uy) * (w / 2 + 5);
+      const find = (max, sides) => {
+        for (let d = 0; d <= max; d += 2) for (const side of sides) {
+          const p = at(fromB ? len - d : d, side);
+          if (free(labelRect(p, w))) return p;
+        }
+        return null;
+      };
+      const p = find(len / 2, [0]) || find(len, [sideGap, -sideGap]) || at(fromB ? len * 0.76 : len * 0.24, 0);
+      placed.push(labelRect(p, w));
+      return { ...p, w };
+    };
+    out[l.id] = [place(textOf(A, l.ap), false), place(textOf(B, l.bp), true)];
+  }
+  return out;
+}
 /** Cổng đang bật về mặt quản trị (không shutdown) — để tô dây "admin down". */
 export function adminUp(net, dev, port) {
   const d = net.devices[dev];

@@ -85,7 +85,7 @@ export const CAP_LABS = [
     title: 'HQ + 2 chi nhánh: Serial PPP CHAP, GRE qua Internet, OSPF đa vùng, DHCP relay, NAT',
     story: 'Chuỗi nhà thuốc An Khang có trụ sở (HQ, LAN 192.168.1.0/24) và 2 chi nhánh. Chi nhánh 1 (LAN 192.168.2.0/24) nối HQ bằng leased-line Serial (10.1.12.0/30) — nhà mạng yêu cầu PPP có xác thực CHAP (mật khẩu chung "AnKh@ng"). Chi nhánh 2 (LAN 192.168.3.0/24) chỉ có Internet (198.51.100.2/30, ISP .1) → dựng GRE Tunnel0 (172.16.0.0/30) tới IP public của HQ 203.0.113.2. Routing: OSPF đa vùng — area 0 = LAN HQ + Serial + Tunnel, area 1 = LAN CN1, area 2 = LAN CN2 (R-CN1/R-CN2 là ABR). R-HQ là DHCP server cho cả 3 LAN (chi nhánh dùng DHCP relay) và là cửa ra Internet duy nhất (NAT PAT) — kể cả CN2 đi Internet cũng vòng qua tunnel về HQ (kiểm soát tập trung). Các cổng đã đặt IP sẵn.',
     build: () => makeNet([
-      server('inet', 'INTERNET 8.8.8.8', 520, 50, { ip: '8.8.8.8', gw: '8.8.8.1' }),
+      server('inet', 'INTERNET 8.8.8.8', 520, 20, { ip: '8.8.8.8', gw: '8.8.8.1' }),
       router('isp', 'ISP', 520, 170, ['g0/0', 'g0/1', 'g0/2']),
       router('hq', 'R-HQ', 260, 230, ['g0/0', 'g0/1', 's0/0/0']),
       router('cn1', 'R-CN1', 260, 400, ['g0/0', 's0/0/0']),
