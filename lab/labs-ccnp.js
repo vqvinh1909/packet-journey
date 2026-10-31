@@ -1,0 +1,526 @@
+// lab/labs-ccnp.js — nhóm CCNP: E = ENCOR 350-401 v1.2, R = ENARSI 300-410 v1.1. Topology, địa chỉ và tình huống tự thiết kế.
+import * as N from './net.js';
+import { linuxDevice } from './linux.js';
+import { cfg, quiz, fa } from './kit.js';
+
+const { pc, server, router, sw, makeNet } = N;
+const ifc = (n, ip, ...more) => [`interface ${n}`, ...(ip ? [`ip address ${ip}`] : []), 'no shutdown', ...more];
+const lo = (n, ip) => [`interface loopback ${n}`, `ip address ${ip}`];
+const ospf = (rid, ...nets) => ['router ospf 1', `router-id ${rid}`, ...nets.map((x) => `network ${x}`), 'exit'];
+const eigrp = (...nets) => ['router eigrp 100', 'no auto-summary', ...nets.map((x) => `network ${x}`), 'exit'];
+const has = (a, dev, cmd, re) => re.test(a.show(dev, cmd));
+const rt = (a, d, k) => a.route(d, k);
+const code = (a, d, k) => a.route(d, k)?.code;
+
+export const CCNP_LABS = [
+  // ============================== ENCOR ==============================
+  {
+    id: 'E01', group: 'np', lesson: 'ENCOR 2.2 — VRF', level: 2, kind: 'config', topics: ['Static'],
+    title: 'VRF-Lite: hai khách hàng trùng dải IP trên cùng một router',
+    story: 'Khách A và khách B cùng dùng 192.168.1.0/24, máy chủ của mỗi bên đều là 10.0.0.10. Một router phải phục vụ cả hai mà không lẫn dữ liệu. Tạo VRF A, VRF B, đưa từng cổng vào đúng VRF rồi đặt lại IP, vì IOS xóa IP khi đổi VRF. Thêm route tĩnh trong VRF A tới 172.16.0.0/16 qua máy chủ A.',
+    build: () => makeNet([
+      router('pe', 'R-PE', 400, 240, ['g0/0', 'g0/1', 'g0/2', 'g0/3']),
+      pc('pca', 'PC-A', 120, 110, { ip: '192.168.1.10', gw: '192.168.1.1' }), pc('pcb', 'PC-B', 120, 370, { ip: '192.168.1.10', gw: '192.168.1.1' }),
+      server('sa', 'SRV-A', 680, 110, { ip: '10.0.0.10', gw: '10.0.0.1' }), server('sb', 'SRV-B', 680, 370, { ip: '10.0.0.10', gw: '10.0.0.1' }),
+    ], [['pca', 'fa0', 'pe', 'g0/0'], ['pcb', 'fa0', 'pe', 'g0/1'], ['sa', 'fa0', 'pe', 'g0/2'], ['sb', 'fa0', 'pe', 'g0/3']]),
+    init: [['pe', cfg('hostname R-PE', 'interface g0/0', 'no shutdown', 'interface g0/1', 'no shutdown', 'interface g0/2', 'no shutdown', 'interface g0/3', 'no shutdown')]],
+    tasks: [
+      { text: 'Có VRF A và VRF B, mỗi VRF có rd', verify: 'show ip vrf', check: (a) => !!a.d('pe').vrfs?.A?.rd && !!a.d('pe').vrfs?.B?.rd },
+      { text: 'Gi0/0, Gi0/2 thuộc VRF A; Gi0/1, Gi0/3 thuộc VRF B, mỗi cổng có IP .1', verify: 'show ip vrf interfaces', check: (a) => { const f = a.d('pe').ifaces; return f['g0/0'].vrf === 'A' && f['g0/2'].vrf === 'A' && f['g0/1'].vrf === 'B' && f['g0/3'].vrf === 'B' && f['g0/0'].ip === '192.168.1.1' && f['g0/1'].ip === '192.168.1.1' && f['g0/2'].ip === '10.0.0.1' && f['g0/3'].ip === '10.0.0.1'; } },
+      { text: 'PC-A tới đúng SRV-A, PC-B tới đúng SRV-B dù cùng IP đích', verify: 'ping 10.0.0.10 trên từng PC', check: (a) => N.sendPacket(a.net, { src: 'pca', dst: '10.0.0.10' }).at?.dev === 'sa' && N.sendPacket(a.net, { src: 'pcb', dst: '10.0.0.10' }).at?.dev === 'sb' },
+      { text: 'Bảng route VRF A có 172.16.0.0/16, bảng toàn cục và VRF B thì không', verify: 'show ip route vrf A', check: (a) => has(a, 'pe', 'show ip route vrf A', /172\.16\.0\.0\/16/) && !has(a, 'pe', 'show ip route vrf B', /172\.16\.0\.0/) && !rt(a, 'pe', '172.16.0.0/16') },
+      quiz('Vì sao VRF-Lite không cần MPLS?', ['Vì nó chỉ tách bảng định tuyến trên từng router, kết nối giữa các router dùng cổng hoặc subinterface riêng', 'Vì nó mã hóa gói', 'Vì nó dùng nhãn 802.1Q làm nhãn MPLS', 'Vì nó chỉ chạy trên switch'], 0, 'VRF-Lite tách RIB và FIB. Muốn nối qua nhiều router phải có link riêng cho từng VRF, MPLS L3VPN mới gộp được bằng nhãn.'),
+    ],
+    hints: ['Tạo ip vrf trước, gõ ip vrf forwarding trên cổng rồi mới đặt IP', 'Kiểm tra bằng ping vrf A 10.0.0.10 trên R-PE'],
+    solution: [['pe', cfg('ip vrf A', 'rd 65000:1', 'ip vrf B', 'rd 65000:2', 'interface g0/0', 'ip vrf forwarding A', 'ip address 192.168.1.1 255.255.255.0', 'interface g0/2', 'ip vrf forwarding A', 'ip address 10.0.0.1 255.255.255.0', 'interface g0/1', 'ip vrf forwarding B', 'ip address 192.168.1.1 255.255.255.0', 'interface g0/3', 'ip vrf forwarding B', 'ip address 10.0.0.1 255.255.255.0', 'exit', 'ip route vrf A 172.16.0.0 255.255.0.0 10.0.0.10')]],
+  },
+  {
+    id: 'E02', group: 'np', lesson: 'ENCOR 3.2 — OSPF nhiều vùng', level: 2, kind: 'config',
+    title: 'OSPF: tóm tắt tại ABR và lọc route liên vùng',
+    story: 'Area 1 có nhiều mạng con 10.1.x.0/24 làm bảng route ở area 0 dài ra. Trên ABR R2, tóm tắt thành 10.1.0.0/16 và chặn hẳn dải thử nghiệm 10.9.0.0/24 đi ra khỏi area 1.',
+    build: () => makeNet([router('r1', 'R1', 120, 200, ['g0/0']), router('r2', 'R2-ABR', 400, 200, ['g0/0', 'g0/1']), router('r3', 'R3', 680, 200, ['g0/0'])], [['r1', 'g0/0', 'r2', 'g0/0'], ['r2', 'g0/1', 'r3', 'g0/0']]),
+    init: [
+      ['r1', cfg('hostname R1', ...ifc('g0/0', '172.16.12.1 255.255.255.0'), ...lo(1, '10.1.0.1 255.255.255.0'), ...lo(2, '10.1.1.1 255.255.255.0'), ...lo(9, '10.9.0.1 255.255.255.0'), ...ospf('1.1.1.1', '0.0.0.0 255.255.255.255 area 1'))],
+      ['r2', cfg('hostname R2-ABR', ...ifc('g0/0', '172.16.12.2 255.255.255.0'), ...ifc('g0/1', '172.16.23.2 255.255.255.0'), ...ospf('2.2.2.2', '172.16.12.0 0.0.0.255 area 1', '172.16.23.0 0.0.0.255 area 0'))],
+      ['r3', cfg('hostname R3', ...ifc('g0/0', '172.16.23.3 255.255.255.0'), ...ospf('3.3.3.3', '0.0.0.0 255.255.255.255 area 0'))],
+    ],
+    tasks: [
+      { text: 'R3 thấy 10.1.0.0/16 dạng O IA, không còn 10.1.0.0/24 và 10.1.1.0/24', verify: 'show ip route ospf', check: (a) => code(a, 'r3', '10.1.0.0/16') === 'O IA' && !rt(a, 'r3', '10.1.0.0/24') && !rt(a, 'r3', '10.1.1.0/24') },
+      { text: 'R2 có route Null0 cho 10.1.0.0/16 để chống lặp', verify: 'show ip route 10.1.0.0', check: (a) => rt(a, 'r2', '10.1.0.0/16')?.discard === true },
+      { text: 'R3 không còn thấy 10.9.0.0/24, R2 vẫn thấy vì nó nằm trong area 1', verify: 'show ip route', check: (a) => !rt(a, 'r3', '10.9.0.0/24') && !!rt(a, 'r2', '10.9.0.0/24') },
+      quiz('Lệnh area X range cấu hình ở đâu?', ['ABR, tóm tắt route trong area X khi đi ra', 'ASBR, tóm tắt route external', 'Mọi router trong area', 'Chỉ router trong area 0'], 0, 'ASBR dùng summary-address cho external, ABR dùng area range cho inter-area.'),
+    ],
+    hints: ['area 1 range 10.1.0.0 255.255.0.0', 'Prefix-list nhớ có dòng permit 0.0.0.0/0 le 32 ở cuối'],
+    solution: [['r2', cfg('ip prefix-list KHONG-TEST deny 10.9.0.0/16 le 32', 'ip prefix-list KHONG-TEST permit 0.0.0.0/0 le 32', 'router ospf 1', 'area 1 range 10.1.0.0 255.255.0.0', 'area 1 filter-list prefix KHONG-TEST out')]],
+  },
+  {
+    id: 'E03', group: 'np', lesson: 'ENCOR 3.1 — RSTP, MST', level: 2, kind: 'config', topics: ['STP'],
+    title: 'MST: gom VLAN thành instance, chia root cho hai switch lõi',
+    story: 'Mạng có VLAN 10, 20, 30, 40. Thay vì chạy riêng cây cho từng VLAN, gom 10 và 20 vào instance 1, 30 và 40 vào instance 2. SW1 làm root instance 1, SW2 làm root instance 2. Tên region và revision phải giống hệt nhau trên cả ba switch, nếu lệch thì chúng là các region khác nhau.',
+    build: () => makeNet([sw('s1', 'SW1', 200, 90, fa(4, ['g0/1', 'g0/2'])), sw('s2', 'SW2', 600, 90, fa(4, ['g0/1', 'g0/2'])), sw('s3', 'SW3', 400, 320, fa(4, ['g0/1', 'g0/2']))], [['s1', 'g0/1', 's2', 'g0/1'], ['s1', 'g0/2', 's3', 'g0/1'], ['s2', 'g0/2', 's3', 'g0/2']]),
+    init: ['s1', 's2', 's3'].map((id, i) => [id, cfg(`hostname SW${i + 1}`, 'vlan 10', 'vlan 20', 'vlan 30', 'vlan 40', 'exit')]),
+    tasks: [
+      { text: 'Cả ba switch chạy spanning-tree mode mst, cùng name CORE, revision 1, instance 1 = VLAN 10,20 và instance 2 = VLAN 30,40', verify: 'show spanning-tree mst configuration', check: (a) => ['s1', 's2', 's3'].every((s) => { const d = a.d(s).stp, m = d.mst; return d.mode === 'mst' && m?.name === 'CORE' && m.rev === 1 && String(m.inst[1]) === '10,20' && String(m.inst[2]) === '30,40'; }) },
+      { text: 'SW1 có priority thấp nhất ở instance 1, SW2 thấp nhất ở instance 2', verify: 'show running-config | include mst', check: (a) => a.d('s1').stp.mst?.prio?.[1] < 32768 && a.d('s2').stp.mst?.prio?.[2] < 32768 && !(a.d('s2').stp.mst?.prio?.[1] <= a.d('s1').stp.mst?.prio?.[1]) },
+      quiz('Hai switch cùng tên region nhưng khác revision thì sao?', ['Coi là hai region khác nhau, nói chuyện qua CIST', 'Vẫn cùng region', 'Cổng bị err-disabled', 'Instance 1 bị tắt'], 0, 'Name, revision và bảng VLAN-instance phải khớp hoàn toàn thì mới cùng region.'),
+      quiz('BPDU Guard và Root Guard khác nhau thế nào?', ['BPDU Guard tắt cổng khi nhận bất kỳ BPDU nào, Root Guard chỉ chặn khi nhận BPDU tốt hơn', 'Hai lệnh giống nhau', 'Root Guard tắt hẳn cổng còn BPDU Guard thì không', 'BPDU Guard chỉ dùng trên trunk'], 0, 'BPDU Guard dành cho cổng PortFast. Root Guard giữ vị trí root ở cổng hướng xuống.'),
+    ],
+    hints: ['spanning-tree mst configuration rồi name, revision, instance', 'spanning-tree mst 1 root primary trên SW1'],
+    solution: ['s1', 's2', 's3'].map((id) => [id, cfg('spanning-tree mode mst', 'spanning-tree mst configuration', 'name CORE', 'revision 1', 'instance 1 vlan 10,20', 'instance 2 vlan 30,40', 'exit', ...(id === 's1' ? ['spanning-tree mst 1 root primary', 'spanning-tree mst 2 root secondary'] : id === 's2' ? ['spanning-tree mst 2 root primary', 'spanning-tree mst 1 root secondary'] : []))]),
+  },
+  {
+    id: 'E04', group: 'np', lesson: 'ENCOR 4.2 — Flexible NetFlow', level: 2, kind: 'config', topics: ['Quản trị thiết bị'],
+    title: 'Flexible NetFlow: xem ai đang nói chuyện với ai',
+    story: 'Cần biết luồng nào đi qua R1. Tạo flow record theo 5-tuple, flow exporter tới máy thu 10.0.2.50 UDP 2055, gắn cả hai vào flow monitor rồi bật chiều vào trên Gi0/0. Sau đó từ PC1 ping 10.0.2.10 để có dữ liệu.',
+    build: () => makeNet([pc('p1', 'PC1', 100, 200, { ip: '10.0.1.10', gw: '10.0.1.1' }), router('r1', 'R1', 400, 200, ['g0/0', 'g0/1']), server('s1', 'SRV', 700, 200, { ip: '10.0.2.10', gw: '10.0.2.1' })], [['p1', 'fa0', 'r1', 'g0/0'], ['r1', 'g0/1', 's1', 'fa0']]),
+    init: [['r1', cfg('hostname R1', ...ifc('g0/0', '10.0.1.1 255.255.255.0'), ...ifc('g0/1', '10.0.2.1 255.255.255.0'))]],
+    tasks: [
+      { text: 'Flow record khóa theo IP nguồn, IP đích, protocol, cổng nguồn, cổng đích', verify: 'show flow record', check: (a) => Object.values(a.d('r1').flow?.records || {}).some((r) => ['ipv4 source address', 'ipv4 destination address', 'ipv4 protocol', 'transport source-port', 'transport destination-port'].every((m) => r.match.includes(m))) },
+      { text: 'Exporter gửi tới 10.0.2.50 UDP 2055, monitor dùng đúng record và exporter', verify: 'show flow monitor', check: (a) => { const f = a.d('r1').flow; return Object.values(f?.monitors || {}).some((m) => f.records[m.record] && f.exporters[m.exporter]?.dst === '10.0.2.50' && f.exporters[m.exporter].port === 2055); } },
+      { text: 'Monitor bật chiều input trên Gi0/0, cache có luồng 10.0.1.10 → 10.0.2.10', verify: 'show flow monitor <tên> cache', check: (a) => { const m = a.d('r1').ifaces['g0/0'].flow?.in; return !!m && m !== 'legacy' && Object.values(a.d('r1').flowCache || {}).some((c) => c.monitor === m && c.src === '10.0.1.10' && c.dst === '10.0.2.10'); } },
+      quiz('Khác biệt chính của Flexible NetFlow so với NetFlow v5?', ['Tự chọn trường làm khóa và trường thu thập, xuất qua v9 hoặc IPFIX', 'Không cần exporter', 'Chỉ chạy trên switch', 'Không phân biệt chiều'], 0, 'NetFlow v5 có khuôn cố định 7 trường khóa. FNF cho tự định nghĩa record.'),
+    ],
+    hints: ['flow record, flow exporter, flow monitor rồi ip flow monitor <tên> input', 'Phải ping sau khi bật monitor thì cache mới có dữ liệu'],
+    solution: [
+      ['r1', cfg('flow record REC', 'match ipv4 source address', 'match ipv4 destination address', 'match ipv4 protocol', 'match transport source-port', 'match transport destination-port', 'collect counter packets', 'flow exporter EXP', 'destination 10.0.2.50', 'transport udp 2055', 'export-protocol netflow-v9', 'flow monitor MON', 'record REC', 'exporter EXP', 'interface g0/0', 'ip flow monitor MON input')],
+      ['p1', ['ping 10.0.2.10']],
+    ],
+  },
+  {
+    id: 'E05', group: 'np', lesson: 'ENCOR 4.3 — SPAN, RSPAN, ERSPAN', level: 2, kind: 'config', topics: ['VLAN/Trunk'],
+    title: 'SPAN và RSPAN: sao chép lưu lượng về máy phân tích',
+    story: 'Cần bắt gói của PC1 ở hai nơi: máy ANA1 cắm cùng SW1 (SPAN cục bộ) và máy ANA2 cắm ở SW2 (RSPAN qua VLAN 999 trên trunk). Cấu hình xong, ping từ PC1 tới SRV rồi xem tcpdump trên cả hai máy phân tích.',
+    build: () => makeNet([
+      sw('s1', 'SW1', 240, 200, fa(4, ['g0/1'])), sw('s2', 'SW2', 560, 200, fa(4, ['g0/1'])),
+      pc('p1', 'PC1', 80, 90, { ip: '10.0.0.11' }), linuxDevice('a1', 'ANA1', 80, 320), server('srv', 'SRV', 720, 90, { ip: '10.0.0.20' }), linuxDevice('a2', 'ANA2', 720, 320),
+    ], [['s1', 'g0/1', 's2', 'g0/1'], ['p1', 'fa0', 's1', 'fa0/1'], ['a1', 'fa0', 's1', 'fa0/2'], ['srv', 'fa0', 's2', 'fa0/1'], ['a2', 'fa0', 's2', 'fa0/2']]),
+    init: [['s1', cfg('hostname SW1', 'interface g0/1', 'switchport mode trunk')], ['s2', cfg('hostname SW2', 'interface g0/1', 'switchport mode trunk')]],
+    tasks: [
+      { text: 'SW1: session 1 sao chép Fa0/1 sang Fa0/2', verify: 'show monitor session 1', check: (a) => { const s = a.d('s1').monitor?.[1]; return s?.srcPorts?.includes('fa0/1') && s.dst === 'fa0/2'; } },
+      { text: 'VLAN 999 có remote-span trên cả hai switch; SW1 session 2 đẩy Fa0/1 vào VLAN 999; SW2 lấy VLAN 999 ra Fa0/2', verify: 'show monitor session all', check: (a) => a.d('s1').rspanVlans?.includes(999) && a.d('s2').rspanVlans?.includes(999) && Object.values(a.d('s1').monitor || {}).some((s) => s.dstRemote === 999 && s.srcPorts?.includes('fa0/1')) && Object.values(a.d('s2').monitor || {}).some((s) => s.srcRemote === 999 && s.dst === 'fa0/2') },
+      { text: 'tcpdump trên ANA1 và ANA2 thấy ICMP của PC1', verify: 'tcpdump -n icmp trên ANA1, ANA2', check: (a) => has(a, 'a1', 'tcpdump -i eth0 icmp', /10\.0\.0\.11 > 10\.0\.0\.20/) && has(a, 'a2', 'tcpdump -i eth0 icmp', /10\.0\.0\.11 > 10\.0\.0\.20/) },
+      quiz('ERSPAN khác RSPAN ở điểm nào?', ['ERSPAN bọc bản sao trong GRE nên đi qua được mạng L3, RSPAN cần VLAN L2 thông suốt', 'ERSPAN không cần đích', 'RSPAN đi qua được Internet', 'ERSPAN chỉ sao chép ARP'], 0, 'ERSPAN cấu hình bằng monitor session type erspan-source, có erspan-id và IP đích.'),
+    ],
+    hints: ['vlan 999 rồi remote-span', 'monitor session 2 destination remote vlan 999'],
+    solution: [
+      ['s1', cfg('vlan 999', 'remote-span', 'exit', 'monitor session 1 source interface fa0/1', 'monitor session 1 destination interface fa0/2', 'monitor session 2 source interface fa0/1', 'monitor session 2 destination remote vlan 999')],
+      ['s2', cfg('vlan 999', 'remote-span', 'exit', 'monitor session 1 source remote vlan 999', 'monitor session 1 destination interface fa0/2')],
+      ['p1', ['ping 10.0.0.20']],
+    ],
+  },
+  {
+    id: 'E06', group: 'np', lesson: 'ENCOR 4.4 — IP SLA, ENARSI 4.5', level: 2, kind: 'config', topics: ['Static'],
+    title: 'IP SLA và track: phát hiện ISP hỏng dù cổng vẫn up',
+    story: 'R1 có hai đường ra Internet. Khi ISP1 hỏng ở phía xa, cổng Gi0/0 vẫn up nên route tĩnh không tự mất. Dùng IP SLA ping 8.8.8.8 qua ISP1, gắn track vào default route chính, thêm default route dự phòng AD 10 qua ISP2. Hãy thử shutdown Gi0/1 trên ISP1 để xem R1 chuyển đường.',
+    build: () => makeNet([
+      router('r1', 'R1', 120, 220, ['g0/0', 'g0/1']), router('i1', 'ISP1', 400, 90, ['g0/0', 'g0/1']), router('i2', 'ISP2', 400, 350, ['g0/0', 'g0/1']), router('net', 'NET', 680, 220, ['g0/0', 'g0/1']),
+    ], [['r1', 'g0/0', 'i1', 'g0/0'], ['r1', 'g0/1', 'i2', 'g0/0'], ['i1', 'g0/1', 'net', 'g0/0'], ['i2', 'g0/1', 'net', 'g0/1']]),
+    init: [
+      ['r1', cfg('hostname R1', ...ifc('g0/0', '198.51.100.2 255.255.255.252'), ...ifc('g0/1', '203.0.113.2 255.255.255.252'))],
+      ['i1', cfg('hostname ISP1', ...ifc('g0/0', '198.51.100.1 255.255.255.252'), ...ifc('g0/1', '10.1.0.1 255.255.255.252'), 'ip route 0.0.0.0 0.0.0.0 10.1.0.2')],
+      ['i2', cfg('hostname ISP2', ...ifc('g0/0', '203.0.113.1 255.255.255.252'), ...ifc('g0/1', '10.2.0.1 255.255.255.252'), 'ip route 0.0.0.0 0.0.0.0 10.2.0.2')],
+      ['net', cfg('hostname NET', ...ifc('g0/0', '10.1.0.2 255.255.255.252'), ...ifc('g0/1', '10.2.0.2 255.255.255.252'), ...lo(0, '8.8.8.8 255.255.255.255'), 'ip route 198.51.100.0 255.255.255.252 10.1.0.1', 'ip route 203.0.113.0 255.255.255.252 10.2.0.1')],
+    ],
+    tasks: [
+      { text: 'IP SLA 1 ping 8.8.8.8, đã schedule chạy ngay, track 1 theo dõi nó', verify: 'show ip sla configuration ; show track', check: (a) => { const d = a.d('r1'); return d.slas?.[1]?.target === '8.8.8.8' && d.slas[1].scheduled && d.tracks?.[1]?.sla === 1; } },
+      { text: 'Default route qua ISP1 gắn track 1, default dự phòng qua 203.0.113.1 AD 10', verify: 'show ip route', check: (a) => { const r = a.d('r1').routes; return r.some((x) => x.prefix === 0 && x.nh === '198.51.100.1' && x.track === 1) && r.some((x) => x.prefix === 0 && x.nh === '203.0.113.1' && x.ad === 10); } },
+      { text: 'Lúc bình thường R1 đi qua ISP1', verify: 'show ip route 0.0.0.0', check: (a) => a.lookup('r1', '8.8.8.8')?.nextHop === '198.51.100.1' },
+      { text: 'Giả lập ISP1 hỏng phía xa: R1 tự chuyển sang ISP2 và vẫn tới 8.8.8.8', verify: 'shutdown Gi0/1 trên ISP1, rồi ping 8.8.8.8', check: (a) => { const n2 = N.cloneNet(a.net); n2.devices.i1.ifaces['g0/1'].shutdown = true; const c = N.makeCtx(n2); return N.lookup(c, 'r1', '8.8.8.8')?.nextHop === '203.0.113.1' && N.sendPacket(n2, { src: 'r1', dst: '8.8.8.8' }).ok; } },
+      quiz('Không có track thì khi ISP1 hỏng phía xa, default route chính thế nào?', ['Vẫn nằm trong bảng route vì next-hop kế bên vẫn tới được, lưu lượng mất', 'Tự biến mất', 'Chuyển sang ISP2 sau 3 phút', 'Router báo lỗi'], 0, 'Route tĩnh chỉ phụ thuộc cổng ra và next-hop. Track mới cho biết đích xa có tới được không.'),
+    ],
+    hints: ['ip sla 1, icmp-echo 8.8.8.8, rồi ip sla schedule 1 life forever start-time now', 'track 1 ip sla 1 reachability', 'ip route 0.0.0.0 0.0.0.0 198.51.100.1 track 1'],
+    solution: [['r1', cfg('ip sla 1', 'icmp-echo 8.8.8.8', 'frequency 5', 'exit', 'ip sla schedule 1 life forever start-time now', 'track 1 ip sla 1 reachability', 'exit', 'ip route 0.0.0.0 0.0.0.0 198.51.100.1 track 1', 'ip route 0.0.0.0 0.0.0.0 203.0.113.1 10')]],
+  },
+  {
+    id: 'E07', group: 'np', lesson: 'ENCOR 4.6, 5.3, 6.2, 6.5 — RESTCONF, JSON', level: 3, kind: 'config', topics: ['Quản trị thiết bị'],
+    title: 'NETCONF, RESTCONF: đọc và tạo cấu hình qua API, đọc mã phản hồi',
+    story: 'Bật mô hình lập trình trên R1: netconf-yang, restconf, ip http secure-server và user admin privilege 15. Từ máy LNX, dùng curl đọc interfaces, rồi tạo Loopback5 có IP 10.5.5.5/32 bằng PUT với file JSON. Thử mật khẩu sai để thấy 401.',
+    build: () => makeNet([router('r1', 'R1', 200, 200, ['g0/0']), linuxDevice('l', 'LNX', 560, 200)], [['r1', 'g0/0', 'l', 'fa0']]),
+    init: [['r1', cfg('hostname R1', ...ifc('g0/0', '10.0.0.1 255.255.255.0'))], ['l', ['ip addr add 10.0.0.50/24 dev eth0']]],
+    tasks: [
+      { text: 'R1 mở NETCONF cổng 830 và RESTCONF qua HTTPS', verify: 'show netconf-yang status ; nc -zv 10.0.0.1 830', check: (a) => a.tcp('l', '10.0.0.1', 830).ok && a.tcp('l', '10.0.0.1', 443).ok && a.d('r1').restconf },
+      { text: 'curl đọc interfaces trả 200 và có Gi0/0, mật khẩu sai trả 401', verify: 'curl -k -u admin:Cisco123 https://10.0.0.1/restconf/data/ietf-interfaces:interfaces', check: (a) => has(a, 'l', 'curl -k -u admin:Cisco123 https://10.0.0.1/restconf/data/ietf-interfaces:interfaces', /200 OK[\s\S]*GigabitEthernet0\/0/) && has(a, 'l', 'curl -k -u admin:sai https://10.0.0.1/restconf/data/ietf-interfaces:interfaces', /401 Unauthorized/) },
+      { text: 'Loopback5 có IP 10.5.5.5 trên R1, tạo qua RESTCONF', verify: 'curl -k -u admin:Cisco123 -X PUT -d @lo5.json https://10.0.0.1/restconf/data/ietf-interfaces:interfaces/interface=Loopback5', check: (a) => a.d('r1').ifaces.lo5?.ip === '10.5.5.5' },
+      quiz('RESTCONF PUT tạo mới thành công trả mã nào, sai JSON trả mã nào?', ['201 và 400', '200 và 500', '204 và 404', '301 và 403'], 0, '201 Created, 204 khi sửa cái đã có, 400 Bad Request khi nội dung sai, 401 sai xác thực, 404 đường dẫn YANG không có.'),
+      quiz('Chuỗi nào là JSON hợp lệ?', ['{"mtu": 1500, "up": true}', "{'mtu': 1500}", '{mtu: 1500}', '{"mtu": 1500,}'], 0, 'JSON bắt buộc nháy kép, không có dấu phẩy thừa ở cuối. Kiểm tra bằng python3 -m json.tool file.'),
+      quiz('YANG đóng vai trò gì?', ['Ngôn ngữ mô tả mô hình dữ liệu cấu hình và trạng thái', 'Giao thức vận chuyển như SSH', 'Định dạng mã hóa như XML', 'Một loại mã hóa mật khẩu'], 0, 'YANG là mô hình. NETCONF, RESTCONF là giao thức. XML, JSON là cách mã hóa.'),
+    ],
+    hints: ['username admin privilege 15 secret Cisco123', 'echo \'{"ietf-interfaces:interface":{"name":"Loopback5","ietf-ip:ipv4":{"address":[{"ip":"10.5.5.5","netmask":"255.255.255.255"}]}}}\' > lo5.json', 'python3 -m json.tool lo5.json để kiểm tra cú pháp'],
+    solution: [
+      ['r1', cfg('username admin privilege 15 secret Cisco123', 'ip http secure-server', 'netconf-yang', 'restconf')],
+      ['l', ['echo \'{"ietf-interfaces:interface":{"name":"Loopback5","ietf-ip:ipv4":{"address":[{"ip":"10.5.5.5","netmask":"255.255.255.255"}]}}}\' > lo5.json', 'python3 -m json.tool lo5.json', 'curl -k -u admin:Cisco123 -X PUT -d @lo5.json https://10.0.0.1/restconf/data/ietf-interfaces:interfaces/interface=Loopback5']],
+    ],
+  },
+  {
+    id: 'E08', group: 'np', lesson: 'ENCOR 5.1 — AAA', level: 2, kind: 'config', topics: ['Quản trị thiết bị'],
+    title: 'AAA: authentication, authorization và accounting cho quản trị',
+    story: 'Đổi R1 sang AAA: đăng nhập VTY xác thực bằng tài khoản cục bộ, phân quyền exec theo cục bộ, ghi accounting khi vào exec. Áp method list riêng tên ADMIN trên VTY để không ảnh hưởng console.',
+    build: () => makeNet([router('r1', 'R1', 400, 200, ['g0/0']), pc('p1', 'PC1', 100, 200, { ip: '10.0.0.10', gw: '10.0.0.1' })], [['p1', 'fa0', 'r1', 'g0/0']]),
+    init: [['r1', cfg('hostname R1', ...ifc('g0/0', '10.0.0.1 255.255.255.0'), 'username netadmin privilege 15 secret Cisco123')]],
+    tasks: [
+      { text: 'Bật aaa new-model, method list ADMIN xác thực local', verify: 'show running-config | include aaa', check: (a) => a.d('r1').aaa?.newModel && a.d('r1').aaa.lists.ADMIN?.includes('local') },
+      { text: 'Có aaa authorization exec ADMIN local và aaa accounting exec ADMIN start-stop', verify: 'show aaa method-lists', check: (a) => { const q = a.d('r1').aaa; return q?.authz?.exec?.list === 'ADMIN' && /local/.test(q.authz.exec.methods) && q.acct?.exec?.list === 'ADMIN' && /start-stop/.test(q.acct.exec.methods); } },
+      { text: 'Line VTY dùng ADMIN cho cả xác thực và phân quyền', verify: 'show running-config | section line vty', check: (a) => a.d('r1').lines.vty.authList === 'ADMIN' && /ADMIN/.test(a.d('r1').lines.vty.authz?.exec || '') },
+      quiz('Khác nhau giữa TACACS+ và RADIUS?', ['TACACS+ dùng TCP 49, tách ba chữ A và mã hóa toàn bộ gói; RADIUS dùng UDP, gộp authentication với authorization, chỉ mã hóa mật khẩu', 'Giống hệt nhau', 'RADIUS dùng TCP 49', 'TACACS+ không hỗ trợ authorization'], 0, 'TACACS+ hợp quản trị thiết bị, RADIUS hợp truy cập mạng.'),
+    ],
+    hints: ['aaa authentication login ADMIN local', 'Vào line vty 0 4 gõ login authentication ADMIN và authorization exec ADMIN'],
+    solution: [['r1', cfg('aaa new-model', 'aaa authentication login ADMIN local', 'aaa authorization exec ADMIN local', 'aaa accounting exec ADMIN start-stop group tacacs+', 'line vty 0 4', 'login authentication ADMIN', 'authorization exec ADMIN')]],
+  },
+  {
+    id: 'E09', group: 'np', lesson: 'ENCOR 5.2, ENARSI 3.3 — CoPP', level: 3, kind: 'config', topics: ['ACL'],
+    title: 'CoPP: chặn Telnet tới chính router mà không ảnh hưởng lưu lượng đi qua',
+    story: 'ACL trên cổng thì lo cho lưu lượng đi qua, còn CoPP bảo vệ CPU router. Tạo class-map khớp Telnet, policy-map drop class đó và gắn vào control-plane chiều input. PC1 vẫn phải ping được R1 và Telnet xuyên qua R1 tới SRV phải còn hoạt động.',
+    build: () => makeNet([pc('p1', 'PC1', 100, 200, { ip: '10.0.1.10', gw: '10.0.1.1' }), router('r1', 'R1', 400, 200, ['g0/0', 'g0/1']), server('s1', 'SRV', 700, 200, { ip: '10.0.2.10', gw: '10.0.2.1', services: [23] })], [['p1', 'fa0', 'r1', 'g0/0'], ['r1', 'g0/1', 's1', 'fa0']]),
+    init: [['r1', cfg('hostname R1', ...ifc('g0/0', '10.0.1.1 255.255.255.0'), ...ifc('g0/1', '10.0.2.1 255.255.255.0'), 'line vty 0 4', 'password cisco', 'login', 'transport input telnet')]],
+    tasks: [
+      { text: 'Telnet từ PC1 tới R1 bị chặn bởi CoPP', verify: 'telnet 10.0.1.1 trên PC1', check: (a) => a.d('r1').copp?.input && !a.tcp('p1', '10.0.1.1', 23).ok },
+      { text: 'PC1 vẫn ping được R1, Telnet tới SRV xuyên R1 vẫn được', verify: 'ping 10.0.1.1 ; telnet 10.0.2.10', check: (a) => a.ping('p1', '10.0.1.1') && a.tcp('p1', '10.0.2.10', 23).ok },
+      { text: 'show policy-map control-plane cho thấy class chặn Telnet', verify: 'show policy-map control-plane', check: (a) => has(a, 'r1', 'show policy-map control-plane', /Service-policy input[\s\S]*access-group[\s\S]*drop/) },
+      quiz('Class-default trong CoPP nên làm gì?', ['Vẫn cho qua, nếu drop hết thì mất cả OSPF, BGP, SSH', 'Luôn drop', 'Bị cấm cấu hình', 'Chỉ áp cho IPv6'], 0, 'Thiết kế thường police theo nhóm: định tuyến rộng tay, quản trị vừa, còn lại chặt.'),
+    ],
+    hints: ['ip access-list extended TELNET, permit tcp any any eq telnet', 'class-map CM-TELNET, match access-group name TELNET', 'control-plane rồi service-policy input PM-COPP'],
+    solution: [['r1', cfg('ip access-list extended TELNET', 'permit tcp any any eq telnet', 'exit', 'class-map CM-TELNET', 'match access-group name TELNET', 'exit', 'policy-map PM-COPP', 'class CM-TELNET', 'drop', 'exit', 'exit', 'control-plane', 'service-policy input PM-COPP')]],
+  },
+  {
+    id: 'E10', group: 'np', lesson: 'ENCOR 6.6 — EEM', level: 2, kind: 'config', topics: ['Quản trị thiết bị'],
+    title: 'EEM applet: router tự phản ứng khi có sự kiện',
+    story: 'Viết applet WATCH-G01: khi log có %LINK-3-UPDOWN của Gi0/1 thì ghi syslog "Gi0/1 doi trang thai" và tạo mô tả trên Loopback9 để đánh dấu. Viết thêm applet thủ công BACKUP dùng event none để chạy bằng event manager run.',
+    build: () => makeNet([router('r1', 'R1', 200, 200, ['g0/0', 'g0/1']), router('r2', 'R2', 600, 200, ['g0/0'])], [['r1', 'g0/1', 'r2', 'g0/0']]),
+    init: [['r1', cfg('hostname R1', ...ifc('g0/1', '10.0.0.1 255.255.255.0'))], ['r2', cfg('hostname R2', ...ifc('g0/0', '10.0.0.2 255.255.255.0'))]],
+    tasks: [
+      { text: 'Applet WATCH-G01 bắt syslog chứa GigabitEthernet0/1, có action syslog và action cli', verify: 'show event manager policy registered', check: (a) => { const e = a.d('r1').eem?.['WATCH-G01']; return e?.event?.k === 'syslog' && /0\/1/.test(e.event.pat) && e.actions.some((x) => x.msg) && e.actions.some((x) => x.cli); } },
+      { text: 'Applet BACKUP dùng event none và đã chạy ít nhất một lần', verify: 'event manager run BACKUP ; show event manager history events', check: (a) => a.d('r1').eem?.BACKUP?.event?.k === 'none' && a.d('r1').eem.BACKUP.runs > 0 },
+      { text: 'Đã thử shutdown rồi no shutdown Gi0/1, applet WATCH-G01 đã kích hoạt và Loopback9 tồn tại', verify: 'show logging | include HA_EM ; show ip interface brief', check: (a) => a.d('r1').eem?.['WATCH-G01']?.runs > 0 && !!a.d('r1').ifaces.lo9 },
+      quiz('Applet EEM được đọc thứ tự action thế nào?', ['Theo nhãn action, so theo chữ và số như 1.0, 2.0', 'Ngẫu nhiên', 'Theo thời gian nhập', 'Chạy song song'], 0, 'Nhãn action quyết định thứ tự, nên đánh số cách quãng để chèn thêm.'),
+    ],
+    hints: ['event syslog pattern "GigabitEthernet0/1"', 'action 1.0 syslog msg "..."', 'action 2.0 cli command "enable", rồi "configure terminal", "interface loopback 9"'],
+    solution: [
+      ['r1', cfg('event manager applet WATCH-G01', 'event syslog pattern "GigabitEthernet0/1"', 'action 1.0 syslog msg "Gi0/1 doi trang thai"', 'action 2.0 cli command "enable"', 'action 3.0 cli command "configure terminal"', 'action 4.0 cli command "interface loopback 9"', 'action 5.0 cli command "end"', 'exit', 'event manager applet BACKUP', 'event none', 'action 1.0 syslog msg "Backup thu cong"', 'exit', 'interface g0/1', 'shutdown', 'no shutdown')],
+      ['r1', ['event manager run BACKUP']],
+    ],
+  },
+  {
+    id: 'E11', group: 'np', lesson: 'ENCOR 1.4 — QoS', level: 2, kind: 'config', topics: ['WAN/Serial'],
+    title: 'Đọc và áp cấu hình QoS: LLQ cho thoại, CBWFQ cho dữ liệu, shaping lồng nhau',
+    story: 'Link WAN 10 Mbps. Thoại đánh dấu EF cần ưu tiên tuyệt đối 1 Mbps, dữ liệu quan trọng AF31 được đảm bảo 30%. Tạo policy PM-WAN, rồi policy cha PM-SHAPE shape 10 Mbps gọi PM-WAN, áp chiều output trên Gi0/1. Mạng cũng đánh dấu EF cho gói từ ACL VOICE ngay ở Gi0/0.',
+    build: () => makeNet([pc('p1', 'PHONE', 100, 200, { ip: '10.0.1.10', gw: '10.0.1.1' }), router('r1', 'R1', 400, 200, ['g0/0', 'g0/1']), server('s1', 'SRV', 700, 200, { ip: '10.0.2.10', gw: '10.0.2.1' })], [['p1', 'fa0', 'r1', 'g0/0'], ['r1', 'g0/1', 's1', 'fa0']]),
+    init: [['r1', cfg('hostname R1', ...ifc('g0/0', '10.0.1.1 255.255.255.0'), ...ifc('g0/1', '10.0.2.1 255.255.255.0'), 'ip access-list extended VOICE', 'permit icmp host 10.0.1.10 any')]],
+    tasks: [
+      { text: 'Gi0/0 chiều input đánh dấu EF cho gói khớp ACL VOICE', verify: 'show policy-map interface g0/0', check: (a) => { const d = a.d('r1'), p = d.qos?.policies?.[d.ifaces['g0/0'].qosIn]; return !!p?.some((e) => e.dscp === 'ef' && d.qos.classes[e.cls]?.matches.some((m) => m.k === 'acl' && m.v === 'VOICE')); } },
+      { text: 'Policy con: class EF priority 1000, class AF31 bandwidth percent 30', verify: 'show policy-map', check: (a) => { const q = a.d('r1').qos; return Object.values(q?.policies || {}).some((p) => p.some((e) => e.priority === '1000 kbps' && q.classes[e.cls]?.matches.some((m) => m.v === 'ef')) && p.some((e) => e.bw === '30%' && q.classes[e.cls]?.matches.some((m) => m.v === 'af31'))); } },
+      { text: 'Gi0/1 chiều output là policy cha shape 10 Mbps gọi policy con', verify: 'show policy-map interface g0/1', check: (a) => { const d = a.d('r1'), p = d.qos?.policies?.[d.ifaces['g0/1'].qosOut]; return !!p?.some((e) => e.shape === 10000000 && e.child && d.qos.policies[e.child]); } },
+      { text: 'Ping từ PHONE làm counter class EF ở chiều output tăng', verify: 'ping 10.0.2.10 trên PHONE, rồi show policy-map interface g0/1', check: (a) => { const q = a.d('r1').qos; return Object.values(q?.policies || {}).some((p) => p.some((e) => e.priority && e.pkts > 0)) || has(a, 'r1', 'show policy-map interface g0/0', /[1-9]\d* packets/); } },
+      quiz('Priority khác bandwidth ở điểm nào?', ['Priority là hàng đợi ưu tiên tuyệt đối có giới hạn, bandwidth là đảm bảo tối thiểu khi nghẽn', 'Giống nhau', 'Bandwidth nhanh hơn', 'Priority chỉ dùng chiều vào'], 0, 'LLQ cho thoại và video. CBWFQ cho các lớp dữ liệu. Shaping thì giữ lại, policing thì cắt.'),
+    ],
+    hints: ['class-map match ip dscp ef', 'policy cha: class class-default, shape average 10000000, service-policy PM-WAN'],
+    solution: [
+      ['r1', cfg('class-map CM-VOICE-ACL', 'match access-group name VOICE', 'exit', 'class-map CM-EF', 'match ip dscp ef', 'exit', 'class-map CM-AF31', 'match ip dscp af31', 'exit', 'policy-map PM-MARK', 'class CM-VOICE-ACL', 'set dscp ef', 'exit', 'exit', 'policy-map PM-WAN', 'class CM-EF', 'priority 1000', 'exit', 'class CM-AF31', 'bandwidth percent 30', 'exit', 'exit', 'policy-map PM-SHAPE', 'class class-default', 'shape average 10000000', 'service-policy PM-WAN', 'exit', 'exit', 'interface g0/0', 'service-policy input PM-MARK', 'interface g0/1', 'service-policy output PM-SHAPE')],
+      ['p1', ['ping 10.0.2.10']],
+    ],
+  },
+  // ============================== ENARSI ==============================
+  {
+    id: 'R01', group: 'np', lesson: 'ENARSI 1.2, 1.3, 1.4 — route-map, tag, redistribution', level: 3, kind: 'config', topics: ['OSPF', 'EIGRP'],
+    title: 'Route-map và tag: chống route quay đầu khi redistribute',
+    story: 'R2 nối OSPF với EIGRP. R1 đưa 172.16.50.0/24 và 172.16.60.0/24 (connected) vào OSPF, gắn tag 100 cho dải 50. Trên R2, khi redistribute OSPF sang EIGRP phải chặn mọi route tag 100 vì đó là dải dành riêng cho OSPF, các route khác đi qua bình thường với metric seed.',
+    build: () => makeNet([router('r1', 'R1', 120, 200, ['g0/0']), router('r2', 'R2', 400, 200, ['g0/0', 'g0/1']), router('r3', 'R3', 680, 200, ['g0/0'])], [['r1', 'g0/0', 'r2', 'g0/0'], ['r2', 'g0/1', 'r3', 'g0/0']]),
+    init: [
+      ['r1', cfg('hostname R1', ...ifc('g0/0', '10.12.0.1 255.255.255.0'), ...lo(50, '172.16.50.1 255.255.255.0'), ...lo(60, '172.16.60.1 255.255.255.0'), ...ospf('1.1.1.1', '10.12.0.0 0.0.0.255 area 0'))],
+      ['r2', cfg('hostname R2', ...ifc('g0/0', '10.12.0.2 255.255.255.0'), ...ifc('g0/1', '10.23.0.2 255.255.255.0'), ...ospf('2.2.2.2', '10.12.0.0 0.0.0.255 area 0'), ...eigrp('10.23.0.0 0.0.0.255'))],
+      ['r3', cfg('hostname R3', ...ifc('g0/0', '10.23.0.3 255.255.255.0'), ...eigrp('10.23.0.0 0.0.0.255'))],
+    ],
+    tasks: [
+      { text: 'R2 thấy 172.16.50.0/24 và 172.16.60.0/24 dạng O E2; dải 50 mang tag 100', verify: 'show ip route ospf ; show ip route 172.16.50.0', check: (a) => code(a, 'r2', '172.16.50.0/24') === 'O E2' && rt(a, 'r2', '172.16.50.0/24').tag === 100 && code(a, 'r2', '172.16.60.0/24') === 'O E2' },
+      { text: 'R3 thấy 172.16.60.0/24 dạng D EX, không thấy 172.16.50.0/24', verify: 'show ip route eigrp', check: (a) => code(a, 'r3', '172.16.60.0/24') === 'D EX' && !rt(a, 'r3', '172.16.50.0/24') },
+      { text: 'Việc chặn dùng match tag 100 trong route-map, không phải xóa redistribute', verify: 'show route-map', check: (a) => Object.values(a.d('r2').routeMaps || {}).some((l) => l.some((e) => e.action === 'deny' && e.matches.some((m) => m.k === 'tag' && m.vals.includes(100)))) },
+      quiz('Khi redistribute hai chiều ở hai điểm, vì sao cần tag?', ['Để nhận ra route vốn từ giao thức kia và không đưa ngược lại, tránh vòng lặp và đường đi tối ưu sai', 'Để tăng băng thông', 'Để bỏ qua AD', 'Vì OSPF bắt buộc'], 0, 'Tag được đặt khi vào miền, và match tag khi ra khỏi miền. AD 110 của OSPF external thấp hơn 170 của EIGRP external nên route dễ quay đầu.'),
+      quiz('Redistribute vào EIGRP không có metric thì sao?', ['Seed metric vô hạn nên route không được quảng bá', 'Dùng metric 1', 'Dùng hop count', 'Báo lỗi cú pháp'], 0, 'Chỉ connected và static được lấy metric từ cổng. OSPF vào EIGRP cần metric hoặc default-metric.'),
+    ],
+    hints: ['Trên R1: ip prefix-list + route-map, rồi redistribute connected subnets route-map X', 'Trên R2: route-map deny 10 match tag 100, permit 20', 'redistribute ospf 1 metric 100000 100 255 1 1500 route-map X'],
+    solution: [
+      ['r1', cfg('ip prefix-list DAI50 permit 172.16.50.0/24', 'route-map R1-OUT permit 10', 'match ip address prefix-list DAI50', 'set tag 100', 'route-map R1-OUT permit 20', 'exit', 'router ospf 1', 'redistribute connected subnets route-map R1-OUT')],
+      ['r2', cfg('route-map O2E deny 10', 'match tag 100', 'route-map O2E permit 20', 'exit', 'router eigrp 100', 'redistribute ospf 1 metric 100000 100 255 1 1500 route-map O2E')],
+    ],
+  },
+  {
+    id: 'R02', group: 'np', lesson: 'ENARSI 1.6 — PBR, ENCOR 3.2', level: 2, kind: 'config', topics: ['ACL'],
+    title: 'PBR: phòng Kế toán đi đường riêng, không quan tâm bảng định tuyến',
+    story: 'R1 có default route qua R2. Riêng máy Kế toán 10.0.1.10 phải đi qua R3. Dùng ACL, route-map với set ip next-hop và ip policy trên cổng vào. Máy khác vẫn đi qua R2.',
+    build: () => makeNet([
+      pc('kt', 'PC-KT', 80, 90, { ip: '10.0.1.10', gw: '10.0.1.1' }), pc('kd', 'PC-KD', 80, 320, { ip: '10.0.1.20', gw: '10.0.1.1' }), sw('s', 'SW', 220, 200, fa(4)),
+      router('r1', 'R1', 400, 200, ['g0/0', 'g0/1', 'g0/2']), router('r2', 'R2', 620, 90, ['g0/0', 'g0/1']), router('r3', 'R3', 620, 320, ['g0/0', 'g0/1']), server('net', 'WEB', 960, 200, { ip: '8.8.8.8', gw: '8.8.8.1' }), sw('s2', 'SW2', 780, 200, fa(4)),
+    ], [['kt', 'fa0', 's', 'fa0/1'], ['kd', 'fa0', 's', 'fa0/2'], ['s', 'fa0/3', 'r1', 'g0/0'], ['r1', 'g0/1', 'r2', 'g0/0'], ['r1', 'g0/2', 'r3', 'g0/0'], ['r2', 'g0/1', 's2', 'fa0/1'], ['r3', 'g0/1', 's2', 'fa0/2'], ['net', 'fa0', 's2', 'fa0/3']]),
+    init: [
+      ['r1', cfg('hostname R1', ...ifc('g0/0', '10.0.1.1 255.255.255.0'), ...ifc('g0/1', '10.12.0.1 255.255.255.0'), ...ifc('g0/2', '10.13.0.1 255.255.255.0'), 'ip route 0.0.0.0 0.0.0.0 10.12.0.2')],
+      ['r2', cfg('hostname R2', ...ifc('g0/0', '10.12.0.2 255.255.255.0'), ...ifc('g0/1', '8.8.8.1 255.255.255.0'), 'ip route 10.0.1.0 255.255.255.0 10.12.0.1')],
+      ['r3', cfg('hostname R3', ...ifc('g0/0', '10.13.0.3 255.255.255.0'), ...ifc('g0/1', '8.8.8.3 255.255.255.0'), 'ip route 10.0.1.0 255.255.255.0 10.13.0.1')],
+    ],
+    tasks: [
+      { text: 'Traceroute của PC-KT đi qua R3 (10.13.0.3)', verify: 'tracert 8.8.8.8 trên PC-KT', check: (a) => a.trace('kt', '8.8.8.8').includes('10.13.0.3') && a.ping('kt', '8.8.8.8') },
+      { text: 'PC-KD vẫn đi qua R2 (10.12.0.2)', verify: 'tracert 8.8.8.8 trên PC-KD', check: (a) => a.trace('kd', '8.8.8.8').includes('10.12.0.2') && !a.trace('kd', '8.8.8.8').includes('10.13.0.3') },
+      { text: 'Bảng route R1 không đổi, chính sách gắn trên Gi0/0', verify: 'show ip policy ; show route-map', check: (a) => !!a.d('r1').ifaces['g0/0'].policy && a.lookup('r1', '8.8.8.8')?.nextHop === '10.12.0.2' },
+      quiz('Gói không khớp route-map PBR thì sao?', ['Đi theo bảng định tuyến bình thường', 'Bị hủy', 'Đi theo next-hop cuối', 'Trả ICMP lỗi'], 0, 'PBR chỉ can thiệp khi gói khớp dòng permit. Dòng deny cũng trả gói về bảng định tuyến.'),
+    ],
+    hints: ['ip access-list standard KT, permit host 10.0.1.10', 'route-map PBR permit 10, match ip address KT, set ip next-hop 10.13.0.3', 'interface g0/0, ip policy route-map PBR'],
+    solution: [['r1', cfg('ip access-list standard KT', 'permit host 10.0.1.10', 'exit', 'route-map PBR permit 10', 'match ip address KT', 'set ip next-hop 10.13.0.3', 'exit', 'interface g0/0', 'ip policy route-map PBR')]],
+  },
+  {
+    id: 'R03', group: 'np', lesson: 'ENARSI 1.10 — OSPF area types', level: 3, kind: 'config', topics: ['OSPF'],
+    title: 'OSPF: totally stubby và NSSA cho chi nhánh nhỏ',
+    story: 'Chi nhánh R3 ở area 1 chỉ có một lối ra, biến area 1 thành totally stubby để chỉ còn default route. Chi nhánh R4 ở area 2 có đường riêng ra đối tác 192.0.2.0/24 phải redistribute, nên dùng NSSA. R1 đang đưa external 198.51.100.0/24 vào OSPF.',
+    build: () => makeNet([router('r1', 'R1-ASBR', 400, 80, ['g0/0']), router('r2', 'R2-ABR', 400, 240, ['g0/0', 'g0/1', 'g0/2']), router('r3', 'R3', 160, 380, ['g0/0']), router('r4', 'R4', 640, 380, ['g0/0'])], [['r1', 'g0/0', 'r2', 'g0/0'], ['r2', 'g0/1', 'r3', 'g0/0'], ['r2', 'g0/2', 'r4', 'g0/0']]),
+    init: [
+      ['r1', cfg('hostname R1-ASBR', ...ifc('g0/0', '10.0.12.1 255.255.255.0'), ...lo(0, '10.0.100.1 255.255.255.0'), ...lo(1, '198.51.100.1 255.255.255.0'), ...ospf('1.1.1.1', '10.0.12.0 0.0.0.255 area 0', '10.0.100.0 0.0.0.255 area 0'), 'router ospf 1', 'redistribute connected subnets')],
+      ['r2', cfg('hostname R2-ABR', ...ifc('g0/0', '10.0.12.2 255.255.255.0'), ...ifc('g0/1', '10.0.23.2 255.255.255.0'), ...ifc('g0/2', '10.0.24.2 255.255.255.0'), ...ospf('2.2.2.2', '10.0.12.0 0.0.0.255 area 0', '10.0.23.0 0.0.0.255 area 1', '10.0.24.0 0.0.0.255 area 2'))],
+      ['r3', cfg('hostname R3', ...ifc('g0/0', '10.0.23.3 255.255.255.0'), ...lo(0, '10.3.0.1 255.255.255.0'), ...ospf('3.3.3.3', '0.0.0.0 255.255.255.255 area 1'))],
+      ['r4', cfg('hostname R4', ...ifc('g0/0', '10.0.24.4 255.255.255.0'), ...lo(0, '10.4.0.1 255.255.255.0'), ...lo(1, '192.0.2.1 255.255.255.0'), ...ospf('4.4.4.4', '10.0.24.0 0.0.0.255 area 2', '10.4.0.0 0.0.0.255 area 2'))],
+    ],
+    tasks: [
+      { text: 'R3 chỉ còn default O*IA, không còn 198.51.100.0/24 và 10.0.100.0/24, vẫn ping được 10.0.100.1', verify: 'show ip route ospf', check: (a) => code(a, 'r3', '0.0.0.0/0') === 'O*IA' && !rt(a, 'r3', '198.51.100.0/24') && !rt(a, 'r3', '10.0.100.0/24') && a.ping('r3', '10.0.100.1') },
+      { text: 'Area 2 là NSSA: R4 không thấy 198.51.100.0/24; R2 thấy 192.0.2.0/24 dạng O N2', verify: 'show ip route', check: (a) => !rt(a, 'r4', '198.51.100.0/24') && code(a, 'r2', '192.0.2.0/24') === 'O N2' },
+      { text: 'R1 thấy 192.0.2.0/24 dạng O E2, ABR đã đổi Type 7 thành Type 5', verify: 'show ip route ospf', check: (a) => code(a, 'r1', '192.0.2.0/24') === 'O E2' },
+      quiz('Area stub thiếu cờ ở một đầu thì sao?', ['Hello mang cờ E khác nhau nên không thành láng giềng', 'Vẫn FULL', 'Chỉ mất default', 'Router tự đổi'], 0, 'Mọi router trong area phải cùng khai stub hoặc nssa.'),
+      quiz('Router nào cần no-summary?', ['Chỉ ABR', 'Mọi router', 'ASBR', 'Router nội vùng'], 0, 'ABR quyết định không gửi Type 3 vào area.'),
+    ],
+    hints: ['R2: area 1 stub no-summary, R3: area 1 stub', 'R2 và R4: area 2 nssa', 'R4: redistribute connected subnets route-map chỉ lấy 192.0.2.0/24'],
+    solution: [
+      ['r2', cfg('router ospf 1', 'area 1 stub no-summary', 'area 2 nssa')],
+      ['r3', cfg('router ospf 1', 'area 1 stub')],
+      ['r4', cfg('ip prefix-list DT permit 192.0.2.0/24', 'route-map DT permit 10', 'match ip address prefix-list DT', 'exit', 'router ospf 1', 'area 2 nssa', 'redistribute connected subnets route-map DT')],
+    ],
+  },
+  {
+    id: 'R04', group: 'np', lesson: 'ENARSI 1.10 — virtual link, xác thực', level: 3, kind: 'config', topics: ['OSPF'],
+    title: 'OSPF: virtual link cho area xa và xác thực MD5 trên backbone',
+    story: 'Sau sáp nhập, area 2 chỉ nối với area 1, không chạm area 0, nên R4 không thấy mạng nào ở backbone. Tạo virtual link giữa R2 và R3 qua area 1. Đồng thời bật xác thực MD5 cho area 0 trên link R1, R2 với key CCNP123.',
+    build: () => makeNet([router('r1', 'R1', 100, 200, ['g0/0']), router('r2', 'R2', 320, 200, ['g0/0', 'g0/1']), router('r3', 'R3', 540, 200, ['g0/0', 'g0/1']), router('r4', 'R4', 760, 200, ['g0/0'])], [['r1', 'g0/0', 'r2', 'g0/0'], ['r2', 'g0/1', 'r3', 'g0/0'], ['r3', 'g0/1', 'r4', 'g0/0']]),
+    init: [
+      ['r1', cfg('hostname R1', ...ifc('g0/0', '10.0.12.1 255.255.255.0'), ...lo(0, '10.1.0.1 255.255.255.0'), ...ospf('1.1.1.1', '0.0.0.0 255.255.255.255 area 0'))],
+      ['r2', cfg('hostname R2', ...ifc('g0/0', '10.0.12.2 255.255.255.0'), ...ifc('g0/1', '10.0.23.2 255.255.255.0'), ...ospf('2.2.2.2', '10.0.12.0 0.0.0.255 area 0', '10.0.23.0 0.0.0.255 area 1'))],
+      ['r3', cfg('hostname R3', ...ifc('g0/0', '10.0.23.3 255.255.255.0'), ...ifc('g0/1', '10.0.34.3 255.255.255.0'), ...ospf('3.3.3.3', '10.0.23.0 0.0.0.255 area 1', '10.0.34.0 0.0.0.255 area 2'))],
+      ['r4', cfg('hostname R4', ...ifc('g0/0', '10.0.34.4 255.255.255.0'), ...lo(0, '10.4.0.1 255.255.255.0'), ...ospf('4.4.4.4', '0.0.0.0 255.255.255.255 area 2'))],
+    ],
+    tasks: [
+      { text: 'Virtual link R2 ↔ R3 up, R4 ping được 10.1.0.1', verify: 'show ip ospf virtual-links', check: (a) => has(a, 'r2', 'show ip ospf virtual-links', /is up/) && a.ping('r4', '10.1.0.1') },
+      { text: 'R1 thấy 10.4.0.0/24 dạng O IA', verify: 'show ip route ospf', check: (a) => code(a, 'r1', '10.4.0.0/24') === 'O IA' },
+      { text: 'Link R1, R2 dùng MD5, láng giềng vẫn FULL', verify: 'show ip ospf interface g0/0', check: (a) => a.ospfIf('r1', 'g0/0')?.authT === 'md5' && a.ospfIf('r2', 'g0/0')?.authT === 'md5' && a.nbrs('r1').some((n) => n.dev === 'r2') },
+      quiz('Virtual link không được đi qua area nào?', ['Area stub hoặc NSSA', 'Area thường', 'Area 1', 'Area có số lẻ'], 0, 'Area transit phải giữ được đủ LSA nên không thể là stub. Cấu hình dùng router-id của đầu kia, không phải IP cổng.'),
+    ],
+    hints: ['area 1 virtual-link 3.3.3.3 trên R2 và ngược lại trên R3', 'area 0 authentication message-digest + ip ospf message-digest-key 1 md5 CCNP123', 'Router có cổng vào area 0 qua virtual link cũng theo cấu hình xác thực của area 0 khi đo thật'],
+    solution: [
+      ['r2', cfg('router ospf 1', 'area 1 virtual-link 3.3.3.3', 'exit', 'interface g0/0', 'ip ospf authentication message-digest', 'ip ospf message-digest-key 1 md5 CCNP123')],
+      ['r3', cfg('router ospf 1', 'area 1 virtual-link 2.2.2.2')],
+      ['r1', cfg('interface g0/0', 'ip ospf authentication message-digest', 'ip ospf message-digest-key 1 md5 CCNP123')],
+    ],
+  },
+  {
+    id: 'R05', group: 'np', lesson: 'ENARSI 1.9 — EIGRP named, xác thực, stub', level: 3, kind: 'config', topics: ['EIGRP'],
+    title: 'EIGRP: named mode, xác thực bằng key chain và router stub',
+    story: 'R1 và R2 ở hai đầu, R3 là chi nhánh chỉ nên nhận route. Viết cấu hình named mode trên R2 thay vì kiểu cũ, thêm xác thực MD5 bằng key chain KC giữa R1 và R2. R3 thành stub để R1, R2 không gửi query tới nó và không dùng nó làm đường trung chuyển.',
+    build: () => makeNet([router('r1', 'R1', 100, 110, ['g0/0', 'g0/1']), router('r2', 'R2', 600, 110, ['g0/0', 'g0/1']), router('r3', 'R3', 350, 340, ['g0/0', 'g0/1'])], [['r1', 'g0/0', 'r2', 'g0/0'], ['r1', 'g0/1', 'r3', 'g0/0'], ['r2', 'g0/1', 'r3', 'g0/1']]),
+    init: [
+      ['r1', cfg('hostname R1', ...ifc('g0/0', '10.0.12.1 255.255.255.0'), ...ifc('g0/1', '10.0.13.1 255.255.255.0'), ...lo(0, '10.1.0.1 255.255.255.0'), ...eigrp('10.0.0.0 0.255.255.255'))],
+      ['r2', cfg('hostname R2', ...ifc('g0/0', '10.0.12.2 255.255.255.0'), ...ifc('g0/1', '10.0.23.2 255.255.255.0'), ...lo(0, '10.2.0.1 255.255.255.0'))],
+      ['r3', cfg('hostname R3', ...ifc('g0/0', '10.0.13.3 255.255.255.0'), ...ifc('g0/1', '10.0.23.3 255.255.255.0'), ...lo(0, '10.3.0.1 255.255.255.0'), ...eigrp('10.0.0.0 0.255.255.255'))],
+    ],
+    tasks: [
+      { text: 'R2 chạy named mode tên LAB, autonomous-system 100', verify: 'show running-config | section eigrp', check: (a) => a.d('r2').eigrp?.named === 'LAB' && a.d('r2').eigrp.as === 100 && a.eigrpNbrs('r2').length > 0 },
+      { text: 'Giữa R1 và R2 dùng MD5 với key chain KC, vẫn là láng giềng', verify: 'show ip eigrp neighbors ; show key chain', check: (a) => { const e = N.eigrpIfaces(N.makeCtx(a.net), 'r1').find((x) => x.ifn === 'g0/0'); return e?.authMode === 'md5' && e.keys.length > 0 && a.eigrpNbrs('r1').some((n) => n.to === 'r2'); } },
+      { text: 'R3 là stub: khi đứt link R1, R2 thì R1 không đi vòng qua R3 để tới 10.2.0.0/24', verify: 'shutdown g0/0 trên R1 rồi show ip route', check: (a) => { if (!a.d('r3').eigrp?.stub) return false; const n2 = N.cloneNet(a.net); n2.devices.r1.ifaces['g0/0'].shutdown = true; return !N.routeTable(N.makeCtx(n2), 'r1').some((r) => r.net === '10.2.0.0'); } },
+      { text: 'R1 vẫn thấy 10.3.0.0/24 của stub', verify: 'show ip route eigrp', check: (a) => code(a, 'r1', '10.3.0.0/24') === 'D' },
+      quiz('Neighbor EIGRP cần những gì khớp nhau?', ['AS, K-values, xác thực, subnet', 'Router-id, hello, MTU', 'Hold time', 'Priority'], 0, 'Hello và hold time có thể khác nhau. Router-id trùng chỉ gây lỗi route external.'),
+      quiz('Named mode lợi gì?', ['Gom cấu hình một chỗ, dùng wide metric cho cổng tốc độ cao, cùng lúc IPv4 và IPv6', 'Bỏ được xác thực', 'Không cần AS', 'Thay OSPF'], 0, 'Cấu hình nằm trong address-family, af-interface, topology base.'),
+    ],
+    hints: ['router eigrp LAB, address-family ipv4 unicast autonomous-system 100', 'af-interface g0/0: authentication mode md5, authentication key-chain KC', 'Trên R1: ip authentication mode eigrp 100 md5 và ip authentication key-chain eigrp 100 KC'],
+    solution: [
+      ['r1', cfg('key chain KC', 'key 1', 'key-string CCNP123', 'exit', 'exit', 'interface g0/0', 'ip authentication mode eigrp 100 md5', 'ip authentication key-chain eigrp 100 KC')],
+      ['r2', cfg('key chain KC', 'key 1', 'key-string CCNP123', 'exit', 'exit', 'router eigrp LAB', 'address-family ipv4 unicast autonomous-system 100', 'network 10.0.0.0 0.255.255.255', 'af-interface g0/0', 'authentication mode md5', 'authentication key-chain KC', 'exit-af-interface', 'exit-address-family')],
+      ['r3', cfg('router eigrp 100', 'eigrp stub connected')],
+    ],
+  },
+  {
+    id: 'R06', group: 'np', lesson: 'ENARSI 1.5, 1.9 — variance, FS, summary', level: 3, kind: 'config', topics: ['EIGRP'],
+    title: 'EIGRP: đọc FD, RD, feasible successor, chia tải không đều và tóm tắt',
+    story: 'R1 có hai đường tới 10.9.0.0/24: qua R2 nhanh và qua R3 chậm hơn. Đọc bảng topology để biết R3 có phải feasible successor không, đặt variance để dùng cả hai, rồi tóm tắt các mạng 10.9.x.0 của R4 thành 10.9.0.0/16 khi gửi về phía R2 và R3.',
+    build: () => makeNet([router('r1', 'R1', 100, 200, ['g0/0', 'g0/1']), router('r2', 'R2', 360, 90, ['g0/0', 'g0/1']), router('r3', 'R3', 360, 320, ['g0/0', 'g0/1']), router('r4', 'R4', 640, 200, ['g0/0', 'g0/1'])], [['r1', 'g0/0', 'r2', 'g0/0'], ['r1', 'g0/1', 'r3', 'g0/0'], ['r2', 'g0/1', 'r4', 'g0/0'], ['r3', 'g0/1', 'r4', 'g0/1']]),
+    init: [
+      ['r1', cfg('hostname R1', ...ifc('g0/0', '10.0.12.1 255.255.255.0'), ...ifc('g0/1', '10.0.13.1 255.255.255.0'), 'bandwidth 100000', ...eigrp('10.0.0.0 0.255.255.255'))],
+      ['r2', cfg('hostname R2', ...ifc('g0/0', '10.0.12.2 255.255.255.0'), ...ifc('g0/1', '10.0.24.2 255.255.255.0'), ...eigrp('10.0.0.0 0.255.255.255'))],
+      ['r3', cfg('hostname R3', ...ifc('g0/0', '10.0.13.3 255.255.255.0'), ...ifc('g0/1', '10.0.34.3 255.255.255.0'), ...eigrp('10.0.0.0 0.255.255.255'))],
+      ['r4', cfg('hostname R4', ...ifc('g0/0', '10.0.24.4 255.255.255.0'), ...ifc('g0/1', '10.0.34.4 255.255.255.0'), ...lo(0, '10.9.0.1 255.255.255.0'), ...lo(1, '10.9.1.1 255.255.255.0'), ...eigrp('10.0.0.0 0.255.255.255'))],
+    ],
+    tasks: [
+      quiz('Điều kiện để một đường thành feasible successor?', ['RD của đường đó nhỏ hơn FD hiện tại', 'FD của nó nhỏ hơn RD', 'Băng thông lớn hơn', 'Cùng next-hop'], 0, 'Feasibility condition đảm bảo không lặp. Đường đó dùng được ngay khi successor hỏng, không cần query.'),
+      { text: 'R4 tóm tắt 10.9.0.0/16 trên cả hai cổng, R1 chỉ còn route /16', verify: 'show ip route eigrp', check: (a) => code(a, 'r1', '10.9.0.0/16') === 'D' && !rt(a, 'r1', '10.9.0.0/24') && !rt(a, 'r1', '10.9.1.0/24') },
+      { text: 'R4 có route Null0 cho 10.9.0.0/16, AD 5', verify: 'show ip route 10.9.0.0', check: (a) => rt(a, 'r4', '10.9.0.0/16')?.discard && rt(a, 'r4', '10.9.0.0/16').ad === 5 },
+      { text: 'Đặt variance trên R1 để bảng route có cả hai next-hop cho 10.9.0.0/16', verify: 'show ip route 10.9.0.0 ; show ip eigrp topology', check: (a) => a.d('r1').eigrp.variance > 1 && (rt(a, 'r1', '10.9.0.0/16')?.alts || []).some((p) => p.nh !== rt(a, 'r1', '10.9.0.0/16').nextHop) },
+      { text: 'Bảng topology của R1 cho thấy FD và đường feasible successor', verify: 'show ip eigrp topology', check: (a) => has(a, 'r1', 'show ip eigrp topology', /FD is \d+[\s\S]*via 10\.0\.13\.3 \(\d+\/\d+\)/) },
+      quiz('Router tóm tắt tự tạo route Null0 để làm gì?', ['Chống lặp: gói tới mạng con không tồn tại bị bỏ thay vì đi theo default', 'Tăng tốc', 'Làm next-hop', 'Để OSPF học'], 0, 'Đó là discard route, AD 5 trong EIGRP.'),
+    ],
+    hints: ['ip summary-address eigrp 100 10.9.0.0 255.255.0.0 trên g0/0 và g0/1 của R4', 'router eigrp 100, variance 2'],
+    solution: [
+      ['r4', cfg('interface g0/0', 'ip summary-address eigrp 100 10.9.0.0 255.255.0.0', 'interface g0/1', 'ip summary-address eigrp 100 10.9.0.0 255.255.0.0')],
+      ['r1', cfg('router eigrp 100', 'variance 20')],
+    ],
+  },
+  {
+    id: 'R07', group: 'np', lesson: 'ENARSI 1.11, ENCOR 3.2 — BGP path selection', level: 3, kind: 'config', topics: ['BGP'],
+    title: 'BGP: local-preference chọn đường ra, AS-path prepend chọn đường vào',
+    story: 'Công ty AS 65001 có hai router biên R1, R2 nối ISP-A AS 100 và ISP-B AS 200, hai ISP nối nhau. Muốn đi ra qua R2 và lưu lượng từ Internet đi vào qua R1. Dùng local-preference 200 cho route học ở R2, prepend AS khi quảng bá ra từ R2.',
+    build: () => makeNet([router('r1', 'R1', 200, 320, ['g0/0', 'g0/1']), router('r2', 'R2', 600, 320, ['g0/0', 'g0/1']), router('a', 'ISP-A', 200, 90, ['g0/0', 'g0/1']), router('b', 'ISP-B', 600, 90, ['g0/0', 'g0/1'])], [['r1', 'g0/0', 'r2', 'g0/0'], ['r1', 'g0/1', 'a', 'g0/0'], ['r2', 'g0/1', 'b', 'g0/0'], ['a', 'g0/1', 'b', 'g0/1']]),
+    init: [
+      ['r1', cfg('hostname R1', ...ifc('g0/0', '10.0.12.1 255.255.255.0'), ...ifc('g0/1', '10.0.1.1 255.255.255.252'), ...lo(0, '172.20.0.1 255.255.255.0'), 'router bgp 65001', 'neighbor 10.0.12.2 remote-as 65001', 'neighbor 10.0.12.2 next-hop-self', 'neighbor 10.0.1.2 remote-as 100', 'network 172.20.0.0 mask 255.255.255.0')],
+      ['r2', cfg('hostname R2', ...ifc('g0/0', '10.0.12.2 255.255.255.0'), ...ifc('g0/1', '10.0.2.1 255.255.255.252'), 'router bgp 65001', 'neighbor 10.0.12.1 remote-as 65001', 'neighbor 10.0.12.1 next-hop-self', 'neighbor 10.0.2.2 remote-as 200')],
+      ['a', cfg('hostname ISP-A', ...ifc('g0/0', '10.0.1.2 255.255.255.252'), ...ifc('g0/1', '10.0.3.1 255.255.255.252'), ...lo(0, '8.8.8.1 255.255.255.0'), 'router bgp 100', 'neighbor 10.0.1.1 remote-as 65001', 'neighbor 10.0.3.2 remote-as 200', 'network 8.8.8.0 mask 255.255.255.0')],
+      ['b', cfg('hostname ISP-B', ...ifc('g0/0', '10.0.2.2 255.255.255.252'), ...ifc('g0/1', '10.0.3.2 255.255.255.252'), 'router bgp 200', 'neighbor 10.0.2.1 remote-as 65001', 'neighbor 10.0.3.1 remote-as 100')],
+    ],
+    tasks: [
+      { text: 'R1 đi ra 8.8.8.0/24 qua R2 (next-hop 10.0.12.2), nhờ local-preference 200', verify: 'show ip bgp', check: (a) => rt(a, 'r1', '8.8.8.0/24')?.nextHop === '10.0.12.2' && has(a, 'r1', 'show ip bgp', /\*>i8\.8\.8\.0\/24\s+10\.0\.12\.2\s+0\s+200/) },
+      { text: 'R2 cũng dùng đường qua ISP-B dù AS-path dài hơn', verify: 'show ip bgp', check: (a) => rt(a, 'r2', '8.8.8.0/24')?.nextHop === '10.0.2.2' },
+      { text: 'ISP-B đi về 172.20.0.0/24 qua ISP-A vì R2 prepend thêm AS 65001 hai lần', verify: 'show ip bgp trên ISP-B', check: (a) => rt(a, 'b', '172.20.0.0/24')?.nextHop === '10.0.3.1' && has(a, 'r2', 'show ip bgp neighbors 10.0.2.2 advertised-routes', /65001 65001 65001/) },
+      quiz('Thứ tự chọn đường BGP của Cisco bắt đầu thế nào?', ['Weight, local-pref, tự sinh, AS-path, origin, MED, eBGP trước iBGP', 'AS-path, weight, MED', 'MED, local-pref, weight', 'Router-id trước tiên'], 0, 'Câu nhớ: N WLLA OMNI. Weight chỉ có ý nghĩa cục bộ trên một router, local-pref có ý nghĩa trong AS, MED gợi ý cho AS kế bên.'),
+      quiz('Đổi route-map xong, dùng lệnh nào để áp mà không rớt phiên?', ['clear ip bgp * soft', 'clear ip bgp *', 'reload', 'no router bgp'], 0, 'Route refresh gửi lại Adj-RIB mà không rớt phiên TCP.'),
+    ],
+    hints: ['route-map LP permit 10, set local-preference 200, neighbor 10.0.2.2 route-map LP in', 'route-map PRE permit 10, set as-path prepend 65001 65001, neighbor 10.0.2.2 route-map PRE out'],
+    solution: [['r2', cfg('route-map LP permit 10', 'set local-preference 200', 'route-map PRE permit 10', 'set as-path prepend 65001 65001', 'exit', 'router bgp 65001', 'neighbor 10.0.2.2 route-map LP in', 'neighbor 10.0.2.2 route-map PRE out')]],
+  },
+  {
+    id: 'R08', group: 'np', lesson: 'ENARSI 1.11 — route reflector, peer-group, multihop', level: 3, kind: 'config', topics: ['BGP'],
+    title: 'BGP: route reflector, peer group, eBGP multihop qua loopback, xác thực',
+    story: 'AS 65000 có RR ở giữa và hai client C1, C2 không nối iBGP trực tiếp. Dùng peer-group IBGP trên RR, bật route-reflector-client. C2 nối eBGP tới EXT bằng loopback nên cần ebgp-multihop và mật khẩu MD5. EXT quảng bá 8.8.8.0/24, C1 phải học được.',
+    build: () => makeNet([router('c1', 'C1', 100, 200, ['g0/0']), router('rr', 'RR', 320, 200, ['g0/0', 'g0/1']), router('c2', 'C2', 540, 200, ['g0/0', 'g0/1']), router('ext', 'EXT', 760, 200, ['g0/0'])], [['c1', 'g0/0', 'rr', 'g0/0'], ['rr', 'g0/1', 'c2', 'g0/0'], ['c2', 'g0/1', 'ext', 'g0/0']]),
+    init: [
+      ['c1', cfg('hostname C1', ...ifc('g0/0', '10.0.1.1 255.255.255.0'), ...lo(0, '1.1.1.1 255.255.255.255'), ...ospf('1.1.1.1', '0.0.0.0 255.255.255.255 area 0'), 'router bgp 65000', 'neighbor 3.3.3.3 remote-as 65000', 'neighbor 3.3.3.3 update-source loopback0')],
+      ['rr', cfg('hostname RR', ...ifc('g0/0', '10.0.1.3 255.255.255.0'), ...ifc('g0/1', '10.0.2.3 255.255.255.0'), ...lo(0, '3.3.3.3 255.255.255.255'), ...ospf('3.3.3.3', '0.0.0.0 255.255.255.255 area 0'), 'router bgp 65000')],
+      ['c2', cfg('hostname C2', ...ifc('g0/0', '10.0.2.2 255.255.255.0'), ...ifc('g0/1', '10.0.3.2 255.255.255.0'), ...lo(0, '2.2.2.2 255.255.255.255'), ...ospf('2.2.2.2', '10.0.2.0 0.0.0.255 area 0', '2.2.2.2 0.0.0.0 area 0'), 'ip route 9.9.9.9 255.255.255.255 10.0.3.9', 'router bgp 65000', 'neighbor 3.3.3.3 remote-as 65000', 'neighbor 3.3.3.3 update-source loopback0', 'neighbor 3.3.3.3 next-hop-self')],
+      ['ext', cfg('hostname EXT', ...ifc('g0/0', '10.0.3.9 255.255.255.0'), ...lo(0, '9.9.9.9 255.255.255.255'), ...lo(1, '8.8.8.1 255.255.255.0'), 'ip route 0.0.0.0 0.0.0.0 10.0.3.2', 'router bgp 65535', 'neighbor 2.2.2.2 remote-as 65000', 'neighbor 2.2.2.2 update-source loopback0', 'neighbor 2.2.2.2 ebgp-multihop 2', 'neighbor 2.2.2.2 password BGP123', 'network 8.8.8.0 mask 255.255.255.0')],
+    ],
+    tasks: [
+      { text: 'RR dùng peer-group IBGP, hai client là thành viên và là route-reflector-client', verify: 'show ip bgp peer-group ; show ip bgp neighbors 1.1.1.1', check: (a) => { const b = a.d('rr').bgp; return b.groups?.IBGP?.rrClient && b.neighbors['1.1.1.1']?.group === 'IBGP' && b.neighbors['2.2.2.2']?.group === 'IBGP' && a.bgpUp('rr', '1.1.1.1') && a.bgpUp('rr', '2.2.2.2'); } },
+      { text: 'Phiên eBGP C2 tới 9.9.9.9 Established, dùng multihop và mật khẩu', verify: 'show ip bgp summary', check: (a) => a.bgpUp('c2', '9.9.9.9') && !!a.d('c2').bgp.neighbors['9.9.9.9'].multihop && !!a.d('c2').bgp.neighbors['9.9.9.9'].password },
+      { text: 'C1 học 8.8.8.0/24 qua RR và ping được 8.8.8.1', verify: 'show ip bgp ; ping 8.8.8.1', check: (a) => code(a, 'c1', '8.8.8.0/24') === 'B' && a.ping('c1', '8.8.8.1') },
+      quiz('Route reflector giải quyết vấn đề gì?', ['Tránh full-mesh iBGP, n(n-1)/2 phiên', 'Thay eBGP', 'Tăng băng thông', 'Đổi AS'], 0, 'RR giữ nguyên next-hop, thêm originator-id và cluster-list để chống lặp.'),
+      quiz('AS 4 byte 65536 viết dạng asdot thế nào?', ['1.0', '0.65536', '65536.0', '2.1'], 0, 'Asdot: phần cao chấm phần thấp. AS riêng 2 byte là 64512 đến 65534.'),
+    ],
+    hints: ['neighbor IBGP peer-group, neighbor IBGP remote-as 65000, neighbor IBGP update-source loopback0, neighbor IBGP route-reflector-client', 'neighbor 1.1.1.1 peer-group IBGP', 'C2: neighbor 9.9.9.9 remote-as 65535, ebgp-multihop 2, update-source loopback0, password BGP123'],
+    solution: [
+      ['rr', cfg('router bgp 65000', 'neighbor IBGP peer-group', 'neighbor IBGP remote-as 65000', 'neighbor IBGP update-source loopback0', 'neighbor IBGP route-reflector-client', 'neighbor 1.1.1.1 peer-group IBGP', 'neighbor 2.2.2.2 peer-group IBGP')],
+      ['c2', cfg('router bgp 65000', 'neighbor 9.9.9.9 remote-as 65535', 'neighbor 9.9.9.9 update-source loopback0', 'neighbor 9.9.9.9 ebgp-multihop 2', 'neighbor 9.9.9.9 password BGP123')],
+    ],
+  },
+  {
+    id: 'R09', group: 'np', lesson: 'ENARSI 2.3 — DMVPN', level: 3, kind: 'config', topics: ['WAN/Serial'],
+    title: 'DMVPN pha 3: một hub, spoke đi thẳng spoke, có IPsec',
+    story: 'Hub đã có sẵn underlay qua ISP. Dựng Tunnel0 mGRE trên hub và hai spoke cùng mạng 172.16.0.0/24, NHRP network-id 1, spoke đăng ký NHS 172.16.0.1. Chạy EIGRP 100 qua tunnel, tắt split horizon trên hub. Bật pha 3: ip nhrp redirect ở hub, ip nhrp shortcut ở spoke. Bảo vệ bằng IPsec profile PROF. Ping từ LAN spoke 1 tới LAN spoke 2 hai lần, lần sau phải đi thẳng.',
+    build: () => makeNet([
+      router('isp', 'ISP', 400, 220, ['g0/0', 'g0/1', 'g0/2']), router('hub', 'HUB', 400, 60, ['g0/0', 'tu0']), router('s1', 'SPOKE1', 140, 360, ['g0/0', 'tu0']), router('s2', 'SPOKE2', 660, 360, ['g0/0', 'tu0']),
+    ], [['hub', 'g0/0', 'isp', 'g0/0'], ['s1', 'g0/0', 'isp', 'g0/1'], ['s2', 'g0/0', 'isp', 'g0/2']]),
+    init: [
+      ['isp', cfg('hostname ISP', ...ifc('g0/0', '203.0.113.2 255.255.255.252'), ...ifc('g0/1', '198.51.100.2 255.255.255.252'), ...ifc('g0/2', '192.0.2.2 255.255.255.252'))],
+      ['hub', cfg('hostname HUB', ...ifc('g0/0', '203.0.113.1 255.255.255.252'), 'ip route 0.0.0.0 0.0.0.0 203.0.113.2', ...lo(0, '10.0.0.1 255.255.255.0'))],
+      ['s1', cfg('hostname SPOKE1', ...ifc('g0/0', '198.51.100.1 255.255.255.252'), 'ip route 0.0.0.0 0.0.0.0 198.51.100.2', ...lo(0, '10.1.0.1 255.255.255.0'))],
+      ['s2', cfg('hostname SPOKE2', ...ifc('g0/0', '192.0.2.1 255.255.255.252'), 'ip route 0.0.0.0 0.0.0.0 192.0.2.2', ...lo(0, '10.2.0.1 255.255.255.0'))],
+    ],
+    tasks: [
+      { text: 'Spoke đăng ký xong với hub: show dmvpn trên HUB có 2 peer', verify: 'show dmvpn', check: (a) => N.nhrpSpokes(a.net, a.d('hub'), 'tu0').length === 2 },
+      { text: 'EIGRP qua tunnel: hub có 2 láng giềng, SPOKE1 học 10.2.0.0/24 của SPOKE2 qua hub', verify: 'show ip eigrp neighbors ; show ip route eigrp', check: (a) => a.eigrpNbrs('hub').length === 2 && code(a, 's1', '10.2.0.0/24') === 'D' },
+      { text: 'Tunnel được IPsec bảo vệ ở cả ba router', verify: 'show running-config interface tunnel 0', check: (a) => ['hub', 's1', 's2'].every((r) => a.d(r).ifaces.tu0.tunProtect) },
+      { text: 'Sau hai lần ping, SPOKE1 có NHRP shortcut tới 10.2.0.0/24 và traceroute đi thẳng, không qua 172.16.0.1', verify: 'ping 10.2.0.1 source 10.1.0.1 ; show ip nhrp', check: (a) => (a.d('s1').nhrpCache || []).some((e) => e.net === '10.2.0.0') && a.ping('s1', '10.2.0.1') && !a.trace('s1', '10.2.0.1').includes('172.16.0.1') },
+      quiz('DMVPN pha 1, 2, 3 khác nhau chỗ nào?', ['Pha 1 spoke là GRE thường, mọi thứ qua hub. Pha 2 giữ next-hop spoke để đi thẳng. Pha 3 có NHRP redirect và shortcut, hub tóm tắt được', 'Chỉ khác mã hóa', 'Pha 3 không cần NHRP', 'Pha 1 đi thẳng spoke'], 0, 'Pha 2 cần no ip next-hop-self eigrp trên hub. Pha 3 không cần.'),
+      quiz('Hub cần lệnh nào để gửi multicast định tuyến tới spoke?', ['ip nhrp map multicast dynamic', 'ip multicast-routing', 'ip pim sparse-mode', 'ip nhrp shortcut'], 0, 'mGRE không có khái niệm broadcast, phải khai rõ.'),
+    ],
+    hints: ['interface tunnel 0, ip address 172.16.0.1 255.255.255.0, tunnel source g0/0, tunnel mode gre multipoint', 'Spoke: ip nhrp nhs 172.16.0.1, ip nhrp map 172.16.0.1 203.0.113.1, ip nhrp map multicast 203.0.113.1', 'Hub: no ip split-horizon eigrp 100, ip nhrp redirect', 'crypto isakmp policy 10, crypto isakmp key K address 0.0.0.0, transform-set, crypto ipsec profile PROF'],
+    solution: (() => {
+      const ips = ['crypto isakmp policy 10', 'encryption aes', 'hash sha', 'authentication pre-share', 'group 14', 'exit', 'crypto isakmp key DMVPN123 address 0.0.0.0', 'crypto ipsec transform-set TS esp-aes esp-sha-hmac', 'exit', 'crypto ipsec profile PROF', 'set transform-set TS', 'exit'];
+      const spoke = (ip) => cfg(...ips, 'interface tunnel 0', `ip address ${ip} 255.255.255.0`, 'tunnel source g0/0', 'tunnel mode gre multipoint', 'tunnel key 100', 'ip nhrp network-id 1', 'ip nhrp nhs 172.16.0.1', 'ip nhrp map 172.16.0.1 203.0.113.1', 'ip nhrp map multicast 203.0.113.1', 'ip nhrp shortcut', 'tunnel protection ipsec profile PROF', 'exit', 'router eigrp 100', 'no auto-summary', 'network 172.16.0.0 0.0.0.255', 'network 10.0.0.0 0.255.255.255');
+      return [
+        ['hub', cfg(...ips, 'interface tunnel 0', 'ip address 172.16.0.1 255.255.255.0', 'tunnel source g0/0', 'tunnel mode gre multipoint', 'tunnel key 100', 'ip nhrp network-id 1', 'ip nhrp map multicast dynamic', 'ip nhrp redirect', 'no ip split-horizon eigrp 100', 'tunnel protection ipsec profile PROF', 'exit', 'router eigrp 100', 'no auto-summary', 'network 172.16.0.0 0.0.0.255', 'network 10.0.0.0 0.255.255.255')],
+        ['s1', spoke('172.16.0.2')], ['s2', spoke('172.16.0.3')],
+        ['s1', ['ping 10.2.0.1', 'ping 10.2.0.1']],
+      ];
+    })(),
+  },
+  {
+    id: 'R10', group: 'np', lesson: 'ENARSI 3.2 — uRPF, time-based ACL', level: 2, kind: 'config', topics: ['ACL'],
+    title: 'uRPF chống giả mạo nguồn, ACL theo giờ làm việc',
+    story: 'Cổng ISP của R1 phải bỏ gói có IP nguồn không về đúng cổng đó. Dùng uRPF strict. Máy trong chỉ được SSH tới SRV trong giờ làm việc, thứ Hai đến thứ Sáu, 08:00 đến 17:00. Dùng clock set để kiểm tra.',
+    build: () => makeNet([pc('p1', 'PC1', 100, 200, { ip: '10.0.1.10', gw: '10.0.1.1' }), router('r1', 'R1', 380, 200, ['g0/0', 'g0/1', 'g0/2']), server('s1', 'SRV', 380, 380, { ip: '10.0.2.10', gw: '10.0.2.1', services: [22] }), router('isp', 'ISP', 680, 200, ['g0/0'])], [['p1', 'fa0', 'r1', 'g0/0'], ['r1', 'g0/2', 's1', 'fa0'], ['r1', 'g0/1', 'isp', 'g0/0']]),
+    init: [
+      ['r1', cfg('hostname R1', ...ifc('g0/0', '10.0.1.1 255.255.255.0'), ...ifc('g0/2', '10.0.2.1 255.255.255.0'), ...ifc('g0/1', '203.0.113.1 255.255.255.252'), 'ip route 192.0.2.0 255.255.255.0 203.0.113.2')],
+      ['isp', cfg('hostname ISP', ...ifc('g0/0', '203.0.113.2 255.255.255.252'), ...lo(0, '10.0.1.99 255.255.255.255'), ...lo(1, '192.0.2.1 255.255.255.0'), 'ip route 0.0.0.0 0.0.0.0 203.0.113.1')],
+    ],
+    tasks: [
+      { text: 'Gi0/1 bật uRPF rx: gói nguồn 192.0.2.1 qua được, gói giả mạo nguồn 10.0.1.99 bị bỏ', verify: 'show ip verify source ; ping 10.0.2.10 source 10.0.1.99 từ ISP', check: (a) => { if (a.d('r1').ifaces['g0/1'].urpf?.mode !== 'rx') return false; const p = (src) => { const ctx = N.cloneNet(a.net); return N.sendPacket(ctx, { src: 'isp', dst: '10.0.2.10', srcIp: src }); }; return p('192.0.2.1').ok && !p('10.0.1.99').ok; } },
+      { text: 'Có time-range GIOLAM periodic weekdays 8:00 đến 17:00', verify: 'show time-range', check: (a) => a.d('r1').timeRanges?.GIOLAM?.some((p) => p.days[0] === 'weekdays' && p.from === 480 && p.to === 1020) },
+      { text: 'Gi0/0 có ACL chiều in dùng time-range, trong giờ SSH được, ngoài giờ bị chặn', verify: 'clock set 20:00:00 2 Mar 2026 rồi telnet 10.0.2.10 22', check: (a) => { const n2 = N.cloneNet(a.net), r = n2.devices.r1; if (!r.ifaces['g0/0'].aclIn) return false; const t = (clock) => { r.clockNow = clock; return N.sendPacket(n2, { src: 'p1', dst: '10.0.2.10', proto: 'tcp', dport: 22 }).ok; }; return t({ day: 'Mon', min: 600 }) && !t({ day: 'Mon', min: 1200 }) && !t({ day: 'Sun', min: 600 }); } },
+      quiz('Có hai đường ra (bất đối xứng) thì nên dùng uRPF nào?', ['Loose (any), chỉ cần có route về nguồn', 'Strict (rx)', 'Không dùng được', 'Thêm allow-self-ping'], 0, 'Strict sẽ bỏ cả gói hợp lệ khi đường về khác đường đi.'),
+    ],
+    hints: ['ip verify unicast source reachable-via rx', 'time-range GIOLAM, periodic weekdays 8:00 to 17:00', 'permit tcp any host 10.0.2.10 eq 22 time-range GIOLAM, permit icmp any any, deny tcp any any eq 22'],
+    solution: [['r1', cfg('interface g0/1', 'ip verify unicast source reachable-via rx', 'exit', 'time-range GIOLAM', 'periodic weekdays 8:00 to 17:00', 'exit', 'ip access-list extended NHANVIEN', 'permit tcp any host 10.0.2.10 eq 22 time-range GIOLAM', 'deny tcp any host 10.0.2.10 eq 22', 'permit ip any any', 'exit', 'interface g0/0', 'ip access-group NHANVIEN in')]],
+  },
+  {
+    id: 'R11', group: 'np', lesson: 'ENARSI 4.4, 3.2 — DHCPv6', level: 2, kind: 'config', topics: ['IPv6'],
+    title: 'DHCPv6: máy chủ, relay, và lọc lưu lượng IPv6',
+    story: 'R1 là máy chủ DHCPv6 cho hai router client: R2 cùng link và R3 ở sau relay R2. Tạo pool cấp 2001:DB8:10::/64 và 2001:DB8:20::/64, dùng ipv6 dhcp relay destination trên R2. Sau đó lọc Telnet IPv6 đi vào R1 bằng ipv6 traffic-filter.',
+    build: () => makeNet([router('r1', 'R1', 120, 200, ['g0/0']), router('r2', 'R2', 400, 200, ['g0/0', 'g0/1']), router('r3', 'R3', 680, 200, ['g0/0'])], [['r1', 'g0/0', 'r2', 'g0/0'], ['r2', 'g0/1', 'r3', 'g0/0']]),
+    init: [
+      ['r1', cfg('hostname R1', 'ipv6 unicast-routing', 'interface g0/0', 'ipv6 address 2001:DB8:10::1/64', 'no shutdown')],
+      ['r2', cfg('hostname R2', 'ipv6 unicast-routing', 'interface g0/0', 'no shutdown', 'interface g0/1', 'ipv6 address 2001:DB8:20::1/64', 'no shutdown')],
+      ['r3', cfg('hostname R3', 'ipv6 unicast-routing', 'interface g0/0', 'no shutdown')],
+    ],
+    tasks: [
+      { text: 'R1 có pool cho 2001:DB8:10::/64, phục vụ trên Gi0/0', verify: 'show ipv6 dhcp pool', check: (a) => Object.values(a.d('r1').dhcp6?.pools || {}).some((p) => p.addr?.prefix === 64) && !!a.d('r1').ifaces['g0/0'].dhcp6Server },
+      { text: 'R2 Gi0/0 và R3 Gi0/0 nhận được địa chỉ, R3 nhận qua relay trên R2', verify: 'show ipv6 interface brief ; show ipv6 dhcp binding', check: (a) => a.d('r2').ifaces['g0/0'].ipv6?.some((x) => x.dhcp) && a.d('r3').ifaces['g0/0'].ipv6?.some((x) => x.dhcp) && !!a.d('r2').ifaces['g0/1'].dhcp6Relay && a.d('r1').dhcp6.bindings.some((b) => b.client === 'R3' && b.via === 'relay') },
+      { text: 'R1 áp ipv6 traffic-filter chiều in chặn Telnet', verify: 'show ipv6 access-list', check: (a) => { const n = a.d('r1').ifaces['g0/0'].ipv6Filter?.in; return !!n && a.d('r1').acls6?.[n]; } },
+      quiz('SLAAC, stateless DHCPv6, stateful DHCPv6 khác nhau thế nào?', ['SLAAC tự sinh địa chỉ. Stateless lấy thêm DNS từ DHCPv6. Stateful lấy cả địa chỉ, máy chủ giữ binding', 'Giống hệt', 'SLAAC cần máy chủ', 'Stateful không dùng cổng 547'], 0, 'Cờ M và O trong RA báo cho máy chọn kiểu nào. Client gửi tới ff02::1:2.'),
+      quiz('IPv6 First Hop Security: RA Guard chặn cái gì?', ['RA giả mạo từ cổng không phải router', 'NDP từ router thật', 'Mọi multicast', 'DHCPv6 trả lời'], 0, 'DHCPv6 Guard chặn máy chủ giả. Binding table là gốc của ND Inspection và Source Guard.'),
+    ],
+    hints: ['ipv6 dhcp pool P1, address prefix 2001:DB8:10::/64', 'interface g0/0, ipv6 dhcp server P1', 'R2 g0/1: ipv6 dhcp relay destination 2001:DB8:10::1'],
+    solution: [
+      ['r1', cfg('ipv6 dhcp pool P1', 'address prefix 2001:DB8:10::/64', 'dns-server 2001:DB8:10::53', 'exit', 'interface g0/0', 'ipv6 dhcp server P1', 'exit', 'ipv6 access-list CHAN-TELNET', 'deny tcp any any eq 23', 'permit ipv6 any any', 'exit', 'interface g0/0', 'ipv6 traffic-filter CHAN-TELNET in')],
+      ['r2', cfg('interface g0/0', 'ipv6 address dhcp', 'interface g0/1', 'ipv6 dhcp relay destination 2001:DB8:10::1')],
+      ['r3', cfg('interface g0/0', 'ipv6 address dhcp')],
+    ],
+  },
+  {
+    id: 'R12', group: 'np', lesson: 'ENARSI 4.3, 1.8 — debug có điều kiện, BFD', level: 2, kind: 'config', topics: ['Quản trị thiết bị'],
+    title: 'Debug có điều kiện và BFD: gỡ lỗi an toàn, phát hiện đứt nhanh',
+    story: 'Trên router thật, debug ip packet có thể làm treo CPU. Giới hạn debug chỉ cho 10.0.0.2 bằng debug condition rồi mới bật. Sau đó bật BFD 300 ms trên link OSPF giữa R1 và R2 để phát hiện đứt dưới 1 giây thay vì 40 giây dead timer.',
+    build: () => makeNet([router('r1', 'R1', 200, 200, ['g0/0']), router('r2', 'R2', 600, 200, ['g0/0'])], [['r1', 'g0/0', 'r2', 'g0/0']]),
+    init: [
+      ['r1', cfg('hostname R1', ...ifc('g0/0', '10.0.0.1 255.255.255.0'), ...lo(0, '1.1.1.1 255.255.255.255'), ...ospf('1.1.1.1', '0.0.0.0 255.255.255.255 area 0'))],
+      ['r2', cfg('hostname R2', ...ifc('g0/0', '10.0.0.2 255.255.255.0'), ...ospf('2.2.2.2', '0.0.0.0 255.255.255.255 area 0'))],
+    ],
+    tasks: [
+      { text: 'R1 có debug condition ip 10.0.0.2 và debug ip packet đang bật', verify: 'show debugging condition', check: (a) => a.d('r1').debug?.cond?.ip === '10.0.0.2' && a.d('r1').debug.ipPacket },
+      { text: 'Hai đầu bật bfd interval 100 min_rx 100 multiplier 3, OSPF dùng BFD, show bfd neighbors có R2', verify: 'show bfd neighbors', check: (a) => has(a, 'r1', 'show bfd neighbors', /10\.0\.0\.2\s+\S+\s+Up/) },
+      quiz('BFD 100 ms nhân 3 phát hiện đứt sau khoảng bao lâu?', ['300 ms', '3 giây', '40 giây', '100 ms'], 0, 'Detect time = interval × multiplier. BFD chỉ báo cho giao thức định tuyến, tự nó không học route.'),
+      quiz('Muốn log có thời gian đến mili giây, lệnh nào?', ['service timestamps debug datetime msec', 'logging on', 'clock set', 'debug all'], 0, 'Đo mốc thời gian chính xác cần NTP đồng bộ.'),
+    ],
+    hints: ['debug condition ip 10.0.0.2 rồi debug ip packet', 'interface g0/0, bfd interval 100 min_rx 100 multiplier 3', 'router ospf 1, bfd all-interfaces'],
+    solution: [
+      ['r1', [...cfg('interface g0/0', 'bfd interval 100 min_rx 100 multiplier 3', 'exit', 'router ospf 1', 'bfd all-interfaces'), 'debug condition ip 10.0.0.2', 'debug ip packet']],
+      ['r2', cfg('interface g0/0', 'bfd interval 100 min_rx 100 multiplier 3', 'exit', 'router ospf 1', 'bfd all-interfaces')],
+    ],
+  },
+  {
+    id: 'R13', group: 'np', lesson: 'ENARSI 1.1, 1.3 — AD, distribute-list', level: 2, kind: 'config', topics: ['Static'],
+    title: 'AD và distribute-list: quyết định route nào vào bảng định tuyến',
+    story: 'R1 học 10.5.0.0/24 từ cả EIGRP (AD 90) lẫn OSPF (AD 110), công ty muốn dùng đường OSPF qua R3. Đổi AD của OSPF trên R1 xuống 80, không đụng cấu hình R2, R3. Thêm distribute-list để R1 không nhận 10.6.0.0/24 từ OSPF. Thêm floating static qua R2 AD 200 cho 192.0.2.0/24.',
+    build: () => makeNet([router('r1', 'R1', 100, 200, ['g0/0', 'g0/1']), router('r2', 'R2', 400, 90, ['g0/0', 'g0/1']), router('r3', 'R3', 400, 320, ['g0/0', 'g0/1']), router('r4', 'R4', 700, 200, ['g0/0', 'g0/1'])], [['r1', 'g0/0', 'r2', 'g0/0'], ['r1', 'g0/1', 'r3', 'g0/0'], ['r2', 'g0/1', 'r4', 'g0/0'], ['r3', 'g0/1', 'r4', 'g0/1']]),
+    init: [
+      ['r1', cfg('hostname R1', ...ifc('g0/0', '10.0.12.1 255.255.255.0'), ...ifc('g0/1', '10.0.13.1 255.255.255.0'), ...eigrp('10.0.12.0 0.0.0.255'), ...ospf('1.1.1.1', '10.0.13.0 0.0.0.255 area 0'))],
+      ['r2', cfg('hostname R2', ...ifc('g0/0', '10.0.12.2 255.255.255.0'), ...ifc('g0/1', '10.0.24.2 255.255.255.0'), ...eigrp('10.0.0.0 0.255.255.255'))],
+      ['r3', cfg('hostname R3', ...ifc('g0/0', '10.0.13.3 255.255.255.0'), ...ifc('g0/1', '10.0.34.3 255.255.255.0'), ...ospf('3.3.3.3', '10.0.0.0 0.255.255.255 area 0'))],
+      ['r4', cfg('hostname R4', ...ifc('g0/0', '10.0.24.4 255.255.255.0'), ...ifc('g0/1', '10.0.34.4 255.255.255.0'), ...lo(5, '10.5.0.1 255.255.255.0'), ...lo(6, '10.6.0.1 255.255.255.0'), ...eigrp('10.0.24.0 0.0.0.255', '10.5.0.0 0.0.0.255', '10.6.0.0 0.0.0.255'), ...ospf('4.4.4.4', '10.0.34.0 0.0.0.255 area 0', '10.5.0.0 0.0.0.255 area 0', '10.6.0.0 0.0.0.255 area 0'))],
+    ],
+    tasks: [
+      { text: 'R1 dùng OSPF cho 10.5.0.0/24 với AD 80', verify: 'show ip route 10.5.0.0', check: (a) => code(a, 'r1', '10.5.0.0/24') === 'O' && rt(a, 'r1', '10.5.0.0/24').ad === 80 },
+      { text: '10.6.0.0/24 trên R1 không đi qua OSPF nữa (còn lại đường EIGRP)', verify: 'show ip route 10.6.0.0', check: (a) => code(a, 'r1', '10.6.0.0/24') === 'D' },
+      { text: 'Floating static 192.0.2.0/24 qua 10.0.12.2 AD 200', verify: 'show ip route static', check: (a) => a.d('r1').routes.some((r) => r.net === '192.0.2.0' && r.ad === 200 && r.nh === '10.0.12.2') },
+      quiz('AD mặc định nào đúng?', ['Connected 0, static 1, eBGP 20, EIGRP 90, OSPF 110, RIP 120, EIGRP ext 170, iBGP 200', 'OSPF 90, EIGRP 110', 'eBGP 200, iBGP 20', 'Static 0, connected 1'], 0, 'AD chỉ so giữa các nguồn, metric so trong cùng giao thức. Prefix dài hơn thắng trước cả AD.'),
+    ],
+    hints: ['router ospf 1, distance 80', 'ip prefix-list F deny 10.6.0.0/24, permit 0.0.0.0/0 le 32', 'distribute-list prefix F in'],
+    solution: [['r1', cfg('ip prefix-list F deny 10.6.0.0/24', 'ip prefix-list F permit 0.0.0.0/0 le 32', 'router ospf 1', 'distance 80', 'distribute-list prefix F in', 'exit', 'ip route 192.0.2.0 255.255.255.0 10.0.12.2 200')]],
+  },
+];

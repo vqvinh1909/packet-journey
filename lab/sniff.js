@@ -62,7 +62,32 @@ export function sniffQuery(net, dev, ifn, fn, count) {
     const l = net.links.find((x) => x.id === p.link);
     return !!l && (l.a === dev ? l.ap : l.bp) === ifn;
   };
-  return box(net).pkts.filter((p) => (p.from === dev || p.to === dev) && atPort(p) && fn(p)).slice(-count);
+  const span = spanSources(net, dev);
+  return box(net).pkts.filter((p) => (((p.from === dev || p.to === dev) && atPort(p)) || span.some((s) => s(p))) && fn(p)).slice(-count);
+}
+
+/** SPAN, RSPAN, ERSPAN: các bộ lọc gói đang được sao chép tới máy phân tích `dev` qua cổng đích monitor session. */
+function spanSources(net, dev) {
+  const out = [], all = Object.values(net.devices);
+  const portsOf = (sw, s) => [...(s.srcPorts || []), ...(s.srcVlans || []).flatMap((v) => Object.keys(sw.ports || {}).filter((n) => sw.ports[n].vlan === v))];
+  const mirror = (sw, s) => {
+    for (const port of portsOf(sw, s)) {
+      const l = net.links.find((x) => (x.a === sw.id && x.ap === port) || (x.b === sw.id && x.bp === port));
+      if (l) out.push((p) => p.link === l.id && (s.dir === 'rx' ? p.to === sw.id : s.dir === 'tx' ? p.from === sw.id : true));
+    }
+  };
+  for (const l of net.links) {
+    const me = l.a === dev ? 'a' : l.b === dev ? 'b' : null;
+    if (!me) continue;
+    const sw = net.devices[me === 'a' ? l.b : l.a], port = me === 'a' ? l.bp : l.ap;
+    for (const s of Object.values(sw?.monitor || {})) {
+      if (s.dst !== port) continue;
+      mirror(sw, s);
+      if (s.srcRemote != null) for (const o of all) for (const t of Object.values(o.monitor || {})) if (t.dstRemote === s.srcRemote && o.rspanVlans?.includes(s.srcRemote) && sw.rspanVlans?.includes(s.srcRemote)) mirror(o, t);
+      if (s.erspanIp) for (const o of all) for (const t of Object.values(o.monitor || {})) if (t.erspanDst === s.erspanIp && t.erspanId === s.erspanId) mirror(o, t);
+    }
+  }
+  return out;
 }
 
 const ICMP = { 0: 'echo reply', 3: 'destination unreachable', 8: 'echo request', 11: 'time exceeded in-transit' };

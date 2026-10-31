@@ -22,6 +22,7 @@ import { makePan } from './panos.js';
 import { makeGuiFw } from './guifw.js';
 import { makeWlc } from './wlc.js';
 import { makeLinux, DNS_TYPES } from './linux.js';
+import { makeNp } from './np.js';
 
 const { longIf, shortIf, normIf, isIp, maskToPrefix, prefixToMask, netOf, ifSort } = N;
 
@@ -1024,6 +1025,7 @@ export function createCli(net) {
   const GUIFW = makeGuiFw({ R });
   const VENDOR = { fortios: makeForti({ net, R }), panos: makePan({ net, R }), sophos: GUIFW, checkpoint: GUIFW, pfsense: GUIFW, wlc: makeWlc({ net, R }) };
   const LINUX = makeLinux({ net, R, sshConnect: (d, ip, user, s) => sshConnect(d, ip, user, s), iosRun: (dev, cmds) => { const c = createCli(net); c.session(dev).mode = 'priv'; return cmds.map((l) => c.exec(dev, l).out); }, iosConfig: (dev) => { const { logBuf, ...rest } = net.devices[dev]; return JSON.stringify(rest); } });
+  const NP = makeNp({ c, net, IFS, toPriv, doExec, ifAll, ctxOf, showIpRoute, iosPing, iosTrace, execLine: (id, line) => exec(id, line), sess, redistSet: redist, T: { CFG_ROUTER, CFG_SWITCH, IF_ROUTER, IF_SVI, OSPF_MODE, EIGRP_MODE, BGP_MODE, LINE_MODE, VLAN_MODE, SHOW_ROUTER, SHOW_SWITCH, EXEC_PRIV, routerEigrp, showEigrpNei } });
   function tableFor(d, s) {
     if (d.os === 'asa') return ASA.tableFor(d, s);
     switch (s.mode) {
@@ -1053,7 +1055,7 @@ export function createCli(net) {
       case 'pmapic': return PMAPIC_MODE;
       case 'zpair': return ZPAIR_MODE;
       case 'mstcfg': return MST_MODE;
-      default: return [];
+      default: return NP.modes[s.mode] || [];
     }
   }
   const ace6 = (x, words, seq) => {
@@ -1072,7 +1074,7 @@ export function createCli(net) {
     c('do <rest>', (x) => doExec(x)),
   ];
   const cfgTable = (d) => (d.os === 'asa' ? ASA.cfgTable() : isRouter(d) ? CFG_ROUTER : CFG_SWITCH);
-  const SUB = new Set(['acl6', 'if', 'subif', 'range', 'vlan', 'router', 'pool', 'acl-std', 'acl-ext', 'line', 'isakmp', 'tset', 'cmap', 'vamap', 'bgp', 'mstcfg', 'ospf6', 'asaobj', 'pmap', 'pmapc', 'zone', 'aaasrv', 'ragpol', 'cmapi', 'pmapi', 'pmapic', 'zpair']);
+  const SUB = new Set([...Object.keys(NP.prompts), 'acl6', 'if', 'subif', 'range', 'vlan', 'router', 'pool', 'acl-std', 'acl-ext', 'line', 'isakmp', 'tset', 'cmap', 'vamap', 'bgp', 'mstcfg', 'ospf6', 'asaobj', 'pmap', 'pmapc', 'zone', 'aaasrv', 'ragpol', 'cmapi', 'pmapi', 'pmapic', 'zpair']);
 
   // ================== Thực thi ==================
   function prompt(id) {
@@ -1086,7 +1088,7 @@ export function createCli(net) {
     if (d.os === 'asa') return ASA.prompt(d, s);
     if (VENDOR[d.os]) return VENDOR[d.os].prompt(d, s);
     const h = d.name;
-    return ({ user: `${h}>`, priv: `${h}#`, config: `${h}(config)#`, if: `${h}(config-if)#`, subif: `${h}(config-subif)#`, range: `${h}(config-if-range)#`, vlan: `${h}(config-vlan)#`, router: `${h}(config-router)#`, pool: `${h}(dhcp-config)#`, 'acl-std': `${h}(config-std-nacl)#`, 'acl-ext': `${h}(config-ext-nacl)#`, line: `${h}(config-line)#`, isakmp: `${h}(config-isakmp)#`, tset: `${h}(cfg-crypto-trans)#`, cmap: `${h}(config-crypto-map)#`, vamap: `${h}(config-access-map)#`, bgp: `${h}(config-router)#`, mstcfg: `${h}(config-mst)#`, ospf6: `${h}(config-rtr)#`, acl6: `${h}(config-ipv6-acl)#`, zone: `${h}(config-sec-zone)#`, aaasrv: `${h}(config-server-${d.aaa?.servers?.[s.aaaSrv]?.proto === 'radius' ? 'radius' : 'tacacs'})#`, ragpol: `${h}(config-nd-raguard)#`, cmapi: `${h}(config-cmap)#`, pmapi: `${h}(config-pmap)#`, pmapic: `${h}(config-pmap-c)#`, zpair: `${h}(config-sec-zone-pair)#` })[s.mode] || `${h}#`;
+    return ({ user: `${h}>`, priv: `${h}#`, config: `${h}(config)#`, if: `${h}(config-if)#`, subif: `${h}(config-subif)#`, range: `${h}(config-if-range)#`, vlan: `${h}(config-vlan)#`, router: `${h}(config-router)#`, pool: `${h}(dhcp-config)#`, 'acl-std': `${h}(config-std-nacl)#`, 'acl-ext': `${h}(config-ext-nacl)#`, line: `${h}(config-line)#`, isakmp: `${h}(config-isakmp)#`, tset: `${h}(cfg-crypto-trans)#`, cmap: `${h}(config-crypto-map)#`, vamap: `${h}(config-access-map)#`, bgp: `${h}(config-router)#`, mstcfg: `${h}(config-mst)#`, ospf6: `${h}(config-rtr)#`, acl6: `${h}(config-ipv6-acl)#`, zone: `${h}(config-sec-zone)#`, aaasrv: `${h}(config-server-${d.aaa?.servers?.[s.aaaSrv]?.proto === 'radius' ? 'radius' : 'tacacs'})#`, ragpol: `${h}(config-nd-raguard)#`, cmapi: `${h}(config-cmap)#`, pmapi: `${h}(config-pmap)#`, pmapic: `${h}(config-pmap-c)#`, zpair: `${h}(config-sec-zone-pair)#` })[s.mode] || (NP.prompts[s.mode] ? `${h}(${NP.prompts[s.mode]})#` : `${h}#`);
   }
 
   function exec(id, raw) {
@@ -1143,6 +1145,7 @@ export function createCli(net) {
       // dòng log in ngay (%LINK, %LINEPROTO, %SYS…) cũng vào buffer "show logging"
       for (const l of res.out) if (/^%[A-Z0-9_]+-\d-[A-Z0-9_]+:/.test(l)) N.logPush(net, id, l, false, true);
     }
+    res.out = res.out.concat(NP.eemTick(id));
     if (net.clock) {
       N.clockSync(net, id);
       if (d.type === 'router' || d.type === 'switch') res.out = res.out.concat(N.drainLogs(net, id));
@@ -1552,7 +1555,7 @@ export function createCli(net) {
     if (oct1 === 127 || oct1 >= 224) return [`Not a valid host address - ${ip}`];
     if (pfx < 31 && (ip === nw || ip === N.n2ip(N.ip2n(nw) + 2 ** (32 - pfx) - 1))) return [`Bad mask /${pfx} for address ${ip}`];
     for (const [m, g] of Object.entries(IFS(x.d))) {
-      if (m !== n && g.ip && (N.inNet(ip, g.ip, g.prefix) || N.inNet(g.ip, ip, pfx))) return [`% ${netOf(ip, pfx)} overlaps with ${longIf(m)}`];
+      if (m !== n && g.ip && (g.vrf || null) === (f.vrf || null) && (N.inNet(ip, g.ip, g.prefix) || N.inNet(g.ip, ip, pfx))) return [`% ${netOf(ip, pfx)} overlaps with ${longIf(m)}`];
     }
     f.ip = ip; f.prefix = pfx;
     return [];
@@ -1752,6 +1755,7 @@ export function createCli(net) {
       const k = w[i];
       if (k === 'log') e.log = true;
       else if (k === 'established' && proto === 'tcp') e.established = true;
+      else if (k === 'time-range' && ws[i + 1]) e.timeRange = ws[++i];
       else if (proto === 'icmp' && ['echo', 'echo-reply', 'unreachable', 'time-exceeded'].includes(k)) e.icmpType = k;
       else bad();
       i++;
@@ -2001,15 +2005,15 @@ export function createCli(net) {
     const t = r.at && net.devices[r.at.dev];
     if (t && t !== d && t.debug?.icmp) for (let i = 0; i < n; i++) N.logPush(net, t.id, `ICMP: echo reply sent, src ${ip}, dst ${src}, ${tail}`, true);
   }
-  function iosPing(d, ip) {
-    const r = N.sendPacket(net, { src: d.id, dst: ip, record: true, anim: true });
+  function iosPing(d, ip, vrf) {
+    const r = N.sendPacket(net, { src: d.id, dst: ip, vrf, record: true, anim: true });
     icmpDebug(d, ip, r, 5);
     const marks = r.ok ? (r.firstArp ? '.!!!!' : '!!!!!') : r.kind === 'unreach' ? 'U.U.U' : '.....';
     const okN = (marks.match(/!/g) || []).length;
     return R(['Type escape sequence to abort.', `Sending 5, 100-byte ICMP Echos to ${ip}, timeout is 2 seconds:`, marks, `Success rate is ${okN * 20} percent (${okN}/5)${okN ? ', round-trip min/avg/max = 1/1/4 ms' : ''}`], { sim: r.sim, simLabel: `${d.name} ping ${ip}`, why: r.ok ? null : r.fail?.why, ok: r.ok });
   }
-  function iosTrace(d, ip) {
-    const r = N.sendPacket(net, { src: d.id, dst: ip, record: false, anim: true });
+  function iosTrace(d, ip, vrf) {
+    const r = N.sendPacket(net, { src: d.id, dst: ip, vrf, record: false, anim: true });
     const out = ['Type escape sequence to abort.', `Tracing the route to ${ip}`, 'VRF info: (vrf in name/id, vrf out name/id)'];
     let n = 0;
     for (const h of r.hops) out.push(`  ${++n} ${h.ip} 0 msec 1 msec 0 msec`);
@@ -2606,21 +2610,23 @@ export function createCli(net) {
   ];
   function routeText(r) {
     const nw = `${r.net}/${r.prefix}`;
+    if (r.discard) return `${nw} is ${r.code[0] === 'S' ? 'directly connected' : 'a summary, 00:05:12'}, Null0`;
+    if (r.alts?.length) return `${nw} [${r.ad}/${r.metric}] via ${r.nextHop}, 00:05:12, ${longIf(r.iface)}\n${r.alts.map((p) => `${' '.repeat(nw.length + 10)}[${r.ad}/${p.m}] via ${p.nh}, 00:05:12, ${longIf(p.outIf)}`).join('\n')}`;
     if (r.code === 'C' || r.code === 'L') return `${nw} is directly connected, ${longIf(r.iface)}`;
     if (r.code[0] === 'S') return r.nextHop ? `${nw} [${r.ad}/0] via ${r.nextHop}` : `${nw} is directly connected, ${longIf(r.iface)}`;
     return `${nw} [${r.ad}/${r.metric}] via ${r.nextHop}, 00:0${(r.metric % 5) + 1}:${String(10 + (r.metric % 49)).padStart(2, '0')}, ${longIf(r.iface)}`;
   }
-  function showIpRoute(d, filter) {
+  function showIpRoute(d, filter, vrf = null) {
     if (d.type === 'switch' && !d.ipRouting) return [`Default gateway is ${d.defaultGateway || 'not set'}`, '', 'Host               Gateway           Last Use    Total Uses  Interface', 'ICMP redirect cache is empty', '(Lab: switch Layer 2 không định tuyến — chỉ dùng ip default-gateway cho chính nó)'];
     const ctx = ctxOf();
-    let rt = N.routeTable(ctx, d.id);
+    let rt = N.routeTable(ctx, d.id, vrf);
     const allRt = rt;
     if (filter === 'ospf') rt = rt.filter((r) => r.code[0] === 'O');
     if (filter === 'static') rt = rt.filter((r) => r.code[0] === 'S');
     if (filter === 'connected') rt = rt.filter((r) => r.code === 'C' || r.code === 'L');
     if (filter === 'eigrp') rt = rt.filter((r) => r.code[0] === 'D');
     if (filter === 'bgp') rt = rt.filter((r) => r.code === 'B');
-    const L = [...CODES];
+    const L = [...(vrf ? [`Routing Table: ${vrf}`] : []), ...CODES];
     const def = allRt.find((r) => r.prefix === 0);
     L.push(def ? `Gateway of last resort is ${def.nextHop || '0.0.0.0'} to network 0.0.0.0` : 'Gateway of last resort is not set', '');
     const cp = (ip) => { const a = +ip.split('.')[0]; return a < 128 ? 8 : a < 192 ? 16 : 24; };
@@ -2661,7 +2667,7 @@ export function createCli(net) {
     for (const e of N.ospfIfaces(ctx, d.id)) {
       const cnt = nb.filter((n) => n.iface === e.ifn).length;
       let st = 'P2P';
-      if (e.ntype !== 'p2p') { const r = N.ospfRoles(ctx, d.id, e.ifn); st = r.dr === d.id ? 'DR' : r.bdr === d.id ? 'BDR' : e.prio === 0 ? 'DROTH' : cnt ? 'DROTH' : 'DR'; }
+      if (e.ntype !== 'p2p' && e.ntype !== 'p2mp') { const r = N.ospfRoles(ctx, d.id, e.ifn); st = r.dr === d.id ? 'DR' : r.bdr === d.id ? 'BDR' : e.prio === 0 ? 'DROTH' : cnt ? 'DROTH' : 'DR'; }
       L.push(`${pad(shortIf(e.ifn), 13)}${pad(d.ospf.pid, 6)}${pad(e.area, 16)}${pad(`${e.ip}/${e.prefix}`, 19)}${pad(e.cost, 6)}${pad(st, 6)}${cnt}/${cnt}`);
     }
     return L;
@@ -2674,11 +2680,12 @@ export function createCli(net) {
     const L = [];
     for (const e of N.ospfIfaces(ctx, d.id)) {
       if (only && e.ifn !== only) continue;
-      const p2p = e.ntype === 'p2p';
+      const p2p = e.ntype === 'p2p' || e.ntype === 'p2mp';
       const cnt = nb.filter((n) => n.iface === e.ifn), full = cnt.filter((n) => n.full);
       L.push(`${longIf(e.ifn)} is up, line protocol is up`, `  Internet Address ${e.ip}/${e.prefix}, Area ${e.area}, Attached via Network Statement`,
-        `  Process ID ${d.ospf.pid}, Router ID ${o.rid[d.id]}, Network Type ${p2p ? 'POINT_TO_POINT' : 'BROADCAST'}, Cost: ${e.cost}`);
-      if (p2p) L.push('  Transmit Delay is 1 sec, State POINT_TO_POINT');
+        `  Process ID ${d.ospf.pid}, Router ID ${o.rid[d.id]}, Network Type ${{ p2p: 'POINT_TO_POINT', p2mp: 'POINT_TO_MULTIPOINT', nbma: 'NON_BROADCAST', broadcast: 'BROADCAST' }[e.ntype]}, Cost: ${e.cost}`);
+      if (e.authT !== 'null') L.push(`  ${e.authT === 'md5' ? 'Cryptographic' : 'Simple password'} authentication enabled`);
+      if (p2p) L.push(`  Transmit Delay is 1 sec, State ${e.ntype === 'p2mp' ? 'POINT_TO_MULTIPOINT' : 'POINT_TO_POINT'}`);
       else {
         const r = N.ospfRoles(ctx, d.id, e.ifn);
         const ipOf = (id) => (id === d.id ? e.ip : nb.find((n) => n.dev === id)?.addr);
@@ -2894,8 +2901,8 @@ export function createCli(net) {
     for (const k of Object.keys({ ...tbl, ...best }).sort((x, y) => N.ip2n(x.split('/')[0]) - N.ip2n(y.split('/')[0]))) {
       const list = tbl[k] || [best[k]];
       for (const p of list) {
-        const isBest = best[k] && p.nh === best[k].nh && JSON.stringify(p.asPath) === JSON.stringify(best[k].asPath);
-        L.push(`${isBest ? '*>' : '* '}${p.ibgp ? 'i' : ' '}${pad(p.prefix === 0 ? '0.0.0.0' : k, 17)}${pad(p.nh, 20)}${lpad(0, 6)} ${lpad(p.ibgp ? 100 : '', 6)} ${lpad(p.local ? 32768 : 0, 6)} ${[...p.asPath, 'i'].join(' ')}`);
+        const isBest = best[k] === p || (best[k] && p.nh === best[k].nh && JSON.stringify(p.asPath) === JSON.stringify(best[k].asPath));
+        L.push(`${isBest ? '*>' : '* '}${p.ibgp ? 'i' : ' '}${pad(p.prefix === 0 ? '0.0.0.0' : k, 17)}${pad(p.nh, 20)}${lpad(p.med || 0, 6)} ${lpad(p.ibgp || (p.lp ?? 100) !== 100 ? p.lp ?? 100 : '', 6)} ${lpad(p.weight || 0, 6)} ${[...p.asPath, p.origin || 'i'].join(' ')}`);
       }
     }
     return L;
@@ -3285,7 +3292,7 @@ export function createCli(net) {
     const st = ntpState(d);
     return ['address         ref clock       st   when     poll    reach  delay          offset            disp', ...d.ntp.servers.map((s) => `${st.sync && st.ref === s ? '*~' : ' ~'}${pad(s, 16)}${pad(st.sync && st.ref === s ? '127.127.1.1' : '.INIT.', 16)}${pad(st.sync && st.ref === s ? st.stratum - 1 : 16, 5)}${pad(12, 9)}${pad(64, 8)}${pad(st.sync && st.ref === s ? 377 : 0, 7)}0.00           0.00              0.12`), ' * sys.peer, # selected, + candidate, - outlyer, x falseticker, ~ configured'];
   }
-  function clockLine(d) { return ntpState(d).sync ? '12:00:02.043 UTC Mon Mar 2 2026' : '*0:12:34.567 UTC Mon Mar 1 1993'; }
+  function clockLine(d) { if (d.clockNow?.text) return d.clockNow.text; return ntpState(d).sync ? '12:00:02.043 UTC Mon Mar 2 2026' : '*0:12:34.567 UTC Mon Mar 1 1993'; }
   function cdpOn(d, p) { if (!d.cdpRun) return false; return d.type === 'router' ? d.ifaces[p]?.cdp !== false : d.ports[p]?.cdp !== false; }
   function showCdp(d, detail) {
     const L = detail ? [] : ['Capability Codes: R - Router, T - Trans Bridge, B - Source Route Bridge', '                  S - Switch, H - Host, I - IGMP, r - Repeater, P - Phone', 'Device ID    Local Intrfce   Holdtme    Capability   Platform    Port ID'];
@@ -3457,6 +3464,7 @@ export function createCli(net) {
       if (o.passiveDefault) { L.push(' passive-interface default'); for (const n of o.noPassive) L.push(` no passive-interface ${longIf(n)}`); }
       else for (const n of o.passive) L.push(` passive-interface ${longIf(n)}`);
       for (const [src, c0] of Object.entries(o.redist || {})) L.push(` redistribute ${src}${c0.as ?? c0.pid ? ' ' + (c0.as ?? c0.pid) : ''}${c0.metric != null ? ' metric ' + c0.metric : ''}${c0.subnets ? ' subnets' : ''}`);
+      L.push(...NP.ospfLines(o));
       for (const s of o.networks) L.push(` network ${s.net} ${s.wild} area ${s.area}`);
       if (o.defaultOriginate) L.push(` default-information originate${o.defaultAlways ? ' always' : ''}`);
       L.push('!');
@@ -3467,8 +3475,9 @@ export function createCli(net) {
       if (b.rid) L.push(` bgp router-id ${b.rid}`);
       L.push(' bgp log-neighbor-changes');
       for (const n of b.networks) L.push(` network ${n.net} mask ${prefixToMask(n.prefix)}`);
+      L.push(...NP.bgpLines(b));
       for (const [ip, n] of Object.entries(b.neighbors)) {
-        L.push(` neighbor ${ip} remote-as ${n.remoteAs}`);
+        if (n.remoteAs != null) L.push(` neighbor ${ip} remote-as ${n.remoteAs}`);
         if (n.desc) L.push(` neighbor ${ip} description ${n.desc}`);
         if (n.updateSource) L.push(` neighbor ${ip} update-source ${longIf(n.updateSource)}`);
         if (n.nextHopSelf) L.push(` neighbor ${ip} next-hop-self`);
@@ -3476,13 +3485,15 @@ export function createCli(net) {
       }
       L.push('!');
     }
-    if (d.eigrp) {
+    if (d.eigrp?.named) L.push(...NP.eigrpNamed(d.eigrp));
+    else if (d.eigrp) {
       const e = d.eigrp;
       L.push(`router eigrp ${e.as}`);
       if (e.rid) L.push(` eigrp router-id ${e.rid}`);
       for (const n of e.passive) L.push(` passive-interface ${longIf(n)}`);
       for (const [src, c0] of Object.entries(e.redist || {})) L.push(` redistribute ${src}${c0.as ?? c0.pid ? ' ' + (c0.as ?? c0.pid) : ''}${c0.metric ? ` metric ${c0.metric[0]} ${c0.metric[1]} 255 1 1500` : ''}`);
       if (e.defaultMetric) L.push(` default-metric ${e.defaultMetric[0]} ${e.defaultMetric[1]} 255 1 1500`);
+      L.push(...NP.eigrpLines(e));
       for (const s of e.networks) L.push(` network ${s.net}${s.wild ? ' ' + s.wild : ''}`);
       if (!e.autoSummary) L.push(' no auto-summary');
       L.push('!');
@@ -3499,6 +3510,7 @@ export function createCli(net) {
     const f = IFS(d)[n];
     const L = [`interface ${longIf(n)}`];
     if (f.desc) L.push(` description ${f.desc}`);
+    if (f.vrf) L.push(` ip vrf forwarding ${f.vrf}`);
     if (f.encap != null) L.push(` encapsulation dot1Q ${f.encap}${f.native ? ' native' : ''}`);
     L.push(f.ip ? ` ip address ${f.ip} ${prefixToMask(f.prefix)}` : ' no ip address');
     for (const h of f.helper) L.push(` ip helper-address ${h}`);
@@ -3508,11 +3520,12 @@ export function createCli(net) {
     if (f.nat) L.push(` ip nat ${f.nat}`);
     if (f.ospfCost != null) L.push(` ip ospf cost ${f.ospfCost}`);
     if (f.ospfPrio != null) L.push(` ip ospf priority ${f.ospfPrio}`);
-    if (f.ospfNet) L.push(` ip ospf network ${f.ospfNet === 'p2p' ? 'point-to-point' : 'broadcast'}`);
+    if (f.ospfNet) L.push(` ip ospf network ${{ p2p: 'point-to-point', p2mp: 'point-to-multipoint', nbma: 'non-broadcast', broadcast: 'broadcast' }[f.ospfNet]}`);
     if (f.ospfHello != null) L.push(` ip ospf hello-interval ${f.ospfHello}`);
     if (f.ospfPid != null) L.push(` ip ospf ${f.ospfPid} area ${f.ospfArea}`);
     if (f.ll) L.push(` ipv6 address ${f.ll} link-local`);
-    for (const a of f.ipv6 || []) L.push(a.eui ? ` ipv6 address ${A6.net6(a.ip, 64)}/64 eui-64` : ` ipv6 address ${a.ip}/${a.prefix}`);
+    L.push(...NP.ifLines(f));
+    for (const a of f.ipv6 || []) L.push(a.dhcp ? ' ipv6 address dhcp' : a.eui ? ` ipv6 address ${A6.net6(a.ip, 64)}/64 eui-64` : ` ipv6 address ${a.ip}/${a.prefix}`);
     if (f.ipv6Enable) L.push(' ipv6 enable');
     for (const dir of ['in', 'out']) if (f.ipv6Filter?.[dir]) L.push(` ipv6 traffic-filter ${f.ipv6Filter[dir]} ${dir}`);
     if (f.ospf6) L.push(` ipv6 ospf ${f.ospf6.pid} area ${f.ospf6.area}`);
@@ -3524,7 +3537,7 @@ export function createCli(net) {
       if (s.ip) L.push(` standby ${g} ip ${s.ip}`);
       if (s.priority != null) L.push(` standby ${g} priority ${s.priority}`);
       if (s.preempt) L.push(` standby ${g} preempt`);
-      for (const t of s.track || []) L.push(` standby ${g} track ${longIf(t.ifn)} ${t.dec}`);
+      for (const t of s.track || []) L.push(t.obj != null ? ` standby ${g} track ${t.obj} decrement ${t.dec}` : ` standby ${g} track ${longIf(t.ifn)} ${t.dec}`);
     }
     for (const [g, s] of Object.entries(f.vrrp || {})) {
       if (s.ip) L.push(` vrrp ${g} ip ${s.ip}`);
@@ -3621,7 +3634,7 @@ export function createCli(net) {
       if (d.ipv6Routing) L.push('ipv6 unicast-routing');
       for (const r of d.routes6 || []) L.push(`ipv6 route ${r.net}/${r.prefix} ${r.iface ? longIf(r.iface) + (r.nh ? ' ' + r.nh : '') : r.nh}${(r.ad ?? 1) !== 1 ? ' ' + r.ad : ''}`);
       if (d.ospf6) L.push(`ipv6 router ospf ${d.ospf6.pid}`, ...(d.ospf6.rid ? [` router-id ${d.ospf6.rid}`] : []), ...d.ospf6.passive.map((n) => ` passive-interface ${longIf(n)}`), '!');
-      L.push('!', 'ip flow-export version 9', '!', ...aclBlock(d), '!', ...ACL6.acl6Running(d.acls6));
+      L.push('!', ...NP.running(d), '!', ...aclBlock(d), '!', ...ACL6.acl6Running(d.acls6));
     } else {
       L = headBlock(d);
       if (d.ipRouting) L.push('ip routing', '!');
