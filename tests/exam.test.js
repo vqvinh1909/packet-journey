@@ -1,4 +1,4 @@
-// tests/exam.test.js — 🎓 thi thử CCNA (lab/ccna-exam.js): ngân hàng đúng tỉ lệ 6 mảng, xáo phương án vẫn giữ đáp án,
+// tests/exam.test.js — 🎓 thi thử CCNA (lab/ccna-exam.js): ngân hàng đúng tỉ lệ 5 mảng của v2.0, xáo phương án vẫn giữ đáp án,
 // đề rút gọn, chấm thang 1000, câu lab mô phỏng chấm được bằng checkLab.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -23,6 +23,13 @@ test('ngân hàng: 100 câu chia đúng tỉ lệ đề 200-301, đáp án hợp
   assert.equal(new Set(E.BANK.map((q) => q[1])).size, 100);
 });
 
+test('đề v2.0: có đủ chủ đề mới, tỉ trọng theo mảng, không còn chủ đề đã bỏ', () => {
+  assert.deepEqual(E.DOMAINS.map((d) => d.w), [25, 25, 20, 20, 10]);
+  const all = E.BANK.map((q) => JSON.stringify(q)).join(' ');
+  for (const k of ['Hypervisor', 'EUI-64', 'Root Guard', 'Loop Guard', 'PoE', 'Storm Control', 'RA Guard', 'SCP', 'CNAME', 'Agentic AI', 'Ansible', 'facility']) assert.ok(all.includes(k), 'thiếu ' + k);
+  for (const k of ['GLBP', 'DSCP', 'spine-leaf', 'O IA']) assert.ok(!E.BANK.some((q) => q[1].includes(k)), 'còn ' + k);
+});
+
 test('đề đầy đủ: xáo câu + phương án nhưng đáp án vẫn trỏ đúng nội dung; cùng seed ra cùng đề', () => {
   const ex = E.makeExam(42, 'full');
   assert.equal(ex.minutes, 120);
@@ -45,7 +52,7 @@ test('đề rút gọn 30 câu giữ tỉ lệ mảng + 1 câu lab, 40 phút', (
   assert.equal(ex.minutes, 40);
   const mcq = ex.qs.filter((q) => q.kind !== 'sim' && !q.gen);
   assert.equal(mcq.length, 30);
-  assert.equal(mcq.filter((q) => q.domain === 'ipc').length, 8);
+  assert.equal(mcq.filter((q) => q.domain === 'rt').length, 6);
   assert.equal(ex.qs.filter((q) => q.kind === 'sim').length, 1);
 });
 
@@ -67,9 +74,9 @@ test('chấm điểm: đúng hết = 1000 đạt, bỏ trống = 300, ghép cặ
   const mu = ex.qs.find((q) => q.kind === 'multi');
   assert.equal(E.scoreQ(mu, [mu.answer[0]]), 0, 'chọn thiếu đáp án = 0 điểm');
   assert.equal(E.scoreQ(mu, [...mu.answer].reverse()), 1, 'thứ tự chọn không quan trọng');
-  g = E.gradeExam(ex, perfect.map((a, k) => (ex.qs[k].domain === 'sec' ? null : a)));
-  assert.equal(g.domains.find((d) => d.id === 'sec').pct, 0);
-  assert.equal(g.domains.find((d) => d.id === 'nf').pct, 1);
+  g = E.gradeExam(ex, perfect.map((a, k) => (ex.qs[k].domain === 'svc' ? null : a)));
+  assert.equal(g.domains.find((d) => d.id === 'svc').pct, 0);
+  assert.equal(g.domains.find((d) => d.id === 'infra').pct, 1);
   assert.ok(g.score < 1000 && g.score > 825);
 });
 

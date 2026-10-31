@@ -4,7 +4,6 @@
 
 import { BitWriter } from '../packet/bytes.js';
 
-export const DHCP6_MSG = { SOLICIT: 1, ADVERTISE: 2, REQUEST: 3, CONFIRM: 4, RENEW: 5, REPLY: 7 };
 function msgName(t) { return { 1: 'SOLICIT', 2: 'ADVERTISE', 3: 'REQUEST', 4: 'CONFIRM', 5: 'RENEW', 7: 'REPLY' }[t] || '?'; }
 const OPT_NAME = { 1: 'Client ID', 2: 'Server ID', 3: 'IA_NA', 5: 'IA Address', 6: 'ORO', 23: 'DNS Servers' };
 

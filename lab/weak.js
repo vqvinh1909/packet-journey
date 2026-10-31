@@ -25,9 +25,10 @@ export const TOPICS = [
   ['IPv6', /ipv6|ospfv3|slaac|dual-stack/i],
   ['Quản trị thiết bị', /\bssh\b|\baaa\b|\bntp\b|syslog|nâng cấp ios|\bcdp\b|\blldp\b|\bsnmp|rommon|config-register|kiểm toán|mật khẩu|cấu hình cơ bản/i],
   ['WAN/Serial', /serial|\bppp\b|\bchap\b|\bgre\b/i],
+  ['Wi-Fi', /(wlan|wlc)/i],
 ];
 export const TOPIC_NAMES = TOPICS.map(([t]) => t);
-const GROUP_TOPIC = { sec: 'Firewall', l2s: 'Bảo mật L2' };
+const GROUP_TOPIC = { sec: 'Firewall', l2s: 'Bảo mật L2', wifi: 'Wi-Fi' };
 
 /** Chủ đề trong một đoạn chữ. */
 export const topicsOfText = (text) => TOPICS.filter(([, re]) => re.test(String(text || ''))).map(([t]) => t);

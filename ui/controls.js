@@ -1,5 +1,6 @@
 // ui/controls.js — thanh điều khiển timeline: ⏮ ◀ ▶/⏸ ▶ ⏭, tốc độ, thanh trượt,
 // và danh sách bước bấm để nhảy tới.
+import { esc } from './topo.js';
 
 export function renderControls(container, cbs, t) {
   container.innerHTML = '';
@@ -76,6 +77,3 @@ export function renderControls(container, cbs, t) {
   };
 }
 
-function esc(s) {
-  return String(s ?? '').replace(/[&<>]/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[m]));
-}

@@ -1,9 +1,7 @@
 // ui/glossary.js — modal Từ điển thuật ngữ + bảng tra nhanh (port, OSI↔TCP/IP).
+import { esc } from './topo.js';
 import { GLOSSARY, PORTS, OSI_MAP } from '../i18n/glossary.js';
 
-function esc(s) {
-  return String(s ?? '').replace(/[&<>]/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[m]));
-}
 
 export function openGlossary() {
   document.querySelector('.modal-backdrop')?.remove();

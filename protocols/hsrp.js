@@ -5,8 +5,6 @@
 import { BitWriter } from '../packet/bytes.js';
 import { parseIp } from '../packet/addr.js';
 
-export const HSRP_OP = { HELLO: 0, COUP: 1, RESIGN: 2 };
-export const HSRP_STATE = { INITIAL: 0, LEARN: 1, LISTEN: 2, SPEAK: 4, STANDBY: 8, ACTIVE: 16 };
 function opName(o) { return { 0: 'Hello', 1: 'Coup', 2: 'Resign' }[o] || '?'; }
 function stateName(s) { return { 0: 'Initial', 1: 'Learn', 2: 'Listen', 4: 'Speak', 8: 'Standby', 16: 'Active' }[s] || '?'; }
 

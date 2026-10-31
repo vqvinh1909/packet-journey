@@ -10,11 +10,19 @@ export function load(key, fallback) {
   }
 }
 
+let warnedFull = false;
+/** Trả true nếu đã ghi được. Bộ nhớ đầy thì báo một lần, vì từ đó mọi thay đổi đều không được lưu. */
 export function save(key, value) {
   try {
     localStorage.setItem(PREFIX + key, JSON.stringify(value));
-  } catch {
-    /* chế độ riêng tư / bị chặn — bỏ qua, app vẫn chạy */
+    return true;
+  } catch (e) {
+    // chế độ riêng tư / bị chặn thì bỏ qua, app vẫn chạy
+    if (!warnedFull && (e?.name === 'QuotaExceededError' || e?.name === 'NS_ERROR_DOM_QUOTA_REACHED')) {
+      warnedFull = true;
+      globalThis.alert?.('Bộ nhớ trình duyệt đã đầy nên thay đổi mới KHÔNG được lưu. Hãy xuất dữ liệu ra file (💾 Tiến độ, ⬇ Xuất) rồi xoá bớt lab hoặc sơ đồ cũ.');
+    }
+    return false;
   }
 }
 
@@ -43,9 +51,19 @@ export function exportAll() {
   return out;
 }
 
-/** Nhập tiến độ từ object (ghi đè các key tương ứng). */
+// Các khoá mà giao diện đọc ngay khi mở: sai kiểu sẽ làm cửa sổ hỏng ở mọi lần mở sau.
+const IMPORT_KINDS = {
+  done: 'object', 'labs-done': 'object', weak: 'object', 'subnet-stats': 'object', 'roadmap-read': 'object', 'lab-star': 'object', 'labexam-best': 'object',
+  'break-history': 'array', 'ccna-exam-hist': 'array', 'subnet-runs': 'array',
+};
+const kindOf = (v) => (Array.isArray(v) ? 'array' : v === null ? 'null' : typeof v);
+const isProgressKey = (k) => k in IMPORT_KINDS || /^(quiz_|lablog:|labnote:|labans:)/.test(k);
+
+/** Nhập tiến độ từ object (ghi đè các key tương ứng). Ném lỗi và không ghi gì nếu file không phải tiến độ. */
 export function importAll(obj) {
-  if (!obj || typeof obj !== 'object') return 0;
+  if (kindOf(obj) !== 'object' || !Object.keys(obj).some(isProgressKey)) throw new Error('Không phải file tiến độ');
+  for (const [k, kind] of Object.entries(IMPORT_KINDS)) if (k in obj && kindOf(obj[k]) !== kind) throw new Error(`Khoá ${k} sai kiểu`);
+  for (const [k, v] of Object.entries(obj)) if (k.startsWith('quiz_') && !Number.isFinite(v)) throw new Error(`Khoá ${k} sai kiểu`);
   let n = 0;
   for (const [k, v] of Object.entries(obj)) { save(k, v); n += 1; }
   return n;

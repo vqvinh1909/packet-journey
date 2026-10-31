@@ -1,5 +1,6 @@
 // ui/app.js — bộ điều phối: nối topology, timeline, ngăn xếp tầng, chi tiết gói.
 
+import { esc } from './topo.js';
 import { SCENARIOS, getScenario } from '../scenarios/index.js';
 import { downloadPcap } from '../packet/pcap.js';
 import { flattenFields } from '../packet/serialize.js';
@@ -15,6 +16,7 @@ import { sandboxFromDiagram } from '../lab/diagram-bridge.js';
 import { openLab } from './lab.js';
 import { openSubnet } from './subnet.js';
 import { openWeak } from './weak.js';
+import { openRoadmap } from './roadmap.js';
 import { openCheat } from './cheat.js';
 import { openExam } from './exam.js';
 import * as topo from './topology.js';
@@ -60,7 +62,14 @@ function boot() {
   // PWA: đăng ký service worker để chạy offline (bỏ qua nếu lỗi/không hỗ trợ).
   // updateViaCache:'none' → trình duyệt luôn kiểm tra sw.js mới, không dùng bản cũ trong cache.
   if ('serviceWorker' in navigator) {
-    window.addEventListener('load', () => navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).catch(() => {}));
+    window.addEventListener('load', () => {
+      // Lần đầu các module đã tải xong trước khi service worker chạy nên nó không thấy: gửi danh sách cho nó lưu.
+      const firstVisit = !navigator.serviceWorker.controller;
+      navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' })
+        .then(() => navigator.serviceWorker.ready)
+        .then((reg) => { if (firstVisit) reg.active?.postMessage({ cache: performance.getEntriesByType('resource').map((r) => r.name).filter((u) => new URL(u).origin === location.origin) }); })
+        .catch(() => {});
+    });
   }
 
   // Báo cho bộ tự phục hồi trong index.html: app đã chạy bình thường.
@@ -89,6 +98,7 @@ function buildChrome() {
   $('btn-subnet').onclick = openSubnet;
   $('btn-cheat').onclick = openCheat;
   $('btn-exam').onclick = openExam;
+  $('btn-roadmap').onclick = () => openRoadmap({ openLab: (id) => openLab(loadSimResult, { labId: id }), openScenario: loadScenario, openExam });
   $('btn-weak').onclick = () => openWeak({ openLab: (id, x = {}) => openLab(loadSimResult, { labId: id, ...x }) });
   refreshGuessBtn();
   refreshChromeText();
@@ -138,7 +148,7 @@ function refreshChromeText() {
   // nút thanh trên cùng (nội dung lab / kịch bản vẫn là tiếng Việt)
   const en = getLang() === 'en';
   const HDR = {
-    'btn-subnet': ['🧮 Luyện subnet', '🧮 Subnetting'], 'btn-cheat': ['📋 Cheat sheet', '📋 Cheat sheet'], 'btn-exam': ['🎓 Thi thử CCNA', '🎓 CCNA mock exam'],
+    'btn-roadmap': ['🧭 Lộ trình', '🧭 Roadmap'], 'btn-subnet': ['🧮 Luyện subnet', '🧮 Subnetting'], 'btn-cheat': ['📋 Cheat sheet', '📋 Cheat sheet'], 'btn-exam': ['🎓 Thi thử CCNA', '🎓 CCNA mock exam'],
     'btn-weak': ['📊 Điểm yếu', '📊 Weak spots'], 'btn-guess': ['🤔 Đoán bước', '🤔 Guess step'], 'btn-quiz': ['🎯 Quiz', '🎯 Quiz'], 'btn-builder': ['🛠️ Tự tạo', '🛠️ Builder'],
     'btn-canvas': ['✏️ Vẽ mạng', '✏️ Draw network'], 'btn-glossary': ['📘 Từ điển', '📘 Glossary'], 'btn-progress': ['💾 Tiến độ', '💾 Progress'],
   };
@@ -349,8 +359,5 @@ function bindKeys() {
   });
 }
 
-function esc(s) {
-  return String(s ?? '').replace(/[&<>]/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[m]));
-}
 
 boot();

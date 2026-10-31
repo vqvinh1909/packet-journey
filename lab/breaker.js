@@ -41,6 +41,7 @@ export function faultCandidates(net) {
   const out = [];
   const add = (f) => out.push(f);
   for (const d of Object.values(net.devices)) {
+    if (d.os === 'wlc') continue; // cấu hình bằng web, không có lệnh để gài lỗi
     if (isHost(d)) {
       // sai IP / mask / gateway của PC (chỉ máy đặt IP tĩnh)
       if (d.dhcp || !d.ip || !N.linkAt(net, d.id, 'fa0')) continue;

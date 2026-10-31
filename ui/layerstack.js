@@ -1,3 +1,4 @@
+import { esc } from './topo.js';
 // ui/layerstack.js — ngăn xếp tầng OSI; tầng đang xử lý sáng lên, kèm hướng đóng/bóc.
 
 const ROWS = [
@@ -41,6 +42,3 @@ export function renderLayerStack(container, step, t) {
   }
 }
 
-function esc(s) {
-  return String(s ?? '').replace(/[&<>]/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[m]));
-}

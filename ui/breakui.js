@@ -1,10 +1,10 @@
 // ui/breakui.js — hộp thoại "🎲 Phá mạng ngẫu nhiên": chọn lab (ưu tiên lab đã xong), số lỗi 1–3, seed (để
 // tái hiện), xem lịch sử các lượt đã chơi. Logic gài lỗi ở lab/breaker.js; đề chạy trong Lab CLI như một ticket.
+import { esc } from './topo.js';
 import { LABS, LAB_GROUPS, solutionOf } from '../lab/labs.js';
 import { breakId, breakLab, pickBreakLab, randomSeed, rng, breakScore } from '../lab/breaker.js';
 import { load } from './store.js';
 
-const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[m]));
 const fmt = (sec) => `${String(Math.floor(sec / 60)).padStart(2, '0')}:${String(sec % 60).padStart(2, '0')}`;
 
 /** Mở hộp thoại trong `host` (modal Lab CLI). o = { labId (gợi ý chọn sẵn), n, onStart(id) }. */

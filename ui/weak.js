@@ -1,11 +1,11 @@
 // ui/weak.js — "📊 Điểm yếu của tôi": biểu đồ điểm theo chủ đề (SVG), lệnh gõ sai nhiều nhất kèm cú pháp đúng,
 // 3–5 lab nên làm, nút "🎲 Phá mạng" cho chủ đề yếu nhất. Dữ liệu ở localStorage "weak" (lab/weak.js) — ghi bởi
 // trackCmd / trackLab (gọi từ ui/lab.js, ui/quiz.js), cộng thêm "break-history" và "subnet-stats".
+import { esc } from './topo.js';
 import * as W from '../lab/weak.js';
 import { LABS, getLab, solutionOf } from '../lab/labs.js';
 import { load, save } from './store.js';
 
-const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[m]));
 const WEAK_BELOW = 50;
 
 export const getWeak = () => load('weak', null) || W.emptyWeak();

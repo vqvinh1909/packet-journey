@@ -397,7 +397,7 @@ export function openLab(onRun, o = {}) {
     afterCommand(s.net);
     pullLogs();
     // 📊 Điểm yếu: chỉ lệnh người học tự gõ/dán trên router/switch IOS (không ghi mật khẩu, "?", lệnh mẫu)
-    if (!opts.noLog && !pw && !isHost(d) && !GUI_VENDORS[d.os] && d.os !== 'fortios' && d.os !== 'panos') {
+    if (!opts.noLog && !pw && !isHost(d) && !N.isVendorOs(d)) {
       trackCmd({ cmd: line, out: res.out, spec: res.spec, mode, lab: srcLab(), sug: cmdError(res.out) ? s.cli.suggest(dev, line) : [] });
     }
     s.hpos = -1;
@@ -408,7 +408,7 @@ export function openLab(onRun, o = {}) {
     const g = (s.gui ||= {});
     const T = termOf(s, d.id);
     renderGuiFw($('lab-gui'), d, {
-      tab: g.tab, ruleIf: g.ruleIf, addOpen: g.addOpen, lastErr: g.err,
+      net: s.net, tab: g.tab, ruleIf: g.ruleIf, addOpen: g.addOpen, lastErr: g.err,
       history: T.filter((l) => l.c === 'cmd').map((l) => l.t.replace(/^\[[^\]]*\]\s*/, '')),
       setTab: (t) => { g.tab = t; g.err = null; renderGui(d); },
       setRuleIf: (z) => { g.ruleIf = z; renderGui(d); },
@@ -748,7 +748,11 @@ export function openLab(onRun, o = {}) {
     if (!s?.net) return;
     const changed = clockStep(s.net);
     if (pullLogs()) renderTerm();
-    if (changed) drawTopo();
+    if (changed) {
+      drawTopo();
+      // STP hội tụ xong thì AP mới join; chỉ vẽ lại tab không có ô nhập để khỏi mất chữ đang gõ
+      if (s.net.devices[s.dev]?.os === 'wlc' && s.gui?.tab === 'Wireless') renderGui(s.net.devices[s.dev]);
+    }
     renderClock();
   }, TICK_MS);
 

@@ -16,10 +16,11 @@
     <h1 id="app-title">Packet Journey</h1>
     <span class="sub" id="app-sub"></span>
     <select id="sel-scenario" aria-label="scenario"></select>
-    <button id="btn-lab" class="btn-lab" title="Lab thực hành dòng lệnh Cisco IOS theo giáo trình (109 lab, ticket sự cố, lab chuyên đề, lab firewall ASA/ZBF/FortiGate/Palo Alto/Sophos/Check Point/pfSense, bảo mật L2, lab tổng hợp, thi thử + chế độ tự dựng mạng)">🧪 Lab CLI</button>
+    <button id="btn-roadmap" title="Học theo đề cương CCNA 200-301 v2.0: việc đã xong và việc nên làm tiếp">🧭 Lộ trình</button>
+    <button id="btn-lab" class="btn-lab" title="Lab thực hành dòng lệnh Cisco IOS theo giáo trình (113 lab, ticket sự cố, lab chuyên đề, lab firewall ASA/ZBF/FortiGate/Palo Alto/Sophos/Check Point/pfSense, bảo mật L2, lab tổng hợp, thi thử + chế độ tự dựng mạng)">🧪 Lab CLI</button>
     <button id="btn-subnet" title="Luyện subnet vô hạn: network/broadcast, mask↔prefix↔wildcard, VLSM, summary… có giải từng bước và thống kê">🧮 Luyện subnet</button>
     <button id="btn-cheat" title="Cheat sheet tự sinh: các lệnh bạn đã gõ thành công, gom theo chủ đề, in được">📋 Cheat sheet</button>
-    <button id="btn-exam" title="Thi thử CCNA 200-301: đề tự soạn ~100 câu + lab mô phỏng, 120 phút, chấm thang 1000, điểm theo 6 mảng">🎓 Thi thử CCNA</button>
+    <button id="btn-exam" title="Thi thử CCNA 200-301: đề tự soạn ~100 câu + lab mô phỏng, 120 phút, chấm thang 1000, điểm theo 5 mảng của v2.0">🎓 Thi thử CCNA</button>
     <button id="btn-weak" title="Điểm yếu của tôi: điểm theo chủ đề, lệnh hay gõ sai, lab nên làm tiếp">📊 Điểm yếu</button>
     <button id="btn-guess" title="Đoán bước tiếp theo">🤔 Đoán bước</button>
     <button id="btn-quiz" title="Quiz cuối bài">🎯 Quiz</button>
@@ -67,7 +68,8 @@
     // Nếu lần thử lại vẫn hỏng thì hiện thông báo thay vì để trang trắng.
     window.addEventListener('load', () => setTimeout(async () => {
       if (window.__pjBooted) return;
-      if (!sessionStorage.getItem('pj-heal')) {
+      // Offline thì giữ nguyên cache: xoá đi là mất luôn bản đang có.
+      if (navigator.onLine && !sessionStorage.getItem('pj-heal')) {
         sessionStorage.setItem('pj-heal', '1');
         try { const regs = (await navigator.serviceWorker?.getRegistrations()) || []; await Promise.all(regs.map((r) => r.unregister())); } catch (e) { /* bỏ qua */ }
         try { const ks = await caches.keys(); await Promise.all(ks.map((k) => caches.delete(k))); } catch (e) { /* bỏ qua */ }
@@ -76,7 +78,7 @@
       }
       const box = document.createElement('div');
       box.className = 'boot-fail';
-      box.innerHTML = '<b>App chưa khởi động được.</b> Đã tự xoá bộ nhớ đệm và tải lại nhưng vẫn lỗi. ' +
+      box.innerHTML = navigator.onLine === false ? '<b>App chưa tải đủ file để chạy offline.</b> Hãy kết nối mạng rồi mở lại một lần. <button onclick="location.reload()">Thử lại</button>' : '<b>App chưa khởi động được.</b> Đã tự xoá bộ nhớ đệm và tải lại nhưng vẫn lỗi. ' +
         'Hãy bấm F12 → tab Console, chụp dòng chữ đỏ gửi người hỗ trợ. ' +
         '<button onclick="sessionStorage.removeItem(\'pj-heal\');location.reload()">Thử lại</button>';
       document.body.prepend(box);

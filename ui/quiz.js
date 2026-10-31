@@ -1,12 +1,10 @@
 // ui/quiz.js — hộp Quiz cuối bài (modal). Câu hỏi sinh từ chính kịch bản.
 // Lưu điểm cao nhất vào localStorage theo scenarioId.
 
+import { esc } from './topo.js';
 import { save, load } from './store.js';
 import { trackLab } from './weak.js';
 
-function esc(s) {
-  return String(s ?? '').replace(/[&<>]/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[m]));
-}
 
 export function openQuiz(scenarioId, titleVi, quiz) {
   // gỡ modal cũ nếu có

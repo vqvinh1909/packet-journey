@@ -92,17 +92,6 @@ export function addNodes(net, kind, o = {}, x = 120, y = 100) {
   for (let i = 0; i < count; i++) ids.push(addDevice(net, kind, x + (i % 6) * 120, y + Math.floor(i / 6) * 110, { prefix, ports: o.ports, off: o.off ?? true }));
   return { ids };
 }
-/** Vị trí trống gợi ý cho thiết bị mới (lưới, tránh chồng lên thiết bị có sẵn). */
-export function freeSpot(net) {
-  const ds = Object.values(net.devices);
-  for (let row = 0; row < 12; row++) {
-    for (let col = 0; col < 8; col++) {
-      const x = 90 + col * 115, y = 70 + row * 85;
-      if (ds.every((d) => Math.hypot(d.x - x, d.y - y) > 70)) return { x, y };
-    }
-  }
-  return { x: 500, y: 220 };
-}
 /** Chỗ trống gần (x, y) đủ cho `count` thiết bị xếp hàng như addNodes (6 cột, cách 120 × 110). */
 export function freeSpotNear(net, x, y, count = 1) {
   const ds = Object.values(net.devices);
@@ -235,7 +224,7 @@ export function duplicateDevice(net, id) {
   const nid = addDevice(net, kind, src.x + 60, src.y + 50, { ports: portCountOf(src), off: isOff(src) });
   const fresh = net.devices[nid];
   // FortiGate / Palo Alto / firewall web giữ cấu hình (kể cả IP) trong model riêng của hãng → bản sao để trống
-  if (src.os && src.os !== 'asa') return nid;
+  if (N.isVendorOs(src)) return nid;
   const d = N.cloneNet({ devices: { x: src }, links: [] }).devices.x;
   Object.assign(d, { id: nid, name: fresh.name, x: fresh.x, y: fresh.y, arp: {}, kind, off: fresh.off });
   if (isHostLike(d)) { d.ip = ''; d.gateway = ''; }

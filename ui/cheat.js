@@ -1,12 +1,12 @@
 // ui/cheat.js — modal "📋 Cheat sheet": các lệnh bạn đã gõ thành công trong Lab CLI, gom theo chủ đề và chế độ
 // (lab/cheat.js), lọc theo chủ đề / tìm kiếm, in được (CSS @media print chỉ in bảng).
+import { esc } from './topo.js';
 import { buildCheat, modeName, modePrompt } from '../lab/cheat.js';
 import { DESC } from '../lab/ios.js';
 import { TOPIC_NAMES } from '../lab/weak.js';
 import { getWeak } from './weak.js';
 import { load, save } from './store.js';
 
-const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[m]));
 
 export function openCheat() {
   document.querySelector('.modal-backdrop')?.remove();

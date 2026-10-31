@@ -31,6 +31,8 @@ const HTML_BY_TRACK = {
   'Quản trị Hạ tầng mạng (Infrastructure Administrator)': 'Infrastructure-Administrator-Giao-trinh.html',
   'Network security': 'Network-Security-Giao-trinh.html',
 };
+// App ở E:\SAP\Packet-Journey, giáo trình ở E:\SAP\Mạng máy tính\ (ngoài repo).
+const LESSON_ROOT = '../Mạng máy tính/';
 
 /**
  * Tạo href an toàn tới bài học. Nếu nhận ra đường dẫn `../<track>/.../Bai-NN_*.md`,
@@ -44,6 +46,7 @@ export function lessonHref(path) {
     const n = String(m[2]).padStart(2, '0');
     target = `../${m[1]}/${HTML_BY_TRACK[m[1]]}#b${n}-s0`;
   }
+  target = target.replace(/^\.\.\//, LESSON_ROOT);
   const hashIdx = target.indexOf('#');
   const anchor = hashIdx >= 0 ? target.slice(hashIdx) : '';
   const p = hashIdx >= 0 ? target.slice(0, hashIdx) : target;

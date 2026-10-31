@@ -1,11 +1,9 @@
 // ui/progress.js — modal Tiến độ học: kịch bản đã xem, điểm quiz, và xuất/nhập tiến độ.
+import { esc } from './topo.js';
 import { SCENARIOS } from '../scenarios/index.js';
 import { quizFor } from '../scenarios/quizzes.js';
 import { getDone, load, exportAll, importAll } from './store.js';
 
-function esc(s) {
-  return String(s ?? '').replace(/[&<>]/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[m]));
-}
 
 export function openProgress() {
   document.querySelector('.modal-backdrop')?.remove();
@@ -67,7 +65,7 @@ export function openProgress() {
         const n = importAll(JSON.parse(reader.result));
         render();
         modal.querySelector('#pg-sum').textContent += ` · đã nhập ${n} mục (tải lại trang để áp dụng đầy đủ)`;
-      } catch { alert('File không hợp lệ.'); }
+      } catch (err) { alert(`File không hợp lệ: ${err.message}.`); }
     };
     reader.readAsText(file);
   };
