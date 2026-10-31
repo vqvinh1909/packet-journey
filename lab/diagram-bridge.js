@@ -53,6 +53,7 @@ export function sandboxFromDiagram(diagram) {
     const kind = workspaceKind(s), ports = Math.max((s.ports || []).length, d.edges.filter((e) => e.a === s.id || e.b === s.id).length, 1);
     const id = S.addDevice(net, kind, s.x + s.w / 2, s.y + s.h / 2, { off: true, ports });
     net.devices[id].name = (s.label || net.devices[id].name).slice(0, 30); ids.set(s.id, id); used.set(s.id, new Set());
+    if (d.edges.some((e) => (e.a === s.id && e.la === 'pc0') || (e.b === s.id && e.lb === 'pc0'))) net.devices[id].phone = true; // điện thoại IP có thêm cổng PC
   }
   // Cổng được ghi tên trên dây nào thì để dành cho dây đó; dây không ghi tên chỉ lấy cổng còn lại.
   const reserved = (shapeId) => new Set(d.edges.flatMap((e) => [e.a === shapeId ? portAlias(e.la) : '', e.b === shapeId ? portAlias(e.lb) : '']).filter(Boolean));

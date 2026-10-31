@@ -163,6 +163,18 @@ export const QUIZZES = {
     { q: 'VNI 24-bit cho phép bao nhiêu mạng ảo?', options: ['4094', '~16 triệu', '256', '65535'], correct: 1, explainVi: 'Vượt xa giới hạn 4094 VLAN.' },
     { q: 'Thiết bị đóng/gỡ gói VXLAN gọi là?', options: ['Router', 'VTEP', 'Switch L2', 'Gateway'], correct: 1, explainVi: 'VTEP = VXLAN Tunnel End Point.' },
   ],
+  's31-evpn': [
+    { q: 'EVPN thay đổi phần nào của VXLAN?', options: ['Mặt phẳng dữ liệu, bỏ UDP 4789', 'Mặt phẳng điều khiển: học MAC qua BGP thay vì flood', 'Độ dài VNI', 'Khung Ethernet gốc'], correct: 1, explainVi: 'Dữ liệu vẫn là VXLAN, EVPN chỉ đổi cách VTEP biết MAC ở đâu.' },
+    { q: 'Route EVPN nào mang MAC và IP của host?', options: ['Type 1', 'Type 2', 'Type 3', 'Type 5'], correct: 1, explainVi: 'Type 2 là MAC/IP Advertisement.' },
+    { q: 'ARP suppression hoạt động thế nào?', options: ['VTEP chặn mọi ARP và máy không liên lạc được', 'VTEP tự trả lời ARP từ thông tin EVPN đã học', 'Spine trả lời ARP', 'Host không dùng ARP nữa'], correct: 1, explainVi: 'VTEP có cặp IP và MAC từ route type 2 nên trả lời thay, broadcast không vào fabric.' },
+    { q: 'Vì sao dùng Spine làm route reflector?', options: ['Để đóng gói VXLAN', 'Tránh full-mesh iBGP giữa mọi VTEP', 'Để tăng VNI', 'Để bỏ underlay'], correct: 1, explainVi: 'VTEP chỉ cần phiên iBGP với route reflector. Next hop vẫn là VTEP gốc.' },
+  ],
+  's32-sr-mpls': [
+    { q: 'Trong SR-MPLS, ai quyết định đường đi của gói?', options: ['Mọi router P', 'Router đầu vào, ghi đường đi thành chồng nhãn', 'Router cuối', 'Máy khách'], correct: 1, explainVi: 'Đó là source routing, lõi không giữ trạng thái theo luồng.' },
+    { q: 'Node SID được quảng bá bằng gì?', options: ['LDP', 'Phần mở rộng của IS-IS hoặc OSPF', 'DHCP', 'STP'], correct: 1, explainVi: 'SR không cần LDP hay RSVP-TE, IGP mang luôn SID.' },
+    { q: 'Vì sao nhãn node SID giữ nguyên qua từng chặng?', options: ['Mọi router dùng chung dải SRGB', 'Router lỗi', 'Không có LFIB', 'TTL bằng 0'], correct: 0, explainVi: 'Dùng chung SRGB thì SID 4 luôn là nhãn 16004 trên toàn miền.' },
+    { q: 'Penultimate Hop Popping nghĩa là?', options: ['Chặng áp chót gỡ nhãn của segment', 'Chặng đầu gỡ mọi nhãn', 'Xoá gói', 'Thêm nhãn mới'], correct: 0, explainVi: 'Router cuối segment đỡ phải tra hai lần.' },
+  ],
 };
 
 export function quizFor(id) {

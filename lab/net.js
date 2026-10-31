@@ -248,13 +248,16 @@ function peerDev(net, devId, port) {
   const l = linkAt(net, devId, port);
   return l ? net.devices[peerOf(l, devId, port).dev] : null;
 }
+/** Mức broadcast hiện tại (%) trên cổng: máy đầu kia đang phát bão thì có d.stormPct, không thì coi như 0. */
+export function stormNow(net, d, port) { return peerDev(net, d.id, port)?.stormPct ?? 0; }
 /** Cổng switch đang err-disabled (port-security shutdown, hoặc BPDU Guard gặp switch khác). */
 export function errDisabled(net, d, port) {
   const p = d.ports?.[port];
   if (!p) return false;
   if (p.errdis) return true;
   const guard = p.bpduguard || (p.portfast && d.stp?.bpduDefault);
-  return !!(guard && !p.shutdown && peerDev(net, d.id, port)?.type === 'switch');
+  if (guard && !p.shutdown && peerDev(net, d.id, port)?.type === 'switch') return true;
+  return !!(p.storm?.action === 'shutdown' && p.storm.level != null && stormNow(net, d, port) > p.storm.level);
 }
 function physAdminUp(net, devId, port) {
   const d = net.devices[devId];
@@ -275,7 +278,14 @@ export function statusUp(net, devId, port) {
   if (!physAdminUp(net, p.dev, p.port)) return false;
   return !unpowered(d, port, net.devices[p.dev], p.port) && !ethMode(net, devId, port).down;
 }
-// shortcut: điện thoại IP nối thẳng vào switch, chưa mô phỏng PC cắm sau điện thoại; cần thì cho điện thoại 2 cổng.
+/** Module quang tương thích: cùng loại SFP, đúng loại sợi và trong cự ly. SX: multimode 550 m; LX: singlemode 10 km. */
+const SFP = { SX: { fiber: 'MMF', max: 550 }, LX: { fiber: 'SMF', max: 10000 } };
+export function sfpOk(a, b) {
+  if (!a?.sfp && !b?.sfp) return true;
+  if (a?.sfp !== b?.sfp) return false;
+  const m = SFP[a.sfp];
+  return (a.fiber ?? m.fiber) === m.fiber && (a.fiberM ?? 0) <= m.max;
+}
 const unpowered = (d1, p1, d2, p2) => (d2.phone && d1.ports?.[p1]?.power === 'never') || (d1.phone && d2.ports?.[p2]?.power === 'never');
 /**
  * Kết quả thương lượng Ethernet của một cổng. Đặt cứng CẢ speed và duplex thì cổng tắt autonegotiation:
@@ -287,6 +297,7 @@ export function ethMode(net, devId, port) {
   const me = side(devId, port), l = linkAt(net, devId, port);
   if (!l) return { speed: me.speed ?? me.cap, duplex: me.duplex ?? 'full', autoSpeed: !me.speed, autoDuplex: !me.duplex, mismatch: false, down: false };
   const pe = peerOf(l, devId, port), o = side(pe.dev, pe.port);
+  if (!sfpOk(net.devices[devId].ports?.[port], net.devices[pe.dev].ports?.[pe.port])) return { speed: me.cap, duplex: 'full', autoSpeed: !me.speed, autoDuplex: !me.duplex, mismatch: false, down: true };
   const speed = me.speed ?? o.speed ?? Math.min(me.cap, o.cap), neg = !(me.speed && me.duplex) && !(o.speed && o.duplex);
   const dup = (x, y) => x.duplex ?? (neg ? y.duplex ?? 'full' : speed >= 1000 ? 'full' : 'half');
   const duplex = dup(me, o);
@@ -359,9 +370,7 @@ export function effPort(net, d, p) {
     const po = d.ports[b.po];
     return { ...po, mode: po.modeSet ? po.mode : 'access', shutdown: po.shutdown || c.shutdown, bundle: b.po };
   }
-  const e = { ...c, mode: operMode(net, d, p, c), bundle: null };
-  if (c.voiceVlan && e.mode === 'access' && peerDev(net, d.id, p)?.phone) e.vlan = c.voiceVlan; // điện thoại gắn thẻ VLAN thoại
-  return e;
+  return { ...c, mode: operMode(net, d, p, c), bundle: null };
 }
 export function allowedHas(e, v) { return e.allowed == null ? v >= 1 && v <= 4094 : e.allowed.includes(v); }
 /** Cổng PVLAN có mang VLAN v không (host: primary + community của mình; promiscuous: primary + mapping). */
@@ -373,7 +382,7 @@ function pvCarries(d, pv, v) {
 export function portCarries(net, d, p, v) {
   const e = effPort(net, d, p);
   if (e.mode === 'private-vlan') return pvCarries(d, e.pv, v);
-  return e.mode === 'access' ? e.vlan === v : allowedHas(e, v);
+  return e.mode === 'access' ? e.vlan === v || e.voiceVlan === v : allowedHas(e, v);
 }
 
 /** Interface L3 (router: cổng/subif/loopback; switch: SVI) có up/up không. */
@@ -457,7 +466,10 @@ export function flood(net, src, diag) {
   };
 
   const d0 = net.devices[src.dev];
-  if (d0.type === 'pc' || d0.type === 'server') sendOut(src.dev, 'fa0', null, [], null);
+  // Điện thoại IP: cổng fa0 ra switch (thoại gắn thẻ voice VLAN), cổng pc0 nối PC phía sau (dữ liệu không gắn thẻ)
+  const voiceOf = (id) => { const l = linkAt(net, id, 'fa0'); return l ? net.devices[peerOf(l, id, 'fa0').dev].ports?.[peerOf(l, id, 'fa0').port]?.voiceVlan ?? null : null; };
+  if (d0.phone && !statusUp(net, src.dev, 'fa0')) { note(`${d0.name} chưa có nguồn (cổng switch tắt PoE)`); return out; }
+  if (d0.type === 'pc' || d0.type === 'server') sendOut(src.dev, 'fa0', d0.phone ? voiceOf(src.dev) : null, [], null);
   else if (d0.type === 'router') {
     if (!ifUp(net, src.dev, src.ifn)) { note(`${d0.name} ${longIf(src.ifn)} chưa up (shutdown/chưa cắm dây/chưa encapsulation/lệch đóng gói serial)`); return out; }
     const f = d0.ifaces[src.ifn];
@@ -478,6 +490,13 @@ export function flood(net, src, diag) {
     const d = net.devices[it.dev];
     if (it.k === 'arr') {
       if (!physAdminUp(net, it.dev, it.port)) { note(d.off ? `${d.name} đang TẮT (Stop) — thiết bị chưa được Start nên mọi cổng down` : `${d.name} ${longIf(it.port)} đang ${d.type === 'switch' && errDisabled(net, d, it.port) ? 'ERR-DISABLED' : 'shutdown'}`); continue; }
+      if (d.phone) {
+        if (!statusUp(net, it.dev, 'fa0')) { note(`${d.name} chưa có nguồn (cổng switch tắt PoE)`); continue; }
+        if (it.port === 'pc0') { sendOut(it.dev, 'fa0', null, it.hops, null); continue; }
+        if (it.tag != null || !voiceOf(it.dev)) add(it.dev, 'fa0', it.hops);
+        if (it.tag == null) sendOut(it.dev, 'pc0', null, it.hops, null);
+        continue;
+      }
       if (d.type === 'pc' || d.type === 'server') {
         if (it.tag == null) add(it.dev, 'fa0', it.hops);
         else note(`${d.name} nhận frame có tag VLAN ${it.tag} (máy trạm không hiểu 802.1Q) → bỏ`);
@@ -515,8 +534,8 @@ export function flood(net, src, diag) {
           vlan = pv.secondary;
         } else vlan = pv.primary;
       } else if (e.mode === 'access') {
-        if (it.tag != null) { note(`${d.name} ${longIf(it.port)} là cổng ACCESS nhưng nhận frame gắn tag VLAN ${it.tag} (đầu kia đang trunk?) → bỏ`); continue; }
-        vlan = e.vlan;
+        if (it.tag != null && it.tag !== e.voiceVlan) { note(`${d.name} ${longIf(it.port)} là cổng ACCESS nhưng nhận frame gắn tag VLAN ${it.tag} (đầu kia đang trunk?) → bỏ`); continue; }
+        vlan = it.tag ?? e.vlan;
       } else {
         vlan = it.tag ?? e.native;
         if (!allowedHas(e, vlan)) { note(`${d.name} trunk ${longIf(e.bundle || it.port)} không cho phép VLAN ${vlan} (allowed vlan) → bỏ frame`); continue; }
@@ -553,7 +572,10 @@ export function flood(net, src, diag) {
           // host isolated/community nhận frame từ promiscuous (primary) hoặc cùng community
           if (e.pv.mode === 'host' && it.vlan !== e.pv.primary && it.vlan !== e.pv.secondary) continue;
           tag = null;
-        } else if (e.mode === 'access') { if (e.vlan !== it.vlan) continue; tag = null; }
+        } else if (e.mode === 'access') {
+          if (e.vlan !== it.vlan && e.voiceVlan !== it.vlan) continue;
+          tag = e.vlan === it.vlan ? null : it.vlan;
+        }
         else {
           if (!allowedHas(e, it.vlan)) { note(`${d.name} trunk ${longIf(e.bundle || p)} không cho phép VLAN ${it.vlan} (allowed vlan) → không chuyển frame ra cổng này`); continue; }
           tag = it.vlan === e.native ? null : it.vlan;
@@ -730,7 +752,7 @@ export function lookup(ctx, rid, dst) {
 }
 
 // ---------- OSPF ----------
-function ospfCost(ifn, f) { if (f.ospfCost != null) return f.ospfCost; const k = kindOf(ifn); return k === 's' ? 64 : k === 'e' ? 10 : 1; }
+function ospfCost(ifn, f) { if (f.ospfCost != null) return f.ospfCost; const k = kindOf(ifn); return k === 's' ? 64 : k === 'e' || f.speed === 10 ? 10 : 1; }
 export function ospfIfaces(ctx, rid) {
   const net = ctx.net, r = net.devices[rid];
   if (!r.ospf || !isL3(r)) return [];
@@ -1888,8 +1910,8 @@ export function stpRoot(net, vlan) {
 }
 const STP_COST = { g: 4, fa: 19, e: 100 };
 /** Cost STP (short) của cổng logic: 1G = 4, 100M = 19; EtherChannel ≥ 2 sợi rẻ hơn (2×1G = 3, 2×100M = 12). */
-function stpCost(d, members) {
-  const base = STP_COST[kindOf(members[0])] ?? 19;
+function stpCost(net, d, members) {
+  const base = { 10: 100, 100: 19, 1000: 4 }[ethMode(net, d.id, members[0]).speed] ?? STP_COST[kindOf(members[0])] ?? 19;
   return members.length >= 2 ? ({ 4: 3, 19: 12 }[base] ?? base) : base;
 }
 const bidCmp = (net, v) => (a, b) => stpPriority(a, v) - stpPriority(b, v) || (switchMac(net, a.id) < switchMac(net, b.id) ? -1 : switchMac(net, a.id) > switchMac(net, b.id) ? 1 : 0);
@@ -1900,6 +1922,25 @@ const bidCmp = (net, v) => (a, b) => stpPriority(a, v) - stpPriority(b, v) || (s
  * Trả { root: {devId: rootId}, dist: {devId: cost}, ports: {'dev|cổng': {role, sts, cost, peer}} }.
  */
 export function stpState(net, v) {
+  // Root Guard / Loop Guard: cổng vi phạm bị cắt khỏi cây rồi tính lại. Cổng mất BPDU mà không có Loop Guard thì tự mở (nguy cơ loop).
+  const cut = new Map();
+  for (;;) {
+    const st = stpCompute(net, v, cut);
+    const bad = Object.entries(st.ports).find(([k, P]) => {
+      if (cut.has(k)) return false;
+      const c = net.devices[k.slice(0, k.indexOf('|'))].ports[P.name];
+      return (c?.rootGuard && P.role === 'Root') || (c?.noBpduRx && P.peer && P.role !== 'Desg');
+    });
+    if (!bad) {
+      for (const [k, kind] of cut) if (kind && st.ports[k]) Object.assign(st.ports[k], { sts: 'BLK', inc: kind });
+      return st;
+    }
+    const c = net.devices[bad[0].slice(0, bad[0].indexOf('|'))].ports[bad[1].name];
+    const dev = net.devices[bad[0].slice(0, bad[0].indexOf('|'))];
+    cut.set(bad[0], c.rootGuard && bad[1].role === 'Root' ? 'Root' : c.loopGuard || dev.stp.loopguardDefault ? 'Loop' : null);
+  }
+}
+function stpCompute(net, v, cut) {
   const sws = Object.values(net.devices).filter((d) => d.type === 'switch' && d.vlans[v]);
   const cmp = bidCmp(net, v);
   const ports = {}, edges = [], lports = {};
@@ -1914,7 +1955,7 @@ export function stpState(net, v) {
       groups.get(name).push(p);
     }
     lports[d.id] = groups;
-    for (const [name, mem] of groups) ports[d.id + '|' + name] = { role: 'Desg', sts: 'FWD', cost: stpCost(d, mem), name, members: mem, peer: null };
+    for (const [name, mem] of groups) ports[d.id + '|' + name] = { role: 'Desg', sts: 'FWD', cost: stpCost(net, d, mem), name, members: mem, peer: null };
   }
   // cạnh switch–switch (mỗi cổng logic chỉ có 1 láng giềng)
   for (const d of sws) {
@@ -1924,7 +1965,7 @@ export function stpState(net, v) {
       const pd = net.devices[pe.dev];
       if (pd?.type !== 'switch' || !lports[pd.id]) continue;
       const pn = effPort(net, pd, pe.port).bundle || pe.port;
-      if (!ports[pd.id + '|' + pn]) continue;
+      if (!ports[pd.id + '|' + pn] || cut.has(d.id + '|' + name) || cut.has(pd.id + '|' + pn)) continue;
       ports[d.id + '|' + name].peer = { dev: pd.id, port: pn };
       if (d.id < pd.id || (d.id === pd.id && name < pn)) edges.push({ a: d.id, ap: name, b: pd.id, bp: pn });
     }

@@ -6,7 +6,7 @@
 //   radius add <ip> secret=<chuỗi> · radius del <ip>
 //   wlan add <id> ssid=.. iface=<tên> sec=open|wpa2-psk|wpa3-sae|wpa2-ent [psk=..] [radius=<ip>] [qos=..] [isolation=yes|no]
 //   wlan set <id> ... · wlan on|off|del <id>         — WLAN mới tạo ở trạng thái TẮT, giống WLC thật
-//   ap <id-AP> [channel=1..13] [mode=local|flexconnect]
+//   ap <id-AP> [channel=1..13|36..161] [power=5..20] [mode=local|flexconnect]
 //   client ssid=.. [psk=..] [user=..] [pass=..]      — thử kết nối bằng một máy khách
 //   show wlan|ap|if|radius
 
@@ -73,6 +73,25 @@ export function clientTest(net, d, { ssid, psk, user, pass } = {}) {
   const bad = vlanPathError(net, d, f);
   if (bad) return fail('vlan', `Xác thực xong nhưng không có đường ra: ${bad}`);
   return { ok: true, step: 'done', why: `Đã kết nối ${w.ssid}, vào VLAN ${f.vlan}, gateway ${f.gw}, QoS ${w.qos}`, vlan: f.vlan };
+}
+const CH5 = [36, 40, 44, 48, 149, 153, 157, 161];
+export const WLC_CHANNELS = [...Array.from({ length: 13 }, (_, i) => i + 1), ...CH5];
+const bandOf = (ch) => (ch >= 36 ? 5 : 2.4);
+const overlap = (a, b) => bandOf(a) === bandOf(b) && (bandOf(a) === 5 ? a === b : Math.abs(a - b) < 5);
+/**
+ * Mô hình RF giản lược cho từng AP, đo tại vị trí máy khách điển hình:
+ * RSSI = công suất phát - suy hao (5 GHz suy hao thêm 8 dB); nhiễu là nguồn mạnh nhất cùng băng và chồng kênh; SNR = RSSI - nhiễu.
+ * d.wlc.rfEnv = [{ ch, dbm, src }] là nguồn nhiễu ngoài; ch 'all24' là nhiễu cả băng 2.4 GHz (lò vi sóng, Bluetooth).
+ */
+export function rfStatus(net, d) {
+  const aps = apsOf(net, d).map(({ ap }) => ({ ap, c: apConfig(d, ap.id) }));
+  return aps.map(({ ap, c }) => {
+    if (c.channel == null) return { ap: ap.id, name: ap.name, channel: null };
+    const pw = c.power ?? 20, band = bandOf(c.channel), rssi = pw - 65 - (band === 5 ? 8 : 0);
+    const srcs = [{ dbm: -95, src: 'nền' }, ...(d.wlc.rfEnv || []).filter((e) => (e.ch === 'all24' ? band === 2.4 : overlap(e.ch, c.channel))), ...aps.filter((o) => o.ap !== ap && o.c.channel != null && overlap(o.c.channel, c.channel)).map((o) => ({ dbm: (o.c.power ?? 20) - 75, src: o.ap.name }))];
+    const top = srcs.reduce((a, b) => (b.dbm > a.dbm ? b : a));
+    return { ap: ap.id, name: ap.name, channel: c.channel, band, power: pw, rssi, noise: top.dbm, by: top.src, snr: rssi - top.dbm };
+  });
 }
 /** Các AP đã join dùng kênh 2.4 GHz không chồng lấn (1/6/11) và không trùng nhau. */
 export function channelsClean(net, d) {
@@ -150,7 +169,8 @@ export function makeWlc({ net, R }) {
     if (cmd === 'ap') {
       if (!net.devices[sub]?.isAp) return err(`không có AP "${sub ?? ''}"`);
       const o = kv(w.slice(2)), c = { ...apConfig(d, sub) };
-      if (o.channel != null) { if (!(+o.channel >= 1 && +o.channel <= 13)) return err('channel=1..13'); c.channel = +o.channel; }
+      if (o.channel != null) { if (!WLC_CHANNELS.includes(+o.channel)) return err('channel=1..13 hoặc 36, 40, 44, 48, 149, 153, 157, 161'); c.channel = +o.channel; }
+      if (o.power != null) { if (!(+o.power >= 5 && +o.power <= 20)) return err('power=5..20 (dBm)'); c.power = +o.power; }
       if (o.mode != null) { if (!['local', 'flexconnect'].includes(o.mode)) return err('mode=local|flexconnect'); c.mode = o.mode; }
       C.aps[sub] = c;
       return R([]);
@@ -165,7 +185,8 @@ export function makeWlc({ net, R }) {
       if (sub === 'ap') return R(apsOf(net, d).map(({ ap }) => { const c = apConfig(d, ap.id); return `${ap.name} ${apJoined(net, d, ap.id) ? 'JOINED' : 'chưa join'} kênh ${c.channel ?? '-'} ${c.mode}`; }));
       if (sub === 'if') return R([`management ${d.ip || '-'}/${d.prefix} gw ${d.gateway || '-'}`, ...Object.values(C.ifs).map((f) => `${f.name} VLAN ${f.vlan} ${f.ip}/${f.prefix} gw ${f.gw}`)]);
       if (sub === 'radius') return R(Object.keys(C.radius));
-      return R(['show wlan | ap | if | radius']);
+      if (sub === 'rf') return R(rfStatus(net, d).map((x) => (x.channel == null ? `${x.name} chưa chọn kênh` : `${x.name} kênh ${x.channel} (${x.band} GHz) phát ${x.power} dBm, RSSI ${x.rssi} dBm, nhiễu ${x.noise} dBm (${x.by}), SNR ${x.snr} dB`)));
+      return R(['show wlan | ap | if | radius | rf']);
     }
     return R([`ERROR: thao tác không hợp lệ: ${cmd}`, '(Thiết bị này cấu hình bằng giao diện web, dùng các nút trên trang quản trị)']);
   }

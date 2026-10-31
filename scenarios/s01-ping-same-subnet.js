@@ -39,8 +39,8 @@ export function build() {
       { id: 'pc2', type: 'host', name: 'PC2', x: 850, y: 160, lines: ['192.168.1.20/24', PC2.mac] },
     ],
     links: [
-      { id: 'l1', a: 'pc1', b: 'sw1', labelA: PORT.pc1 },
-      { id: 'l2', a: 'sw1', b: 'pc2', labelB: PORT.pc2 },
+      { id: 'l1', a: 'pc1', b: 'sw1', bp: PORT.pc1 },
+      { id: 'l2', a: 'sw1', b: 'pc2', ap: PORT.pc2 },
     ],
   };
 

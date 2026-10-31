@@ -36,7 +36,7 @@ export function build() {
     ],
     links: [
       { id: 'lp', a: 'phone', b: 'sw' }, { id: 'ld', a: 'pc', b: 'sw' },
-      { id: 'lr', a: 'sw', b: 'r1' }, { id: 'lw', a: 'r1', b: 'wan', labelMid: 'WAN (nghẽn)' },
+      { id: 'lr', a: 'sw', b: 'r1' }, { id: 'lw', a: 'r1', b: 'wan', bp: '', labelMid: 'WAN (nghẽn)' },
     ],
   };
 

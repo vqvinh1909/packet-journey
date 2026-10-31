@@ -74,6 +74,7 @@ export function tcpdumpLine(p) {
   if (a) return `${time} ARP, ${a.opcode === 2 ? `Reply ${a.senderIp} is-at ${a.senderMac}` : `Request who-has ${a.targetIp} tell ${a.senderIp}`}, length 28`;
   if (ic) return `${time} IP ${ip.src} > ${ip.dst}: ICMP ${ICMP[ic.type] || `type ${ic.type}`}${ic.type === 0 || ic.type === 8 ? `, id ${ic.identifier ?? 0}, seq ${ic.seq ?? 0}` : ''}, length ${Math.max(0, p.len - 34)}`;
   if (t) return `${time} IP ${ip.src}.${t.srcPort} > ${ip.dst}.${t.dstPort}: Flags [${tcpFlags(t)}], seq ${t.seq ?? 0}${t.flags?.ack ? `, ack ${t.ack ?? 0}` : ''}, win ${t.window ?? 0}, length 0`;
+  if (u && (u.dstPort === 67 || u.dstPort === 68)) return `${time} IP ${ip.src}.${u.srcPort} > ${ip.dst}.${u.dstPort}: BOOTP/DHCP, ${u.dstPort === 67 ? 'Request' : 'Reply'}, length ${Math.max(0, p.len - 42)}`;
   if (u) return `${time} IP ${ip.src}.${u.srcPort} > ${ip.dst}.${u.dstPort}: UDP, length ${Math.max(0, p.len - 42)}`;
   return ip ? `${time} IP ${ip.src} > ${ip.dst}: ip-proto-${ip.protocol}, length ${p.len}` : `${time} ethernet, length ${p.len}`;
 }

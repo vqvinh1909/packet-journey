@@ -227,6 +227,10 @@ export function makeAsa(h) {
     }
     const v = fwCheck(ctx, d, pkt, inIf, outIf);
     if (!v.allow) { phase('ACCESS-LIST', '', false, v.why); return finish('(acl-drop) Flow is denied by configured rule'); }
+    const sn = !st && d.nat.dyn.find((r) => r.asaObj && r.iface === outIf && N.aclEval(d, r.acl, pkt, false).action === 'permit');
+    const si = !st && d.nat.statics.find((s) => s.asaObj && s.local === src);
+    if (si) phase('NAT', 'static', true, `Static translate ${src}${si.lport ? `/${si.lport}` : ''} to ${si.global}${si.gport ? `/${si.gport}` : ''}`);
+    else if (sn) phase('NAT', 'per-session', true, `Dynamic translate ${src}${sport ? `/${sport}` : ''} to ${d.ifaces[outIf].ip}/${sport || 1024}`);
     phase('FLOW-CREATION', '', true, `${v.why}. New flow created`);
     return finish(null);
   }

@@ -2,7 +2,7 @@
 // bảng định tuyến (C/L/S/O/OI), OSPFv3, ping IPv6 đi thật 2 chiều qua L2 (dùng flood VLAN/trunk/STP
 // của net.js — tương đương NDP tìm láng giềng), và SLAAC cho PC (RA từ router có ipv6 unicast-routing).
 
-import { flood, ifUp, epMac, longIf } from './net.js';
+import { flood, ifUp, epMac, longIf, linkAt, peerOf } from './net.js';
 import { parse6, norm6, in6, net6, eui64, linkLocal, isLinkLocal } from './ip6.js';
 import { acl6Eval } from './acl6.js';
 
@@ -200,6 +200,14 @@ export function ping6(net, srcId, dst, opts = {}) {
 }
 
 // ---------------------------------------------------------------- SLAAC
+/** RA Guard: router cắm vào cổng switch gắn policy device-role host thì RA của nó bị bỏ. */
+function raGuarded(net, dev, ifn) {
+  const l = linkAt(net, dev, ifn);
+  if (!l) return false;
+  const pe = peerOf(l, dev, ifn), sw = net.devices[pe.dev];
+  const name = sw.ports?.[pe.port]?.raGuard;
+  return !!name && (sw.raPolicies?.[name]?.role ?? 'host') === 'host';
+}
 /** PC xin địa chỉ bằng SLAAC: router gửi RA (cần ipv6 unicast-routing + cổng có prefix /64) → PC tự ghép EUI-64. */
 export function slaac(net, pcId) {
   const mac = epMac(net, { dev: pcId, ifn: 'fa0' });
@@ -207,7 +215,7 @@ export function slaac(net, pcId) {
     const d = net.devices[t.dev];
     if (d.type !== 'router' || !d.ipv6Routing || !ifUp(net, d.id, t.ifn)) continue;
     const a = (d.ifaces[t.ifn].ipv6 || []).find((x) => x.prefix === 64);
-    if (!a) continue;
+    if (!a || raGuarded(net, t.dev, t.ifn)) continue;
     return { ok: true, ip: eui64(net6(a.ip, 64), mac), prefix: 64, gw: llOf(net, d.id, t.ifn), router: d.name };
   }
   return { ok: false, why: 'Không nhận được Router Advertisement (router chưa "ipv6 unicast-routing" hoặc cổng chưa có prefix /64).' };

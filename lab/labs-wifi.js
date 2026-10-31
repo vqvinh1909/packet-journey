@@ -3,7 +3,7 @@
 
 import * as N from './net.js';
 import { cfg, quiz, ml3, B } from './kit.js';
-import { wlcDevice, radiusServer, apJoined, clientTest, channelsClean, apConfig } from './wlc.js';
+import { wlcDevice, radiusServer, apJoined, clientTest, channelsClean, apConfig, rfStatus } from './wlc.js';
 
 const LESSON_WLAN = `${B}Module-05_Remote-Access-va-Wireless/Bai-24_Wireless-LAN.md`;
 const LESSON_WLC = `${B}Module-05_Remote-Access-va-Wireless/Bai-25_Cisco-Wireless-Controller.md`;
@@ -125,5 +125,24 @@ export const WIFI_LABS = [
       quiz('Máy khách đã xác thực Wi-Fi nhưng không có mạng, nên kiểm tra gì trước?', ['VLAN của WLAN trên trunk và gateway', 'Mật khẩu Wi-Fi', 'SSID có đang phát không', 'Kênh của AP'], 0, 'Mật khẩu và SSID đã qua vì xác thực thành công; lỗi còn lại ở đường có dây phía sau WLC.'),
     ],
     hints: ['Thử kết nối ở tab Monitor: thông báo cho biết lỗi ở bước AP, SSID, xác thực hay VLAN.', 'Có 4 lỗi, 2 lỗi nằm trên switch CORE.', 'Xem "show vlan brief" và "show interfaces trunk" trên CORE.'],
+  },
+  {
+    id: 'W05', group: 'wifi', lesson: 'Bài 24', lessonPath: LESSON_WLAN, level: 2, kind: 'ticket',
+    title: 'Ticket: Wi-Fi chập chờn giờ ăn trưa: đọc SNR, đổi băng và kênh',
+    story: '🎫 Máy vẫn kết nối nhưng hay rớt, nhất là giờ ăn trưa. Khảo sát cho thấy công ty bên cạnh phát mạnh ở kênh 6, còn lò vi sóng trong bếp gây nhiễu cả băng 2.4 GHz. Vào WLC → Wireless, đọc RSSI, nhiễu và SNR rồi đổi kênh cho hai AP. Đích: SNR từ 25 dB trở lên ở cả hai AP. Mô hình RF ở đây là bản giản lược để thấy quan hệ giữa các đại lượng, số đo không lấy từ thiết bị thật.',
+    build: () => { const net = wifiNet(); net.devices.wlc.wlc.rfEnv = [{ ch: 6, dbm: -55, src: 'Wi-Fi công ty bên cạnh' }, { ch: 'all24', dbm: -68, src: 'lò vi sóng' }]; return net; },
+    init: [['core', cfg(...CORE_BASE, ...AP_PORTS, ...trunk('20,30,99'))], ['wlc', [...STAFF_READY, 'ap ap1 channel=6', 'ap ap2 channel=7']]],
+    tasks: [
+      { text: 'AP-1 và AP-2 đều ở băng 5 GHz', verify: 'WLC → Wireless', check: (a) => rfStatus(a.net, w(a)).every((x) => x.band === 5) },
+      { text: 'Hai AP không dùng chung kênh', verify: 'WLC → Wireless', check: (a) => { const c = rfStatus(a.net, w(a)).map((x) => x.channel); return c[0] != null && c[0] !== c[1]; } },
+      { text: 'SNR của cả hai AP từ 25 dB trở lên', verify: 'WLC → Wireless', check: (a) => rfStatus(a.net, w(a)).every((x) => x.snr >= 25) },
+      quiz('RSSI -60 dBm, nhiễu nền -80 dBm. SNR là bao nhiêu?', ['20 dB', '-140 dB', '140 dB', '60 dB'], 0, 'SNR = RSSI - nhiễu = -60 - (-80) = 20 dB.'),
+      quiz('So với 2.4 GHz, băng 5 GHz thế nào?', ['Nhiều kênh hơn, ít nhiễu hơn, nhưng đi gần và xuyên tường kém hơn', 'Đi xa hơn và xuyên tường tốt hơn', 'Chỉ có 3 kênh', 'Không dùng được WPA2'], 0),
+      quiz('Nguồn nào gây nhiễu băng 2.4 GHz?', ['Lò vi sóng, Bluetooth, AP khác chồng kênh', 'Cáp quang', 'Switch PoE', 'Máy chủ DNS'], 0),
+    ],
+    guide: [
+      { dev: 'wlc', raw: true, title: '1. Wireless → chuyển AP sang 5 GHz, mỗi AP một kênh', why: 'Lò vi sóng làm nhiễu cả băng 2.4 GHz, đổi kênh trong băng này vẫn dưới 25 dB. Hai AP gần nhau mà cùng kênh sẽ nhiễu lẫn nhau.', cmds: ['ap ap1 channel=36', 'ap ap2 channel=44'] },
+    ],
+    hints: ['Xem cột RSSI / nhiễu / SNR ở tab Wireless. Nhiễu ghi rõ nguồn gây ra.', 'Thử kênh 1 hoặc 11 trước: tránh được công ty bên cạnh nhưng vẫn dính lò vi sóng.', 'Kênh từ 36 trở lên là băng 5 GHz.'],
   },
 ];

@@ -37,10 +37,10 @@ export function build() {
       { id: 'ce2', type: 'host', name: 'CE2', x: 910, y: 120, color: '#2c5f8a', lines: ['10.2.2.2'] },
     ],
     links: [
-      { id: 'l1', a: 'ce1', b: 'pe1' },
+      { id: 'l1', a: 'ce1', b: 'pe1', ap: 'Gi0/0' },
       { id: 'l2', a: 'pe1', b: 'p', labelMid: 'MPLS' },
       { id: 'l3', a: 'p', b: 'pe2', labelMid: 'MPLS' },
-      { id: 'l4', a: 'pe2', b: 'ce2' },
+      { id: 'l4', a: 'pe2', b: 'ce2', bp: 'Gi0/0' },
     ],
   };
   const sim = new Sim(topology);

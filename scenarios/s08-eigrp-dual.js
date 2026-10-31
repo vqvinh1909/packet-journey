@@ -37,7 +37,7 @@ export function build() {
       { id: 'r1r3', a: 'r1', b: 'r3', labelMid: 'cost 10' },
       { id: 'r1r2', a: 'r1', b: 'r2', labelMid: 'cost 20' },
       { id: 'r2r3', a: 'r2', b: 'r3', labelMid: 'cost 10' },
-      { id: 'r3net', a: 'r3', b: 'net' },
+      { id: 'r3net', a: 'r3', b: 'net', bp: '' },
     ],
   };
 

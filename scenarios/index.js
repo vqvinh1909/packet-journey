@@ -32,11 +32,13 @@ import * as s27 from './s27-ospfv3.js';
 import * as s28 from './s28-slaac-dhcpv6.js';
 import * as s29 from './s29-mpls.js';
 import * as s30 from './s30-vxlan.js';
+import * as s31 from './s31-evpn.js';
+import * as s32 from './s32-sr-mpls.js';
 
 export const SCENARIOS = [
   s01, s02, s03, s04, s05, s06, s07, s08, s09, s10, s11, s12,
   s13, s14, s15, s16, s17, s18, s19, s20, s21, s22, s23,
-  s24, s25, s26, s27, s28, s29, s30,
+  s24, s25, s26, s27, s28, s29, s30, s31, s32,
 ];
 
 export function getScenario(id) {

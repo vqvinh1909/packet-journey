@@ -1,6 +1,6 @@
 // ui/topology.js — vẽ sơ đồ mạng bằng SVG + animation gói tin chạy trên dây.
 
-import { cloudPath, esc } from './topo.js';
+import { cloudPath, esc, layoutPortLabels, nodeBoxes, scenarioPorts } from './topo.js';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 let svg = null;
@@ -47,10 +47,28 @@ export function renderTopology(svgEl, topology) {
 
   // node
   for (const d of topology.devices) drawNode(d);
+  drawPorts(topology);
 
   // dot gói tin (ẩn ban đầu)
   dot = el('circle', { class: 'pkt-dot', r: 9, cx: 0, cy: 0, opacity: 0 });
   svg.appendChild(dot);
+}
+
+/** Nhãn tên cổng ở hai đầu dây, vẽ sau thiết bị để nền của thiết bị không che mất. */
+function drawPorts(topology) {
+  const names = scenarioPorts(topology), lineW = (d) => Math.max(0, ...(d.lines || []).map((s) => s.length * 6.2));
+  const devices = Object.fromEntries(topology.devices.map((d) => {
+    const [icon] = nodeBoxes(d, false), w = Math.max(d.name.length * 8, lineW(d)) + 8;
+    return [d.id, { ...d, boxes: [icon, { l: d.x - w / 2, r: d.x + w / 2, t: d.y + 22, b: d.y + 40 + (d.lines || []).length * 13 }] }];
+  }));
+  const links = topology.links.map((l) => ({ ...l, ap: names[l.id][0], bp: names[l.id][1] }));
+  const pos = layoutPortLabels({ devices, links }, (d, port) => port);
+  for (const l of links) [l.ap, l.bp].forEach((text, i) => {
+    if (!text) return;
+    const p = pos[l.id][i];
+    svg.appendChild(el('rect', { class: 'lab-port-bg', x: p.x - p.w / 2, y: p.y - 8, width: p.w, height: 15, rx: 4 }));
+    svg.appendChild(el('text', { class: 'lab-port', x: p.x, y: p.y + 3.5, 'text-anchor': 'middle' }, [txt(text)]));
+  });
 }
 
 function txt(s) { return document.createTextNode(s); }
