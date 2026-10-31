@@ -644,7 +644,7 @@ export function openWorkspace({ onRun, initialNet = null }) {
   function termOf(id) {
     if (!W.term[id]) {
       const d = net().devices[id];
-      W.term[id] = [{ t: d.shell === 'vpcs' ? `${d.name} — VPCS: ip 10.0.0.10/24 10.0.0.1 · ip dhcp · show ip · ping · trace · save (gõ ? để xem lệnh)` : isHost(d) ? `${d.name} — dòng lệnh máy trạm (gõ ? để xem lệnh)` : `${d.name} console — ? trợ giúp, Tab hoàn thành lệnh, ↑/↓ lịch sử, Ctrl+Z = end, dán nhiều dòng cấu hình`, c: 'sys' }];
+      W.term[id] = [{ t: d.shell === 'linux' ? `${d.name} — Linux mô phỏng (gõ ? để xem lệnh)` : d.shell === 'vpcs' ? `${d.name} — VPCS: ip 10.0.0.10/24 10.0.0.1 · ip dhcp · show ip · ping · trace · save (gõ ? để xem lệnh)` : isHost(d) ? `${d.name} — dòng lệnh máy trạm (gõ ? để xem lệnh)` : `${d.name} console — ? trợ giúp, Tab hoàn thành lệnh, ↑/↓ lịch sử, Ctrl+Z = end, dán nhiều dòng cấu hình`, c: 'sys' }];
     }
     return W.term[id];
   }
@@ -872,7 +872,7 @@ export function openWorkspace({ onRun, initialNet = null }) {
     const d = net().devices[id];
     const g = (W.gui[id] ||= {});
     renderGuiFw(body, d, {
-      tab: g.tab, ruleIf: g.ruleIf, addOpen: g.addOpen, lastErr: g.err,
+      net: net(), tab: g.tab, ruleIf: g.ruleIf, addOpen: g.addOpen, lastErr: g.err,
       history: termOf(id).filter((l) => l.c === 'cmd').map((l) => l.t),
       setTab: (t) => { g.tab = t; g.err = null; renderGui(id, body); },
       setRuleIf: (z) => { g.ruleIf = z; renderGui(id, body); },

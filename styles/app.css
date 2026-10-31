@@ -319,6 +319,7 @@ html, body {
 .lab-gl.fwl { stroke: #b03a2e; stroke-width: 1.6; }
 .lab-gl { stroke: var(--text); stroke-width: 2; fill: none; stroke-linecap: round; stroke-linejoin: round; }
 .lab-gd { fill: var(--text); }
+.lab-gb { fill: var(--text); font-size: 9px; font-weight: 700; text-anchor: middle; }
 .lab-name { font-size: 13px; font-weight: 700; fill: var(--text); paint-order: stroke; stroke: var(--panel-2); stroke-width: 4px; }
 .lab-ip { font-size: 10.5px; font-family: var(--mono); fill: var(--muted); paint-order: stroke; stroke: var(--panel-2); stroke-width: 4px; }
 .lab-tabs { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: -8px; }

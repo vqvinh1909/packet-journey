@@ -4,8 +4,16 @@
 
 import * as N from './net.js';
 import { fa } from './kit.js';
+import { wlcDevice, radiusServer } from './wlc.js';
+import { linuxDevice, lbDevice } from './linux.js';
 
 const range = (n, f) => Array.from({ length: n }, (_, i) => f(i));
+// shortcut: services chỉ ghi số cổng, không phân biệt TCP/UDP nên telnet tới cổng UDP (Syslog, NTP) vẫn báo mở; cần chính xác hơn thì thêm proto vào services.
+const svc = (vendor, label, prefix, badge, services, extraNote = [], extra = () => ({})) => ({
+  vendor, label, prefix, ports: null,
+  note: [`${label} (mô phỏng) đang khởi động ...`, 'Đặt IP: ipconfig <IP> <mask> <gateway>', 'Thử cổng từ máy khác: telnet <IP> <cổng> (PC: chuột phải → dòng lệnh Windows)', ...extraNote],
+  make: (id, name, x, y) => Object.assign(N.server(id, name, x, y, { services }), { badge }, extra()),
+});
 /**
  * Mẫu thiết bị (kiểu "template" của EVE-NG): hãng, nhãn, tiền tố tên, số cổng và cách đặt tên cổng, hàm tạo.
  * ports = null: số cổng cố định (PC/Server một cổng Fa0). make(id, name, x, y, danhSáchCổng).
@@ -24,6 +32,19 @@ export const SANDBOX_KINDS = {
   // PC trong workspace mặc định là VPCS như EVE-NG (lab có sẵn giữ dòng lệnh kiểu Windows)
   pc: { vendor: 'host', label: 'PC (VPCS)', prefix: 'PC', ports: null, make: (id, name, x, y) => Object.assign(N.pc(id, name, x, y), { shell: 'vpcs' }) },
   server: { vendor: 'host', label: 'Server', prefix: 'SRV', ports: null, make: (id, name, x, y) => N.server(id, name, x, y) },
+  linux: { vendor: 'host', label: 'Linux Server', prefix: 'LNX', ports: null, note: ['Linux (mô phỏng) đang khởi động ...', 'Started OpenSSH server (cổng 22).', 'Gõ ? để xem lệnh: ip, ss, curl, nc, dig, systemctl, ufw...', 'Đặt IP: ip addr add 10.0.0.10/24 dev eth0 rồi ip route add default via 10.0.0.1', 'SSH vào máy này: tài khoản admin, mật khẩu admin'], make: linuxDevice },
+  web: svc('service', 'Web (80, 443)', 'WEB', 'WEB', [80, 443]),
+  dns: svc('service', 'DNS (53)', 'DNS', 'DNS', [53], ['Khai báo tên miền: dns add <tên> <IP> · dns show. Máy Linux hỏi bằng dig hoặc curl.'], () => ({ zone: {} })),
+  ssh: svc('service', 'SSH (22)', 'SSH', 'SSH', [22], ['Thử đăng nhập: ssh -l admin <IP>, mật khẩu admin'], () => ({ users: { admin: { pw: 'admin' } } })),
+  db: svc('service', 'Database (3306, 5432)', 'DB', 'DB', [3306, 5432]),
+  lb: { vendor: 'service', label: 'Load Balancer', prefix: 'LB', ports: null, note: ['Load Balancer (mô phỏng) đang khởi động ...', 'Đặt IP: ip addr add 10.0.1.100/24 dev eth0 rồi ip route add default via 10.0.1.1', 'Thêm backend: lb add 80 10.0.2.11 · lb add 80 10.0.2.12 · lb show', 'Thử từ máy khác: curl <IP của LB>, gọi nhiều lần để thấy chia tải.'], make: lbDevice },
+  syslog: svc('netmgmt', 'Syslog (UDP 514)', 'SYSLOG', 'LOG', [514], ['Lab chỉ mô phỏng cổng mở, log của router chưa được gửi tới đây.']),
+  ntp: svc('netmgmt', 'NTP (UDP 123)', 'NTP', 'NTP', [123], ['Router: ntp server <IP> rồi show ntp status']),
+  tacacs: svc('netmgmt', 'TACACS+ (TCP 49)', 'TACACS', 'AAA', [49], ['Lab chỉ mô phỏng cổng mở, router chưa xác thực qua máy này.']),
+  nms: svc('netmgmt', 'Monitoring (161, 3000)', 'NMS', 'NMS', [161, 3000]),
+  wlc: { vendor: 'wifi', label: 'WLC', prefix: 'WLC', ports: null, note: ['WLC (mô phỏng) đang khởi động ...', 'Trang quản trị web sẵn sàng.'], make: (id, name, x, y) => wlcDevice(id, name, x, y) },
+  ap: { vendor: 'wifi', label: 'Access Point', prefix: 'AP', ports: null, note: ['Access Point (mô phỏng) đang khởi động ...', 'Đặt IP: ip 10.10.0.11/24 10.10.0.1 hoặc ip dhcp', 'AP join khi tới được IP quản trị của WLC (xem tab Wireless trên WLC).'], make: (id, name, x, y) => Object.assign(N.pc(id, name, x, y), { shell: 'vpcs', isAp: true }) },
+  radius: { vendor: 'wifi', label: 'RADIUS', prefix: 'RADIUS', ports: null, note: ['RADIUS (mô phỏng) đang khởi động ...', 'Đặt IP: ipconfig <IP> <mask> <gateway>', 'Khai báo: radius secret <chuỗi> · radius user <tên> <mật khẩu> · radius show'], make: (id, name, x, y) => radiusServer(id, name, x, y, { secret: '', users: {} }) },
 };
 /** Bảng thiết bị chia theo hãng (thứ tự hiển thị). */
 export const SANDBOX_VENDORS = [
@@ -34,7 +55,10 @@ export const SANDBOX_VENDORS = [
   { id: 'checkpoint', name: 'Check Point', kinds: ['checkpoint'] },
   { id: 'pfsense', name: 'pfSense', kinds: ['pfsense'] },
   { id: 'network', name: 'Network', kinds: ['cloud'] },
-  { id: 'host', name: 'Host', kinds: ['pc', 'server'] },
+  { id: 'host', name: 'Host', kinds: ['pc', 'server', 'linux'] },
+  { id: 'service', name: 'Máy chủ dịch vụ', kinds: ['web', 'dns', 'ssh', 'db', 'lb'] },
+  { id: 'netmgmt', name: 'Quản trị mạng', kinds: ['syslog', 'ntp', 'tacacs', 'nms'] },
+  { id: 'wifi', name: 'Wi-Fi', kinds: ['wlc', 'ap', 'radius'] },
 ];
 const TYPES = ['pc', 'server', 'switch', 'router'];
 /** Khung làm việc (toạ độ thế giới) — rộng để workspace cuộn/phóng to được. */
@@ -57,6 +81,8 @@ export function kindOf(d) {
   if (d.kind && SANDBOX_KINDS[d.kind]) return d.kind;
   if (d.type === 'switch') return d.model === '3560' ? 'sw3560' : 'sw2960';
   if (N.isCloud(d)) return 'cloud';
+  if (d.isAp) return 'ap';
+  if (d.radius) return 'radius';
   return SANDBOX_KINDS[d.os] ? d.os : d.type;
 }
 
@@ -176,6 +202,7 @@ export function bootLog(d) {
     case 'sophos': case 'checkpoint': case 'pfsense':
       return [`${SANDBOX_KINDS[kindOf(d)].label} (mô phỏng) đang khởi động ...`, `Phát hiện ${ports} cổng mạng`, 'Dịch vụ firewall ... OK', 'Trang quản trị web sẵn sàng.'];
     default:
+      if (SANDBOX_KINDS[kindOf(d)]?.note) return SANDBOX_KINDS[kindOf(d)].note;
       if (d.shell === 'vpcs') return ['', 'Welcome to Virtual PC Simulator, version 0.6.2', 'Dedicated to Daling.', 'Build time: Oct 27 2026', 'Copyright (c) 2007-2015, Paul Meng (mirnshi@gmail.com)', 'All rights reserved.', '', 'VPCS is free software, distributed under the terms of the "BSD" licence.', 'Source code and license can be found at vpcs.sf.net.', 'For more information, please visit wiki.freecode.com.cn.', '', d.vpcsSaved ? 'Loading startup.vpc ... done' : '', 'Press \'?\' to get help.', '', 'Executing the startup file', ''];
       return ['Đang khởi động máy trạm ...', 'Card mạng Fa0 ... OK', 'Sẵn sàng.'];
   }

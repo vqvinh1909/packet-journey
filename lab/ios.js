@@ -21,6 +21,7 @@ import { makeForti } from './fortios.js';
 import { makePan } from './panos.js';
 import { makeGuiFw } from './guifw.js';
 import { makeWlc } from './wlc.js';
+import { makeLinux } from './linux.js';
 
 const { longIf, shortIf, normIf, isIp, maskToPrefix, prefixToMask, netOf, ifSort } = N;
 
@@ -979,6 +980,7 @@ export function createCli(net) {
   // Firewall các hãng có cú pháp riêng (không dùng bảng lệnh IOS): xử lý cả dòng lệnh
   const GUIFW = makeGuiFw({ R });
   const VENDOR = { fortios: makeForti({ net, R }), panos: makePan({ net, R }), sophos: GUIFW, checkpoint: GUIFW, pfsense: GUIFW, wlc: makeWlc({ net, R }) };
+  const LINUX = makeLinux({ net, R, sshConnect: (d, ip, user, s) => sshConnect(d, ip, user, s) });
   function tableFor(d, s) {
     if (d.os === 'asa') return ASA.tableFor(d, s);
     switch (s.mode) {
@@ -1031,7 +1033,7 @@ export function createCli(net) {
   function prompt(id) {
     const d = net.devices[id];
     const s = sess(id);
-    if (d.type === 'pc' || d.type === 'server') return s.pw === 'ssh' ? 'Password: ' : d.shell === 'vpcs' ? `${d.name}> ` : 'C:\\>';
+    if (d.type === 'pc' || d.type === 'server') return s.pw === 'ssh' ? 'Password: ' : d.shell === 'linux' ? LINUX.prompt(d) : d.shell === 'vpcs' ? `${d.name}> ` : 'C:\\>';
     if (d.rommon) return `rommon ${d.rommonUser ? s.rmn || 1 : 1} > `;
     if (s.ask) { const st = s.ask.steps[s.ask.i]; return typeof st.p === 'function' ? st.p(s.ask.data) : st.p; }
     if (s.pw) return s.pwPrompt || 'Password: ';
@@ -1058,7 +1060,7 @@ export function createCli(net) {
       d.bootWin = false; d.rommon = true; d.rommonUser = true; s.loggedOut = false; s.rmn = 1;
       res = R(['', 'monitor: command "boot" aborted due to user interrupt']);
     } else if (d.rommon && d.rommonUser) res = rommonExec(d, s, line.trim());
-    else if ((d.type === 'pc' || d.type === 'server') && !VENDOR[d.os]) res = s.pw === 'ssh' ? sshPw(d, s, line) : d.shell === 'vpcs' ? vpcsExec(d, line.trim()) : pcExec(d, line.trim());
+    else if ((d.type === 'pc' || d.type === 'server') && !VENDOR[d.os]) res = s.pw === 'ssh' ? sshPw(d, s, line) : d.shell === 'linux' ? LINUX.exec(d, s, line.trim()) : d.shell === 'vpcs' ? vpcsExec(d, line.trim()) : pcExec(d, line.trim());
     else if (VENDOR[d.os]) res = VENDOR[d.os].exec(d, s, line.trim());
     else if (d.rommon) res = R(['(Lab: thiết bị đang ở ROMMON vì không có file IOS khởi động được — bấm "↺ Làm lại" để khôi phục lab.)']);
     else if (s.ask) {
@@ -2140,7 +2142,7 @@ export function createCli(net) {
   }
 
   // ---------- PC ----------
-  const PC_HELP = ['Available Commands:', '?         Display the list of available commands', 'arp       Display the arp table (arp -a)', 'ipconfig  Display network configuration / ipconfig <IP> <mask> [<gateway>] / ipconfig /renew /release /all', 'ipv6config <IPv6>/<prefix> [<gateway>] | ipv6config autoconfig (SLAAC)', 'ping      Send echo messages', 'ssh       Ssh client (ssh -l <user> <ip>)', 'telnet    Telnet client (telnet <ip> [port])', 'tracert   Trace route to destination', 'snmpget   SNMP get (snmpget -v2c -c <community> <ip> sysName.0 | -v3 -u <user> -l authPriv -a SHA -A <pass> -x AES -X <pass> <ip> <oid>)', 'snmpwalk  SNMP walk nhóm system', 'snmpset   SNMP set (snmpset -v2c -c <community> <ip> sysLocation.0 s "<giá trị>")'];
+  const PC_HELP = ['Available Commands:', '?         Display the list of available commands', 'arp       Display the arp table (arp -a)', 'ipconfig  Display network configuration / ipconfig <IP> <mask> [<gateway>] / ipconfig /renew /release /all', 'ipv6config <IPv6>/<prefix> [<gateway>] | ipv6config autoconfig (SLAAC)', 'ping      Send echo messages', 'ssh       Ssh client (ssh -l <user> <ip>)', 'telnet    Telnet client (telnet <ip> [port])', 'curl      Gọi web (curl <url>)', 'tracert   Trace route to destination', 'snmpget   SNMP get (snmpget -v2c -c <community> <ip> sysName.0 | -v3 -u <user> -l authPriv -a SHA -A <pass> -x AES -X <pass> <ip> <oid>)', 'snmpwalk  SNMP walk nhóm system', 'snmpset   SNMP set (snmpset -v2c -c <community> <ip> sysLocation.0 s "<giá trị>")'];
   function ipconfigOut(d, all) {
     const L = ['', 'FastEthernet0 Connection:(default port)', '', '   Connection-specific DNS Suffix..: '];
     if (all) L.push(`   Physical Address................: ${N.ciscoMac(N.epMac(net, { dev: d.id, ifn: 'fa0' })).toUpperCase()}`, `   DHCP Enabled....................: ${d.dhcp ? 'Yes' : 'No'}`);
@@ -2335,7 +2337,21 @@ export function createCli(net) {
     const w = line.split(/\s+/).filter(Boolean);
     const cmd = (w[0] || '').toLowerCase();
     if (!cmd) return R([]);
-    if (cmd === '?' || cmd === 'help') return R(PC_HELP);
+    if (cmd === '?' || cmd === 'help') return R(d.radius ? [...PC_HELP, 'radius    radius secret <chuỗi> | radius user <tên> <mật khẩu> | radius show'] : d.zone ? [...PC_HELP, 'dns       dns add <tên> <IP> | dns del <tên> | dns show'] : PC_HELP);
+    if (cmd === 'dns' && d.zone) {
+      const a = (w[1] || '').toLowerCase(), name = (w[2] || '').toLowerCase().replace(/\.$/, '');
+      if (a === 'add' && name && isIp(w[3])) { d.zone[name] = w[3]; return R([]); }
+      if (a === 'del' && name) { delete d.zone[name]; return R([]); }
+      if (a === 'show') return R(Object.entries(d.zone).map(([n, ip]) => `${n}  A  ${ip}`));
+      return R(['Cú pháp: dns add <tên> <IP> | dns del <tên> | dns show']);
+    }
+    if (cmd === 'radius' && d.radius) {
+      const a = (w[1] || '').toLowerCase();
+      if (a === 'secret' && w[2]) { d.radius.secret = w[2]; return R([]); }
+      if (a === 'user' && w[2] && w[3]) { d.radius.users[w[2]] = w[3]; return R([]); }
+      if (a === 'show') return R([`Shared secret: ${d.radius.secret ? 'đã đặt' : 'chưa đặt'}`, `Tài khoản: ${Object.keys(d.radius.users).join(', ') || '(chưa có)'}`]);
+      return R(['Cú pháp: radius secret <chuỗi> | radius user <tên> <mật khẩu> | radius show']);
+    }
     if (cmd === 'ipconfig') {
       const a = (w[1] || '').toLowerCase();
       if (!a) return R(ipconfigOut(d, false));
@@ -2386,6 +2402,7 @@ export function createCli(net) {
     if (cmd === 'ping') { const ip = w.slice(1).find(isIp); return ip ? pcPing(d, ip) : R(['Invalid Command.']); }
     if (cmd === 'tracert') { const ip = w.slice(1).find(isIp); return ip ? pcTrace(d, ip) : R(['Invalid Command.']); }
     if (cmd === 'telnet') { if (!isIp(w[1])) return R(['Invalid Command.']); return tcpConnect(d, w[1], w[2] ? +w[2] : 23); }
+    if (cmd === 'curl') return LINUX.curl(d, w);
     if (cmd === 'ssh') { const i = w.indexOf('-l'); if (i < 0 || !w[i + 1] || !isIp(w[i + 2])) return R(['Invalid Command.', 'Cú pháp: ssh -l <username> <ip>']); return sshConnect(d, w[i + 2], w[i + 1], sess(d.id)); }
     if (cmd === 'arp' && (w[1] || '').toLowerCase() === '-a') {
       const ent = Object.entries(d.arp);
@@ -3043,6 +3060,7 @@ export function createCli(net) {
       const r = N.sendPacket(net, { src: d.id, dst: s });
       if (!r.ok) continue;
       const sd = net.devices[r.at.dev];
+      if (sd.type === 'server' && sd.services?.includes(123)) return { sync: true, stratum: 2, ref: s };
       if (sd.type !== 'router' && sd.type !== 'switch') continue;
       const st = ntpState(sd, depth + 1);
       if (st.sync) return { sync: true, stratum: st.stratum + 1, ref: s };
@@ -3439,7 +3457,7 @@ export function createCli(net) {
     const words = head.trim() ? head.trim().split(/\s+/) : [];
     if (d.type === 'pc' || d.type === 'server') {
       if (words.length) return null;
-      const hit = ['arp', 'help', 'ipconfig', 'ipv6config', 'ping', 'ssh', 'telnet', 'tracert'].filter((c0) => c0.startsWith(part));
+      const hit = (d.shell === 'linux' ? ['cat', 'curl', 'dhclient', 'dig', 'help', 'hostname', 'ip', 'lb', 'nc', 'netstat', 'nslookup', 'ping', 'resolvectl', 'ss', 'ssh', 'systemctl', 'traceroute', 'ufw', 'uname', 'whoami'] : ['arp', 'curl', 'help', 'ipconfig', 'ipv6config', 'ping', 'ssh', 'telnet', 'tracert']).filter((c0) => c0.startsWith(part));
       return hit.length === 1 ? hit[0] + ' ' : null;
     }
     if (s.pw || s.loggedOut || s.ask) return null;
