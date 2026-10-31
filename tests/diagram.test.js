@@ -560,3 +560,15 @@ test('copy / dán: id mới, tên thiết bị mới nếu trùng, giữ dây n�
   assert.deepEqual(again.map((id) => D.shapeOf(d, id).label), ['R1', 'SW1'], 'tên gốc còn trống thì giữ nguyên');
   assert.ok(d.edges.some((e) => e.a === again[0] && e.b === again[1]));
 });
+
+test('mẫu sơ đồ: id không trùng, có nhóm, thiết bị không đè lên nhau', () => {
+  assert.equal(new Set(D.TEMPLATES.map((t) => t.id)).size, D.TEMPLATES.length);
+  for (const t of D.TEMPLATES) {
+    assert.ok(t.group && t.vi && t.en, t.id);
+    const ds = t.build().shapes.filter((s) => !D.isContainer(s) && s.t !== 'note');
+    for (const [i, a] of ds.entries()) for (const b of ds.slice(i + 1)) {
+      assert.ok(a.x + a.w <= b.x || b.x + b.w <= a.x || a.y + a.h <= b.y || b.y + b.h <= a.y, `${t.id}: ${a.label} đè ${b.label}`);
+    }
+    assert.ok(t.build().shapes.every((s) => s.x >= 0 && s.y >= 0), t.id);
+  }
+});

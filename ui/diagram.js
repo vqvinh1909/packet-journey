@@ -57,7 +57,7 @@ export function openDiagram(initial = null, onToWorkspace = null) {
     `<details><summary>Lớp</summary><div><button data-act="layer-create">Tạo lớp</button><button data-act="layer-assign">Chuyển hình chọn vào lớp</button><button data-act="layer-visible">Ẩn / hiện lớp</button><button data-act="layer-lock">Khoá / mở khoá lớp</button></div></details>` +
     `<details><summary>Trợ giúp</summary><div class="dg-help">Kéo từ chấm xanh để nối dây.<br>Nháy đúp dây để thêm điểm uốn.<br>Kéo đầu dây để nối lại.<br>Ctrl+Z / Ctrl+Y: hoàn tác / làm lại.<br>F11: toàn màn hình.</div></details></nav>` +
     `<button data-act="new" title="Sơ đồ mới">📄 Mới</button><button data-act="open" title="Mở file sơ đồ (.json)">📂 Mở</button>` +
-    `<select id="dg-tpl" title="Mẫu sơ đồ"><option value="">📐 Mẫu…</option>${D.TEMPLATES.map((t) => `<option value="${t.id}">${esc(t.vi)}</option>`).join('')}</select>` +
+    `<select id="dg-tpl" title="Mẫu sơ đồ"><option value="">📐 Mẫu…</option>${[...new Set(D.TEMPLATES.map((t) => t.group))].map((g) => `<optgroup label="${esc(g)}">${D.TEMPLATES.filter((t) => t.group === g).map((t) => `<option value="${t.id}">${esc(t.vi)}</option>`).join('')}</optgroup>`).join('')}</select>` +
     `<select id="dg-exp" title="Xuất sơ đồ"><option value="">⬇ Xuất…</option><option value="png">Ảnh PNG</option><option value="svg">Ảnh SVG</option><option value="json">File sơ đồ (.json)</option><option value="drawio">File draw.io (.drawio)</option></select>` +
     (onToWorkspace ? `<button data-act="workspace" title="Tạo mạng trống trong workspace từ sơ đồ này">🧱 Mở trong workspace</button>` : '') +
     `<span class="dg-sep"></span>` +
