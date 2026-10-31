@@ -1,15 +1,18 @@
 // lab/labs-n200.js — nhóm "🆕 Bổ sung CCNA 200-301": các chủ đề của đề hiện hành mà bộ lab trước chưa có —
-// LLDP, OSPF point-to-point, static route có tên + dự phòng, SNMPv2c/v3, ACL IPv6, VLAN mở rộng, khôi phục mật khẩu.
+// LLDP, OSPF point-to-point, static route có tên + dự phòng, SNMPv2c/v3, ACL IPv6, VLAN mở rộng, khôi phục mật khẩu,
+// bản ghi DNS, lỗi duplex và tốc độ, Voice VLAN và PoE, máy ảo và vSwitch, kiểm chứng đề xuất của AI agent.
 // Topology, địa chỉ và tình huống tự thiết kế.
 
 import * as N from './net.js';
 import * as V6 from './net6.js';
 import { snmpTool } from './snmp.js';
-import { cfg, quiz, fa } from './kit.js';
+import { linuxDevice } from './linux.js';
+import { cfg, quiz, fa, allowedOk } from './kit.js';
 
 const { pc, server, router, sw, makeNet } = N;
 // chạy công cụ SNMP trên bản sao để việc chấm không làm đổi bộ đếm / giá trị của mạng người học
 const snmpOk = (a, src, cmd) => snmpTool(N.cloneNet(a.net), src, cmd).some((l) => /= STRING:/.test(l));
+const digShort = (a, q) => a.show('cli', `dig ${q} +short`);
 const ospfR = (rid, nets) => ['router ospf 1', `router-id ${rid}`, ...nets.map((n) => `network ${n} area 0`), 'exit'];
 
 export const N200_LABS = [
@@ -201,5 +204,133 @@ export const N200_LABS = [
     ],
     hints: ['Trong lab, gõ power-cycle ở bất kỳ chế độ nào để tắt/bật nguồn; ngay sau đó gõ send break (hoặc Ctrl+Break).', 'rommon 1 > confreg 0x2142   → rommon 2 > reset', 'Router> enable (không hỏi mật khẩu vì bỏ qua startup-config) → copy startup-config running-config', 'configure terminal → enable secret Cisco@123 → interface g0/0 / g0/1 → no shutdown → config-register 0x2102 → end → copy running-config startup-config'],
     solution: [['rcn', ['power-cycle', 'send break', 'confreg 0x2142', 'reset', '', 'enable', 'copy startup-config running-config', '', 'configure terminal', 'enable secret Cisco@123', 'interface g0/0', 'no shutdown', 'interface g0/1', 'no shutdown', 'exit', 'config-register 0x2102', 'end', 'copy running-config startup-config', '']]],
+  },
+  {
+    id: 'N09', group: 'n2', lesson: 'CCNA 200-301 · 4.4 — Bản ghi DNS', level: 2, kind: 'ticket', topics: ['Quản trị thiết bị'],
+    title: 'Sửa zone DNS sau khi chuyển máy chủ: A, AAAA, CNAME, MX, NS, PTR',
+    story: '🎫 Công ty vừa chuyển web sang máy mới 10.0.0.20 (IPv6 2001:db8:10::20), máy mail là 10.0.0.30, DNS-SRV là 10.0.0.10. Từ hôm đó, người dùng không vào được web, mail ngoài gửi vào bị trả lại, còn log web hiện tên máy cũ. Hãy dùng dig trên CLIENT để tìm bản ghi sai, rồi sửa zone corp.local trên DNS-SRV bằng lệnh dns. Dữ liệu ở đây là tình huống tự soạn, tên miền chỉ dùng trong lab.',
+    build: () => makeNet([
+      sw('sw', 'SW1', 420, 120, fa(4)),
+      Object.assign(linuxDevice('cli', 'CLIENT', 120, 300), { ip: '10.0.0.50', dns: '10.0.0.10' }),
+      Object.assign(server('dns', 'DNS-SRV', 320, 300, { ip: '10.0.0.10', services: [53] }), { badge: 'DNS', zone: {} }),
+      Object.assign(server('web', 'WEB', 520, 300, { ip: '10.0.0.20' }), { badge: 'WEB' }),
+      Object.assign(server('mail', 'MAIL', 720, 300, { ip: '10.0.0.30', services: [25] }), { badge: 'MAIL' }),
+    ], [['cli', 'fa0', 'sw', 'fa0/1'], ['dns', 'fa0', 'sw', 'fa0/2'], ['web', 'fa0', 'sw', 'fa0/3'], ['mail', 'fa0', 'sw', 'fa0/4']]),
+    init: [
+      ['sw', cfg('hostname SW1')],
+      ['dns', ['dns add web.corp.local 10.0.0.99', 'dns add mail.corp.local 10.0.0.30', 'dns add www.corp.local CNAME webb.corp.local', 'dns add corp.local MX 10 mail1.corp.local', 'dns add corp.local NS ns1.corp.local', 'dns add 20.0.0.10.in-addr.arpa PTR old-web.corp.local']],
+    ],
+    tasks: [
+      { text: 'A: web.corp.local trả về IP mới 10.0.0.20', verify: 'CLIENT: dig web.corp.local', check: (a) => digShort(a, 'web.corp.local').join() === '10.0.0.20' },
+      { text: 'CNAME: www.corp.local là bí danh của web.corp.local và ra được IP', verify: 'CLIENT: dig www.corp.local', check: (a) => digShort(a, 'www.corp.local').join() === 'web.corp.local,10.0.0.20' },
+      { text: 'AAAA: web.corp.local có địa chỉ 2001:db8:10::20', verify: 'CLIENT: dig web.corp.local AAAA', check: (a) => digShort(a, 'web.corp.local AAAA').join() === '2001:db8:10::20' },
+      { text: 'MX: corp.local trỏ tới mail.corp.local, ưu tiên 10', verify: 'CLIENT: dig corp.local MX', check: (a) => digShort(a, 'corp.local MX').join() === '10 mail.corp.local' },
+      { text: 'NS: máy chủ tên ns1.corp.local có bản ghi A là 10.0.0.10', verify: 'CLIENT: dig corp.local NS ; dig ns1.corp.local', check: (a) => digShort(a, 'corp.local NS').join() === 'ns1.corp.local' && digShort(a, 'ns1.corp.local').join() === '10.0.0.10' },
+      { text: 'PTR: tra ngược 10.0.0.20 ra web.corp.local', verify: 'CLIENT: dig -x 10.0.0.20', check: (a) => digShort(a, '-x 10.0.0.20').join() === 'web.corp.local' },
+      quiz('MX phải trỏ tới gì?', ['Một tên máy có bản ghi A hoặc AAAA', 'Trực tiếp một địa chỉ IP', 'Một cổng TCP', 'Tên của router biên'], 0, 'Giá trị MX gồm độ ưu tiên và tên máy chủ mail. Tên đó cần có A hoặc AAAA để máy gửi tìm được IP.'),
+      quiz('dig trả status NOERROR nhưng không có dòng ANSWER nghĩa là gì?', ['Tên có tồn tại nhưng không có bản ghi thuộc kiểu vừa hỏi', 'Tên không tồn tại', 'Máy chủ DNS không trả lời', 'Sai cổng 53'], 0, 'Trường hợp này gọi là NODATA. Tên không tồn tại thì status là NXDOMAIN, còn không có máy chủ trả lời thì dig báo connection timed out.'),
+    ],
+    hints: ['Trên CLIENT, hỏi từng kiểu: dig web.corp.local AAAA · dig corp.local MX · dig corp.local NS · dig -x 10.0.0.20', 'Trên DNS-SRV, dns show liệt kê zone. Thêm lại cùng tên và cùng kiểu sẽ thay bản ghi cũ.', 'PTR đặt theo tên đảo ngược: 20.0.0.10.in-addr.arpa. Mẫu: dns add corp.local MX 10 mail.corp.local'],
+    solution: [['dns', ['dns add web.corp.local 10.0.0.20', 'dns add www.corp.local CNAME web.corp.local', 'dns add web.corp.local AAAA 2001:db8:10::20', 'dns add corp.local MX 10 mail.corp.local', 'dns add ns1.corp.local 10.0.0.10', 'dns add 20.0.0.10.in-addr.arpa PTR web.corp.local']]],
+  },
+  {
+    id: 'N10', group: 'n2', lesson: 'CCNA 200-301 · 1.1 — Lỗi interface', level: 2, kind: 'ticket',
+    title: 'Uplink chậm và đứt: lệch duplex, lệch tốc độ, đọc bộ đếm lỗi',
+    story: '🎫 Người dùng ở SW-ACC than mạng rất chậm, còn máy chủ sau SW-SRV thì mất kết nối hẳn. Kỹ sư cũ đã đặt tay speed và duplex trên SW-CORE. Thiết kế của công ty: mọi uplink Gigabit để auto ở cả hai đầu. Hãy đọc show interfaces status và show interfaces để tìm lỗi rồi sửa.',
+    build: () => makeNet([
+      sw('core', 'SW-CORE', 420, 110, ['g0/1', 'g0/2']),
+      sw('acc', 'SW-ACC', 190, 250, ['fa0/1', 'g0/1']),
+      sw('srv', 'SW-SRV', 650, 250, ['fa0/1', 'g0/1']),
+      pc('p1', 'PC1', 190, 410, { ip: '10.0.0.10' }),
+      server('s1', 'SRV1', 650, 410, { ip: '10.0.0.20' }),
+    ], [['core', 'g0/1', 'acc', 'g0/1'], ['core', 'g0/2', 'srv', 'g0/1'], ['p1', 'fa0', 'acc', 'fa0/1'], ['s1', 'fa0', 'srv', 'fa0/1']]),
+    init: [
+      ['core', cfg('hostname SW-CORE', 'interface g0/1', 'speed 100', 'duplex full', 'interface g0/2', 'speed 100')],
+      ['acc', cfg('hostname SW-ACC')],
+      ['srv', cfg('hostname SW-SRV', 'interface g0/1', 'speed 1000')],
+    ],
+    tasks: [
+      { text: 'SW-CORE Gi0/2 và SW-SRV Gi0/1 lên connected', verify: 'show interfaces status', check: (a) => N.statusUp(a.net, 'core', 'g0/2') && N.statusUp(a.net, 'srv', 'g0/1') },
+      { text: 'SW-CORE Gi0/1 và SW-ACC Gi0/1 không còn lệch duplex', verify: 'show interfaces g0/1', check: (a) => !N.ethMode(a.net, 'core', 'g0/1').mismatch },
+      { text: 'Cả hai uplink của SW-CORE để auto và chạy 1000 Mb/s, full duplex', verify: 'show interfaces status', check: (a) => ['g0/1', 'g0/2'].every((p) => { const m = N.ethMode(a.net, 'core', p); return m.speed === 1000 && m.duplex === 'full' && m.autoSpeed && m.autoDuplex; }) },
+      { text: 'PC1 ping được SRV1', verify: 'ping 10.0.0.20', check: (a) => a.ping('p1', '10.0.0.20') },
+      quiz('Một đầu full, một đầu half. Bộ đếm nào tăng ở đầu nào?', ['Đầu full đếm CRC và runt, đầu half đếm late collision', 'Cả hai đầu chỉ đếm giant', 'Đầu full đếm late collision, đầu half đếm CRC', 'Không có bộ đếm nào đổi'], 0, 'Đầu half thấy va chạm muộn khi đầu full cứ gửi. Đầu full nhận phải frame bị cắt dở nên đếm CRC và runt.'),
+      quiz('Đầu kia đặt cứng 100/full, cổng này để auto. Cổng này sẽ chạy thế nào?', ['100 Mb/s, half duplex', '100 Mb/s, full duplex', '1000 Mb/s, full duplex', 'Cổng down'], 0, 'Không có autonegotiation thì vẫn dò được tốc độ, nhưng duplex mặc định là half ở 10/100 và full ở 1000. Vì vậy nên đặt giống nhau ở hai đầu.'),
+      quiz('Cáp quang multimode và singlemode khác nhau ở điểm nào?', ['Multimode lõi lớn, đi cự ly ngắn; singlemode lõi nhỏ, đi xa', 'Multimode dùng điện, singlemode dùng ánh sáng', 'Singlemode chỉ chạy được half duplex', 'Hai loại luôn dùng chung một SFP'], 0, 'Hai đầu cần cùng loại sợi và module quang tương thích, ví dụ 1000BASE-SX đi với multimode, 1000BASE-LX thường dùng singlemode. Sai loại thì link không lên hoặc nhiều lỗi.'),
+    ],
+    hints: ['show interfaces status: tiền tố a- nghĩa là tự thương lượng. Xem cột Duplex và Speed.', 'show interfaces g0/1: dòng input errors, CRC và late collision cho biết lệch duplex.', 'SW-CORE: interface g0/1 → speed auto → duplex auto; làm tương tự với g0/2. SW-SRV: interface g0/1 → speed auto.'],
+    solution: [['core', cfg('interface g0/1', 'speed auto', 'duplex auto', 'interface g0/2', 'speed auto', 'duplex auto')], ['srv', cfg('interface g0/1', 'speed auto')]],
+  },
+  {
+    id: 'N11', group: 'n2', lesson: 'CCNA 200-301 · 2.2 — Voice VLAN và PoE', level: 1, kind: 'ticket',
+    title: 'Điện thoại IP không sáng màn hình: PoE và Voice VLAN',
+    story: '🎫 PHONE1 cắm vào Fa0/1 của SW1 nhưng không có nguồn, nên không gọi được. Thiết kế: dữ liệu ở VLAN 10, thoại ở VLAN 20, tổng đài CUCM ở VLAN 20. Cổng điện thoại cần cấp PoE, đặt access VLAN 10 cho PC cắm phía sau và voice VLAN 20 cho điện thoại. PC1 ở Fa0/2 cũng chưa vào VLAN dữ liệu. Lab vẽ PC1 cắm riêng vì chưa mô phỏng PC nối qua cổng PC của điện thoại.',
+    build: () => makeNet([
+      sw('sw', 'SW1', 420, 110, fa(4)),
+      Object.assign(server('ph', 'PHONE1', 120, 300, { ip: '10.20.0.11', services: [], cloud: false }), { badge: 'TEL', phone: true }),
+      pc('p1', 'PC1', 320, 300, { ip: '10.10.0.11' }),
+      Object.assign(server('cucm', 'CUCM', 520, 300, { ip: '10.20.0.5', services: [5060] }), { badge: 'VOIP' }),
+      server('data', 'SRV-DATA', 720, 300, { ip: '10.10.0.5' }),
+    ], [['ph', 'fa0', 'sw', 'fa0/1'], ['p1', 'fa0', 'sw', 'fa0/2'], ['cucm', 'fa0', 'sw', 'fa0/3'], ['data', 'fa0', 'sw', 'fa0/4']]),
+    init: [['sw', cfg('hostname SW1', 'vlan 10', 'name DATA', 'vlan 20', 'name VOICE', 'exit', 'interface fa0/1', 'switchport mode access', 'switchport access vlan 10', 'power inline never', 'interface fa0/3', 'switchport mode access', 'switchport access vlan 20', 'interface fa0/4', 'switchport mode access', 'switchport access vlan 10')]],
+    tasks: [
+      { text: 'Fa0/1 cấp nguồn cho điện thoại (Admin auto, Oper on)', verify: 'show power inline', check: (a) => a.show('sw', 'show power inline').some((l) => /^Fa0\/1\s+auto\s+on\b/.test(l)) },
+      { text: 'Fa0/1 là cổng access: access VLAN 10, voice VLAN 20', verify: 'show interfaces fa0/1 switchport', check: (a) => { const p = a.d('sw').ports['fa0/1']; return p.mode === 'access' && p.modeSet && p.vlan === 10 && p.voiceVlan === 20; } },
+      { text: 'PHONE1 ping được CUCM', verify: 'ping 10.20.0.5', check: (a) => a.ping('ph', '10.20.0.5') },
+      { text: 'PC1 thuộc VLAN 10 và ping được SRV-DATA', verify: 'ping 10.10.0.5', check: (a) => a.d('sw').ports['fa0/2'].vlan === 10 && a.ping('p1', '10.10.0.5') },
+      quiz('Trên cùng một cổng có điện thoại và PC phía sau, frame đi thế nào?', ['Thoại gắn thẻ 802.1Q VLAN thoại, dữ liệu của PC không gắn thẻ', 'Cả hai đều không gắn thẻ', 'Cả hai đều gắn thẻ VLAN dữ liệu', 'Cổng phải đặt trunk và tắt CDP'], 0),
+      quiz('Điện thoại Cisco biết voice VLAN bằng cách nào?', ['Switch báo qua CDP hoặc LLDP-MED', 'Hỏi DNS', 'Đọc từ bảng MAC', 'Người dùng phải nhập tay trên mọi máy'], 0),
+      quiz('PoE+ theo chuẩn 802.3at cấp tối đa bao nhiêu tại cổng switch?', ['30 W', '15,4 W', '60 W', '5 W'], 0, '802.3af cấp 15,4 W, 802.3at cấp 30 W, 802.3bt cấp cao hơn.'),
+    ],
+    hints: ['show power inline: cột Admin never nghĩa là cổng bị tắt PoE.', 'interface fa0/1 → power inline auto → switchport voice vlan 20', 'interface fa0/2 → switchport mode access → switchport access vlan 10'],
+    solution: [['sw', cfg('interface fa0/1', 'power inline auto', 'switchport voice vlan 20', 'interface fa0/2', 'switchport mode access', 'switchport access vlan 10')]],
+  },
+  {
+    id: 'N12', group: 'n2', lesson: 'CCNA 200-301 · 1.2 — Máy ảo và vSwitch', level: 1, kind: 'config',
+    title: 'Máy ảo cần VLAN: port group trên vSwitch và uplink trunk',
+    story: 'Máy chủ vật lý chạy hypervisor, trong đó có VM-WEB (VLAN 10) và VM-DB (VLAN 20). Cả hai nối vào vSwitch, vSwitch đi ra switch vật lý PSW qua một card mạng. Lab dùng lệnh IOS để mô phỏng logic: mỗi port group là một cổng access, uplink là trunk. Trên VMware hay Hyper-V, bạn đặt VLAN ID trong giao diện của hypervisor.',
+    build: () => makeNet([
+      sw('vs', 'vSwitch0', 280, 120, ['fa0/1', 'fa0/2', 'g0/1']),
+      sw('ps', 'PSW', 640, 120, ['fa0/1', 'fa0/2', 'g0/1']),
+      pc('web', 'VM-WEB', 140, 320, { ip: '10.10.0.11' }),
+      pc('db', 'VM-DB', 340, 320, { ip: '10.20.0.11' }),
+      pc('adm', 'PC-ADMIN', 560, 320, { ip: '10.10.0.50' }),
+      server('nas', 'NAS', 760, 320, { ip: '10.20.0.50' }),
+    ], [['web', 'fa0', 'vs', 'fa0/1'], ['db', 'fa0', 'vs', 'fa0/2'], ['vs', 'g0/1', 'ps', 'g0/1'], ['adm', 'fa0', 'ps', 'fa0/1'], ['nas', 'fa0', 'ps', 'fa0/2']]),
+    init: [
+      ['vs', cfg('hostname vSwitch0', 'vlan 10', 'vlan 20', 'exit')],
+      ['ps', cfg('hostname PSW', 'vlan 10', 'vlan 20', 'exit', 'interface fa0/1', 'switchport mode access', 'switchport access vlan 10', 'interface fa0/2', 'switchport mode access', 'switchport access vlan 20', 'interface g0/1', 'switchport mode trunk', 'switchport trunk allowed vlan 10,20')],
+    ],
+    tasks: [
+      { text: 'Port group: VM-WEB ở VLAN 10, VM-DB ở VLAN 20', verify: 'show vlan brief', check: (a) => { const p = a.d('vs').ports; return p['fa0/1'].vlan === 10 && p['fa0/2'].vlan === 20; } },
+      { text: 'Uplink Gi0/1 của vSwitch là trunk, chỉ cho VLAN 10 và 20', verify: 'show interfaces trunk', check: (a) => { const p = a.d('vs').ports['g0/1']; return p.mode === 'trunk' && allowedOk(p, [10, 20], []); } },
+      { text: 'VM-WEB ping được PC-ADMIN, VM-DB ping được NAS', verify: 'ping', check: (a) => a.ping('web', '10.10.0.50') && a.ping('db', '10.20.0.50') },
+      quiz('Hypervisor type 1 khác type 2 thế nào?', ['Type 1 chạy trực tiếp trên phần cứng, type 2 chạy trên một hệ điều hành', 'Type 1 chỉ chạy Linux', 'Type 2 luôn nhanh hơn', 'Type 2 không cần CPU ảo'], 0, 'ESXi và Hyper-V Server là ví dụ type 1. VirtualBox và VMware Workstation là ví dụ type 2.'),
+      quiz('Container khác máy ảo ở điểm chính nào?', ['Container dùng chung kernel của máy chủ, máy ảo có hệ điều hành riêng', 'Container cần hypervisor type 1', 'Máy ảo khởi động nhanh hơn container', 'Container không có địa chỉ IP'], 0),
+      quiz('Hai VM cùng VLAN trên cùng vSwitch nói chuyện với nhau thì frame đi đâu?', ['Ở lại trong vSwitch, không ra switch vật lý', 'Luôn ra switch vật lý rồi quay lại', 'Phải qua router', 'Phải qua firewall'], 0),
+    ],
+    hints: ['Trên vSwitch0: interface fa0/1 → switchport mode access → switchport access vlan 10. Làm tương tự với fa0/2.', 'interface g0/1 → switchport mode trunk → switchport trunk allowed vlan 10,20', 'Lệch VLAN giữa port group và trunk vật lý là lỗi thường gặp khi máy ảo mất mạng.'],
+    solution: [['vs', cfg('interface fa0/1', 'switchport mode access', 'switchport access vlan 10', 'interface fa0/2', 'switchport mode access', 'switchport access vlan 20', 'interface g0/1', 'switchport mode trunk', 'switchport trunk allowed vlan 10,20')]],
+  },
+  {
+    id: 'N13', group: 'n2', lesson: 'CCNA 200-301 · 5.1–5.2 — Agentic AI và prompt', level: 1, kind: 'ticket', topics: ['VLAN/Trunk'],
+    title: 'AI agent đề xuất sai: kiểm chứng trước khi áp dụng',
+    story: '🎫 PC-KT không vào được SRV. Công ty thử một AI agent (trong lab, đề xuất này được soạn sẵn, không có AI thật). Agent viết: "Fa0/2 đang lỗi, hãy đặt switchport mode trunk". Bạn là người duyệt: tự kiểm chứng bằng show, chỉ áp dụng thay đổi đúng, và tạo tài khoản ai-agent privilege 1 để từ nay agent chỉ đọc được, không sửa được cấu hình.',
+    build: () => makeNet([
+      sw('sw', 'SW1', 420, 120, fa(3)),
+      server('srv', 'SRV', 220, 310, { ip: '10.10.0.5' }),
+      pc('kt', 'PC-KT', 620, 310, { ip: '10.10.0.21' }),
+    ], [['srv', 'fa0', 'sw', 'fa0/1'], ['kt', 'fa0', 'sw', 'fa0/2']]),
+    init: [['sw', cfg('hostname SW1', 'vlan 10', 'name KETOAN', 'vlan 20', 'name KHACH', 'exit', 'interface fa0/1', 'switchport mode access', 'switchport access vlan 10', 'interface fa0/2', 'switchport mode access', 'switchport access vlan 20')]],
+    tasks: [
+      { text: 'Fa0/2 vẫn là cổng access và đúng VLAN 10, không làm theo đề xuất trunk', verify: 'show interfaces fa0/2 switchport', check: (a) => { const p = a.d('sw').ports['fa0/2']; return p.mode === 'access' && p.vlan === 10; } },
+      { text: 'PC-KT ping được SRV', verify: 'ping 10.10.0.5', check: (a) => a.ping('kt', '10.10.0.5') },
+      { text: 'Có tài khoản ai-agent với privilege 1', verify: 'show running-config | include username', check: (a) => +a.d('sw').users['ai-agent']?.priv === 1 },
+      quiz('Điểm khác nhau chính giữa AI agent và chatbot chỉ trả lời?', ['Agent tự lập kế hoạch và gọi công cụ để hành động qua nhiều bước', 'Agent không dùng mô hình ngôn ngữ', 'Chatbot luôn đúng hơn', 'Agent không cần quyền truy cập'], 0),
+      quiz('Prompt nào tốt nhất để nhờ AI phân tích sự cố?', ['Nêu vai trò, bối cảnh, dữ liệu show đã che thông tin nhạy cảm, yêu cầu và định dạng kết quả', 'Mạng lỗi, sửa đi', 'Dán toàn bộ running-config kèm mật khẩu', 'Yêu cầu AI tự đổi cấu hình trên production'], 0),
+      quiz('Biện pháp nào giảm rủi ro khi cho agent chạm vào thiết bị thật?', ['Quyền tối thiểu, người duyệt trước khi đổi cấu hình, ghi log, có cách hoàn tác', 'Cấp privilege 15 cho nhanh', 'Tắt log để bớt nhiễu', 'Tin mọi kết quả nếu AI trả lời tự tin'], 0),
+    ],
+    hints: ['Kiểm chứng trước: show vlan brief và show interfaces fa0/2 switchport.', 'PC-KT và SRV cùng dải IP nhưng khác VLAN. Đây là cổng nối PC nên trunk không phải cách sửa.', 'interface fa0/2 → switchport access vlan 10; rồi username ai-agent privilege 1 secret Agent@123'],
+    solution: [['sw', cfg('interface fa0/2', 'switchport access vlan 10', 'exit', 'username ai-agent privilege 1 secret Agent@123')]],
   },
 ];

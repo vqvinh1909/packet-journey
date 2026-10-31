@@ -67,7 +67,7 @@ export const LAB_GROUPS = [
   { id: 'c2', title: '📗 CCNA trực quan — Ch.2 Các bước cấu hình' },
   { id: 'c3', title: '📗 CCNA trực quan — Ch.3 Xử lý sự cố' },
   { id: 'adv', title: '🔬 Chuyên đề nâng cao — VTP · PVLAN · IPsec · BGP · STP' },
-  { id: 'n2', title: '🆕 Bổ sung CCNA 200-301 — LLDP · OSPF P2P · static route · SNMP · ACL IPv6 · VLAN mở rộng · khôi phục mật khẩu' },
+  { id: 'n2', title: '🆕 Bổ sung CCNA 200-301 — LLDP · OSPF P2P · static route · SNMP · ACL IPv6 · VLAN mở rộng · khôi phục mật khẩu · DNS · duplex · Voice VLAN · máy ảo · AI agent' },
   { id: 'wifi', title: '📶 Wi-Fi & WLC — nối AP, tạo WLAN, QoS, 802.1X, kênh' },
   { id: 'sec', title: '🛡️ Bảo mật & Firewall — ASA · ZBF · FortiGate · Palo Alto · Sophos · Check Point · pfSense' },
   { id: 'l2s', title: '🔐 Bảo mật L2 & thiết bị — DHCP snooping · DAI · IP Source Guard · AAA · hardening' },

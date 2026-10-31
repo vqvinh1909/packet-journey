@@ -31,7 +31,8 @@ const HELP = [
   'ping [-c n] <đích>           traceroute <đích>',
   'ss -tulnp                    Xem cổng đang nghe (có thể dùng netstat -tulnp)',
   'curl <url>                   nc -zv <đích> <cổng>',
-  'dig <tên> [@máy chủ]         nslookup <tên> [máy chủ]',
+  'dig <tên> [A|AAAA|CNAME|MX|NS|PTR] [@máy chủ] · dig -x <IP>',
+  'nslookup [-type=mx] <tên|IP> [máy chủ]',
   'resolvectl dns eth0 <IP>     resolvectl status · cat /etc/resolv.conf',
   'systemctl status|start|stop|restart|enable|disable <dịch vụ> · systemctl list-units',
   '                             Dịch vụ: ' + Object.keys(UNITS).join(', '),
@@ -50,23 +51,40 @@ const LB_HELP = [
   'lb algo <cổng> roundrobin|source   Cách chia tải · lb show   Xem backend UP/DOWN',
 ];
 
+export const DNS_TYPES = ['A', 'AAAA', 'CNAME', 'MX', 'NS', 'PTR'];
+const NSLOOKUP_FMT = { CNAME: 'canonical name = ', MX: 'mail exchanger = ', NS: 'nameserver = ', PTR: 'name = ', AAAA: 'has AAAA address ' };
+
 export function makeLinux({ net, R, sshConnect }) {
-  /** Hỏi DNS qua UDP 53: { ok, ip?, nx?, server? }. Máy đích phải mở cổng 53 và có bảng tên miền. */
-  function dnsQuery(d, name, server) {
+  /**
+   * Hỏi DNS qua UDP 53, tự đi theo CNAME: { ok, ip?, answers, nx?, nodata?, server? }. Máy đích phải mở cổng 53.
+   * Bản ghi A nằm trong t.zone, kiểu khác trong t.rr = [{ name, type, value }].
+   */
+  function dnsQuery(d, name, server, type = 'A') {
     const srv = server || d.dns;
     if (!srv) return { ok: false, why: 'Máy chưa có DNS: resolvectl dns eth0 <IP>' };
     const r = N.sendPacket(net, { src: d.id, dst: srv, proto: 'udp', dport: 53 });
     const t = r.ok && net.devices[r.at.dev];
     if (!t || !t.services?.includes(53)) return { ok: false, server: srv, why: r.ok ? `${srv} không chạy dịch vụ DNS` : r.fail?.why };
-    const ip = t.zone?.[name.toLowerCase().replace(/\.$/, '')];
-    return ip ? { ok: true, ip, server: srv } : { ok: false, nx: true, server: srv };
+    const of = (n, ty) => (ty === 'A' ? (t.zone?.[n] ? [t.zone[n]] : []) : (t.rr || []).filter((r) => r.name === n && r.type === ty).map((r) => r.value));
+    const answers = [];
+    let n = name.toLowerCase().replace(/\.$/, '');
+    for (let hop = 0; hop < 8; hop++) { // CNAME vòng tròn thì dừng, không treo
+      const hits = of(n, type);
+      if (hits.length) { answers.push(...hits.map((value) => ({ name: n, type, value }))); return { ok: true, ip: hits[0], answers, server: srv }; }
+      const cn = type === 'CNAME' ? [] : of(n, 'CNAME');
+      if (!cn.length) break;
+      answers.push({ name: n, type: 'CNAME', value: cn[0] });
+      n = cn[0];
+    }
+    const known = t.zone?.[n] || (t.rr || []).some((r) => r.name === n);
+    return { ok: false, nx: !known, nodata: !!known, answers, server: srv };
   }
   /** Tên hoặc IP → IP. Trả { ip } hoặc { err }. */
   function resolveHost(d, host) {
     if (host === 'localhost') return { ip: '127.0.0.1' };
     if (N.isIp(host)) return { ip: host };
     const r = dnsQuery(d, host);
-    return r.ok ? { ip: r.ip } : { err: r.nx ? `${host} không có trong DNS ${r.server}` : r.why || 'DNS không trả lời' };
+    return r.ok ? { ip: r.ip } : { err: r.nx || r.nodata ? `${host} không có trong DNS ${r.server}` : r.why || 'DNS không trả lời' };
   }
   // Tới chính máy mình đi qua loopback: không ra dây, không qua ufw, chỉ phụ thuộc dịch vụ có chạy hay không.
   const isLocal = (d, ip) => ip.startsWith('127.') || ip === d.ip;
@@ -196,14 +214,24 @@ export function makeLinux({ net, R, sshConnect }) {
     return R([`nc: connect to ${a[0]} port ${port} (tcp) ${r.kind === 'refused' ? 'failed: Connection refused' : 'timed out: Operation now in progress'}`], { ...x, why: r.kind === 'refused' ? 'Mạng thông nhưng không có dịch vụ nghe cổng này.' : r.fail?.why });
   }
   function dig(d, w, style) {
-    const a = w.slice(1).filter((x) => !x.startsWith('+'));
-    const name = a.find((x) => !x.startsWith('@')), at = a.find((x) => x.startsWith('@'))?.slice(1) || (style === 'nslookup' ? a[1] : null);
-    if (!name) return R([style === 'nslookup' ? 'Cú pháp: nslookup <tên> [máy chủ]' : 'Cú pháp: dig <tên> [@máy chủ]']);
-    const r = dnsQuery(d, name, at);
-    if (!r.ok && !r.nx) return R([';; connection timed out; no servers could be reached'], { why: r.why, ok: false });
-    if (style === 'nslookup') return R([`Server:\t\t${r.server}`, '', ...(r.ok ? [`Name:\t${name}`, `Address: ${r.ip}`] : [`** server can't find ${name}: NXDOMAIN`])], { ok: r.ok });
-    if (w.includes('+short')) return R(r.ok ? [r.ip] : []);
-    return R([`;; ->>HEADER<<- opcode: QUERY, status: ${r.ok ? 'NOERROR' : 'NXDOMAIN'}`, ...(r.ok ? [';; ANSWER SECTION:', `${name}.\t300\tIN\tA\t${r.ip}`] : []), `;; SERVER: ${r.server}#53(${r.server})`], { ok: r.ok });
+    const a = w.slice(1).filter((x) => !x.startsWith('+')), isType = (x) => DNS_TYPES.includes(x.toUpperCase());
+    const xAt = a.indexOf('-x'), rest = a.filter((x, i) => !x.startsWith('@') && !x.startsWith('-') && (xAt < 0 || i !== xAt + 1));
+    const words = rest.filter((x) => !isType(x)), rev = xAt >= 0 ? a[xAt + 1] : style === 'nslookup' && N.isIp(words[0]) ? words[0] : null;
+    if (xAt >= 0 && !N.isIp(rev)) return R(['Cú pháp: dig -x <IP>']);
+    const name = rev ? `${rev.split('.').reverse().join('.')}.in-addr.arpa` : words[0];
+    const at = a.find((x) => x.startsWith('@'))?.slice(1) || (style === 'nslookup' ? words[1] : null);
+    if (!name) return R([style === 'nslookup' ? 'Cú pháp: nslookup [-type=mx] <tên|IP> [máy chủ]' : 'Cú pháp: dig <tên> [kiểu bản ghi] [@máy chủ]']);
+    const opt = a.find((x) => /^-(type|query)=/i.test(x))?.split('=')[1];
+    const type = rev ? 'PTR' : (opt || rest.find(isType) || 'A').toUpperCase();
+    if (!DNS_TYPES.includes(type)) return R([`Kiểu bản ghi chưa mô phỏng: ${type}. Có: ${DNS_TYPES.join(', ')}`]);
+    const r = dnsQuery(d, name, at, type);
+    if (!r.ok && !r.nx && !r.nodata) return R([';; connection timed out; no servers could be reached'], { why: r.why, ok: false });
+    if (style === 'nslookup') {
+      const lines = r.answers.flatMap((x) => (x.type === 'A' ? [`Name:\t${x.name}`, `Address: ${x.value}`] : [`${x.name}\t${NSLOOKUP_FMT[x.type]}${x.value}`]));
+      return R([`Server:\t\t${r.server}`, '', ...lines, ...(r.ok ? [] : [r.nx ? `** server can't find ${name}: NXDOMAIN` : `*** Can't find ${name}: No answer`])], { ok: r.ok });
+    }
+    if (w.includes('+short')) return R(r.answers.map((x) => x.value));
+    return R([`;; ->>HEADER<<- opcode: QUERY, status: ${r.nx ? 'NXDOMAIN' : 'NOERROR'}`, ...(r.answers.length ? [';; ANSWER SECTION:', ...r.answers.map((x) => `${x.name}.\t300\tIN\t${x.type}\t${x.value}`)] : []), `;; SERVER: ${r.server}#53(${r.server})`], { ok: r.ok });
   }
   function systemctl(d, w) {
     const act = (w[1] || 'list-units').toLowerCase();

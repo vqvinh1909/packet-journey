@@ -40,6 +40,7 @@ export function openRoadmap(o = {}) {
       `<header><span class="rm-ref">${esc(t.ref)}</span><h4>${esc(t.title)}</h4>${optional ? '' : `<span class="rm-count">${p.done}/${p.total}</span>`}</header>` +
       `<div class="rm-read">${t.lessons.map((n) => `<a href="${lessonLink(n)}" target="_blank" rel="noopener">📖 Bài ${n}</a>`).join('')}` +
       (optional ? '' : `<label><input type="checkbox" data-read="${esc(topicKey(t))}"${st.read[topicKey(t)] ? ' checked' : ''}> Đã nắm lý thuyết</label>`) + `</div>` +
+      (t.notes ? `<details class="rm-notes"><summary>📝 Bài đọc ngắn</summary><ul>${t.notes.map((n) => `<li>${esc(n)}</li>`).join('')}</ul></details>` : '') +
       t.sc.map((id) => { const d = !optional && scenarioDone(id, st); return `<button class="rm-item${d ? ' done' : ''}" data-sc="${id}"><span>${d ? '✓' : '○'}</span><b>Xem gói tin</b> ${esc(scenarioOf(id).meta.titleVi)}, rồi làm 🎯 Quiz</button>`; }).join('') +
       t.core.map((id) => labRow(id, !!st.labsDone[id])).join('') +
       (t.more.length ? `<details class="rm-more"><summary>${optional ? 'Lab' : 'Lab luyện thêm'} (${t.more.filter((id) => st.labsDone[id]).length}/${t.more.length})</summary>${t.more.map((id) => labRow(id, !!st.labsDone[id])).join('')}</details>` : '') +

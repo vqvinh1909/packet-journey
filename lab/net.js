@@ -272,7 +272,25 @@ export function statusUp(net, devId, port) {
   const l = linkAt(net, devId, port);
   if (!l) return false;
   const p = peerOf(l, devId, port);
-  return physAdminUp(net, p.dev, p.port);
+  if (!physAdminUp(net, p.dev, p.port)) return false;
+  return !unpowered(d, port, net.devices[p.dev], p.port) && !ethMode(net, devId, port).down;
+}
+// shortcut: điện thoại IP nối thẳng vào switch, chưa mô phỏng PC cắm sau điện thoại; cần thì cho điện thoại 2 cổng.
+const unpowered = (d1, p1, d2, p2) => (d2.phone && d1.ports?.[p1]?.power === 'never') || (d1.phone && d2.ports?.[p2]?.power === 'never');
+/**
+ * Kết quả thương lượng Ethernet của một cổng. Đặt cứng CẢ speed và duplex thì cổng tắt autonegotiation:
+ * đầu auto còn lại vẫn dò được tốc độ, nhưng duplex rơi về half (10/100) hoặc full (1000).
+ * Trả { speed, duplex, autoSpeed, autoDuplex, mismatch, down }; down = hai đầu không cùng tốc độ.
+ */
+export function ethMode(net, devId, port) {
+  const side = (id, n) => { const c = net.devices[id].ports?.[n] || net.devices[id].ifaces?.[n] || {}; return { speed: c.speed ?? null, duplex: c.duplex ?? null, cap: n.startsWith('g') ? 1000 : 100 }; };
+  const me = side(devId, port), l = linkAt(net, devId, port);
+  if (!l) return { speed: me.speed ?? me.cap, duplex: me.duplex ?? 'full', autoSpeed: !me.speed, autoDuplex: !me.duplex, mismatch: false, down: false };
+  const pe = peerOf(l, devId, port), o = side(pe.dev, pe.port);
+  const speed = me.speed ?? o.speed ?? Math.min(me.cap, o.cap), neg = !(me.speed && me.duplex) && !(o.speed && o.duplex);
+  const dup = (x, y) => x.duplex ?? (neg ? y.duplex ?? 'full' : speed >= 1000 ? 'full' : 'half');
+  const duplex = dup(me, o);
+  return { speed, duplex, autoSpeed: !me.speed, autoDuplex: !me.duplex, mismatch: duplex !== dup(o, me), down: (!!me.speed && !!o.speed && me.speed !== o.speed) || speed > Math.min(me.cap, o.cap) };
 }
 /** Up/up: thêm tầng 2 — serial 2 đầu phải cùng đóng gói (HDLC/PPP) — cột "Protocol". */
 export function lineUp(net, devId, port) {
@@ -341,7 +359,9 @@ export function effPort(net, d, p) {
     const po = d.ports[b.po];
     return { ...po, mode: po.modeSet ? po.mode : 'access', shutdown: po.shutdown || c.shutdown, bundle: b.po };
   }
-  return { ...c, mode: operMode(net, d, p, c), bundle: null };
+  const e = { ...c, mode: operMode(net, d, p, c), bundle: null };
+  if (c.voiceVlan && e.mode === 'access' && peerDev(net, d.id, p)?.phone) e.vlan = c.voiceVlan; // điện thoại gắn thẻ VLAN thoại
+  return e;
 }
 export function allowedHas(e, v) { return e.allowed == null ? v >= 1 && v <= 4094 : e.allowed.includes(v); }
 /** Cổng PVLAN có mang VLAN v không (host: primary + community của mình; promiscuous: primary + mapping). */
