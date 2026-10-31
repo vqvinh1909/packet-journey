@@ -240,18 +240,29 @@ export function createCli(net) {
     c('debug ip ospf adj', (x) => { (x.d.debug ||= {}).ospfAdj = true; return R(['OSPF adjacency debugging is on']); }),
     c('debug ip ospf adjacency', (x) => { (x.d.debug ||= {}).ospfAdj = true; return R(['OSPF adjacency debugging is on']); }),
     c('debug ip icmp', (x) => { (x.d.debug ||= {}).icmp = true; return R(['ICMP packet debugging is on']); }),
+    c('debug ip packet', (x) => { (x.d.debug ||= {}).ipPacket = true; return R(['IP packet debugging is on']); }),
+    c('no debug ip packet', (x) => { (x.d.debug ||= {}).ipPacket = false; return R(['IP packet debugging is off']); }),
+    c('undebug ip packet', (x) => { (x.d.debug ||= {}).ipPacket = false; return R(['IP packet debugging is off']); }),
     c('no debug ip ospf adj', (x) => { (x.d.debug ||= {}).ospfAdj = false; return R(['OSPF adjacency debugging is off']); }),
     c('no debug ip icmp', (x) => { (x.d.debug ||= {}).icmp = false; return R(['ICMP packet debugging is off']); }),
     c('undebug all', (x) => { x.d.debug = {}; return R(['All possible debugging has been turned off']); }),
     c('no debug all', (x) => { x.d.debug = {}; return R(['All possible debugging has been turned off']); }),
     c('undebug ip icmp', (x) => { (x.d.debug ||= {}).icmp = false; return R(['ICMP packet debugging is off']); }),
     c('undebug ip ospf adj', (x) => { (x.d.debug ||= {}).ospfAdj = false; return R(['OSPF adjacency debugging is off']); }),
-    c('show debugging', (x) => { const g = x.d.debug || {}; const L = []; if (g.ospfAdj) L.push('OSPF:', '  OSPF adjacency debugging is on'); if (g.icmp) L.push('IP:', '  ICMP packet debugging is on'); return R(L); }),
+    c('show debugging', (x) => { const g = x.d.debug || {}; const L = []; if (g.ospfAdj) L.push('OSPF:', '  OSPF adjacency debugging is on'); if (g.icmp) L.push('IP:', '  ICMP packet debugging is on'); if (g.ipPacket) L.push('Generic IP:', '  IP packet debugging is on'); return R(L); }),
     c('clear logging', (x) => { x.d.logBuf = []; return R(['Clear logging buffer [confirm]', '']); }),
     c('show running-config', (x) => R(runningConfig(x.d))),
     c('show running-config interface <if>', (x) => R(runIfBlock(x.d, x.a[0]))),
     c('show startup-config', (x) => R(showStartup(x.d))),
     c('show version', (x) => R(showVersion(x.d))),
+    c('show inventory', (x) => R(showInventory(x.d))),
+    c('show processes cpu', () => R(showCpu())),
+    c('show processes cpu sorted', () => R(showCpu())),
+    c('show memory', () => R(showMemory())),
+    c('show memory statistics', () => R(showMemory())),
+    c('show environment', (x) => R(showEnvironment(x.d))),
+    c('show environment all', (x) => R(showEnvironment(x.d))),
+    c('show controllers <if>', (x) => R(showControllers(x.d, x.a[0]))),
     c('show flash:', (x) => R(showFlash(x.d))),
     c('show flash', (x) => R(showFlash(x.d))),
     c('dir', (x) => R(showFlash(x.d))),
@@ -3047,11 +3058,38 @@ export function createCli(net) {
   }
 
   // ---- chung ----
+  /** Mã sản phẩm thật gần nhất theo số cổng FastEthernet. */
+  function switchPid(d) {
+    const n = Object.keys(d.ports).filter((p) => p.startsWith('fa')).length, size = n <= 8 ? 8 : n <= 24 ? 24 : 48;
+    return d.model === '3560' ? `WS-C3560-${size}${size === 8 ? 'PC' : 'TS'}-S` : `WS-C2960-${size}TT-L`;
+  }
+  function showInventory(d) {
+    const pid = isRouter(d) ? 'CISCO2911/K9' : switchPid(d);
+    const sn = [...d.id].reduce((h, ch) => (h * 31 + ch.charCodeAt(0)) >>> 0, 7).toString(36).toUpperCase().padStart(8, '0').slice(-8);
+    return [`NAME: "${isRouter(d) ? 'CISCO2911/K9 chassis' : '1'}", DESCR: "${pid}"`, `PID: ${pid}  , VID: V05  , SN: FOC${sn}`];
+  }
+  const SAMPLE = '(Lab: số liệu mẫu, không đo từ mô phỏng)';
+  function showCpu() {
+    return ['CPU utilization for five seconds: 1%/0%; one minute: 1%; five minutes: 1%', ' PID Runtime(ms)     Invoked      uSecs   5Sec   1Min   5Min TTY Process', '   1        3180        1412       2252  0.00%  0.00%  0.00%   0 Chunk Manager', '  45        8120       60231        134  0.15%  0.12%  0.10%   0 IP Input', '  61        2044       12078        169  0.07%  0.05%  0.05%   0 ARP Input', SAMPLE];
+  }
+  function showMemory() {
+    return ['                Head    Total(b)     Used(b)     Free(b)   Lowest(b)  Largest(b)', 'Processor    21C2E100   401293056    62915840   338377216   337901568   337512448', '      I/O    1E000000    33554432     7340032    26214400    26214400    26148864', SAMPLE];
+  }
+  function showEnvironment(d) {
+    return [...(isRouter(d) ? ['SYS PS1 is present', 'Fan 1 OK, Fan 2 OK, Fan 3 OK', 'SYSTEM INLET: Normal', 'SYSTEM OUTLET: Normal'] : ['FAN is OK', 'TEMPERATURE is OK', 'POWER is OK']), SAMPLE];
+  }
+  function showControllers(d, n) {
+    const f = isRouter(d) ? d.ifaces[n] : null;
+    if (!f) return ['% Invalid input detected.'];
+    if (!n.startsWith('s')) return [`Interface ${longIf(n)}`, 'Hardware is CN Gigabit Ethernet'];
+    if (!N.linkAt(net, d.id, n)) return [`Interface ${longIf(n)}`, 'Hardware is GT96K', 'No serial cable attached'];
+    return [`Interface ${longIf(n)}`, 'Hardware is GT96K', f.clock ? `DCE V.35, clock rate ${f.clock}` : 'DTE V.35 TX and RX clocks detected.'];
+  }
   function showVersion(d) {
     N.ensureFlash(d);
     return isRouter(d)
       ? [`Cisco IOS Software, C2900 Software (C2900-UNIVERSALK9-M), Version ${d.version}, RELEASE SOFTWARE (fc2)`, 'Technical Support: http://www.cisco.com/techsupport', '', `${d.name} uptime is 1 hour, 12 minutes`, `System image file is "flash:${d.image}"`, '', 'Cisco CISCO2911/K9 (revision 1.0) with 491520K/32768K bytes of memory.', `${Object.keys(d.ifaces).filter((n) => !n.includes('.')).length} Gigabit Ethernet/Serial interfaces`, `${d.flashSize >> 10}K bytes of ATA System CompactFlash 0 (Read/Write)`, `Configuration register is ${d.confreg || '0x2102'}${d.confregNext && d.confregNext !== (d.confreg || '0x2102') ? ` (will be ${d.confregNext} at next reload)` : ''}`]
-      : [`Cisco IOS Software, C${d.model} Software (C${d.model}-LANBASEK9-M), Version ${d.version}, RELEASE SOFTWARE (fc1)`, `${d.name} uptime is 1 hour, 12 minutes`, `System image file is "flash:${d.image}"`, '', `cisco WS-C${d.model}-24TT-L (PowerPC405) processor with 65536K bytes of memory.`, `${Object.keys(d.ports).filter((n) => !n.startsWith('po')).length} FastEthernet/GigabitEthernet interfaces`, `Base ethernet MAC Address       : ${N.ciscoMac(N.switchMac(net, d.id)).toUpperCase()}`, 'Configuration register is 0xF'];
+      : [`Cisco IOS Software, C${d.model} Software (C${d.model}-${d.model === '3560' ? 'IPBASEK9' : 'LANBASEK9'}-M), Version ${d.version}, RELEASE SOFTWARE (fc1)`, `${d.name} uptime is 1 hour, 12 minutes`, `System image file is "flash:${d.image}"`, '', `cisco ${switchPid(d)} (PowerPC405) processor with 65536K bytes of memory.`, `${Object.keys(d.ports).filter((n) => !n.startsWith('po')).length} FastEthernet/GigabitEthernet interfaces`, `Base ethernet MAC Address       : ${N.ciscoMac(N.switchMac(net, d.id)).toUpperCase()}`, 'Configuration register is 0xF'];
   }
   function ntpState(d, depth = 0) {
     if (d.ntp.master != null) return { sync: true, stratum: d.ntp.master, ref: '127.127.1.1' };
@@ -3147,7 +3185,7 @@ export function createCli(net) {
   }
   function showArp(d) {
     const L = ['Protocol  Address          Age (min)  Hardware Addr   Type   Interface'];
-    if (isL3(d)) for (const n of ifOrder(d)) { const f = IFS(d)[n]; if (f.ip && N.ifUp(net, d.id, n)) L.push(`Internet  ${pad(f.ip, 17)}${lpad('-', 9)}   ${pad(N.ciscoMac(N.epMac(net, { dev: d.id, ifn: n })), 16)}ARPA   ${longIf(n)}`); }
+    if (isL3(d)) for (const n of ifOrder(d)) { const f = IFS(d)[n]; if (f.ip && !/^s\d/.test(n) && N.ifUp(net, d.id, n)) L.push(`Internet  ${pad(f.ip, 17)}${lpad('-', 9)}   ${pad(N.ciscoMac(N.epMac(net, { dev: d.id, ifn: n })), 16)}ARPA   ${longIf(n)}`); }
     for (const [ip, e] of Object.entries(d.arp)) L.push(`Internet  ${pad(ip, 17)}${lpad(0, 9)}   ${pad(N.ciscoMac(e.mac), 16)}ARPA   ${longIf(e.ifn)}`);
     return L;
   }
@@ -3179,7 +3217,7 @@ export function createCli(net) {
     return L;
   }
   function headBlock(d) {
-    const L = ['!', `version ${isRouter(d) ? '15.5' : '15.0'}`, 'no service timestamps log datetime msec', 'no service timestamps debug datetime msec', d.servicePwEnc ? 'service password-encryption' : 'no service password-encryption', '!', `hostname ${d.name}`, '!'];
+    const L = ['!', `version ${(d.version || N.defaultVersion(d)).replace(/\(.*/, '')}`, 'no service timestamps log datetime msec', 'no service timestamps debug datetime msec', d.servicePwEnc ? 'service password-encryption' : 'no service password-encryption', '!', `hostname ${d.name}`, '!'];
     if (d.bootSystem?.length) L.push('boot-start-marker', ...d.bootSystem.map((b) => `boot system flash:${b}`), 'boot-end-marker', '!');
     if (d.enableSecret) L.push(`enable secret 5 ${md5ish(d.enableSecret)}`);
     if (d.enablePassword) L.push(`enable password ${pwShow(d, d.enablePassword)}`);

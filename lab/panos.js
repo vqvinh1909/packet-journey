@@ -35,7 +35,7 @@ const cidr = (v) => { const m = String(v).match(/^(\d+\.\d+\.\d+\.\d+)(?:\/(\d+)
 const OP_CMDS = [
   ['configure', 'Manipulate software configuration information'],
   ['show session all', 'Show all sessions'], ['show running security-policy', 'Show the running security policy'], ['show routing route', 'Show routing table'],
-  ['show interface all', 'Show all interfaces'], ['show config running', 'Show the running configuration'],
+  ['show interface all', 'Show all interfaces'], ['show config running', 'Show the running configuration'], ['show system info', 'Show system information'],
   ['test security-policy-match from <zone> to <zone> source <ip> destination <ip> protocol <number> destination-port <port>', 'Test security policy match'],
   ['ping host <ip>', 'Ping hosts and networks'],
 ];
@@ -282,6 +282,7 @@ export function makePan(h) {
     const cmd = String(t[0]).toLowerCase();
     if (!s.panCfg) {
       if (cmd === 'configure') { s.panCfg = true; return R(['Entering configuration mode', '[edit]']); }
+      if (cmd === 'show' && t[1] === 'system' && t[2] === 'info') return R([`hostname: ${d.name}`, 'ip-address: 192.168.1.1', 'netmask: 255.255.255.0', 'model: PA-VM', 'family: vm', 'sw-version: 10.2.4', 'operational-mode: normal', '(Lab: thông tin mẫu của máy ảo PA-VM)']);
       if (cmd === 'show' && t[1] === 'session' && t[2] === 'all') return R(showSessions(d));
       if (cmd === 'show' && t[1] === 'running' && t[2] === 'security-policy') return R(setLines(st.run).filter((l) => l.includes('rulebase security')));
       if (cmd === 'show' && t[1] === 'routing' && t[2] === 'route') return R(showRoutes(d));
@@ -292,7 +293,7 @@ export function makePan(h) {
         const r = N.sendPacket(net, { src: d.id, dst: t[2], record: true });
         return R([`PING ${t[2]} (${t[2]}) 56(84) bytes of data.`, ...(r.ok ? [1, 2, 3].map((i) => `64 bytes from ${t[2]}: icmp_seq=${i} ttl=${r.ttl} time=0.${i + 3} ms`) : []), '', `--- ${t[2]} ping statistics ---`, `3 packets transmitted, ${r.ok ? 3 : 0} received, ${r.ok ? 0 : 100}% packet loss`], { why: r.ok ? null : r.fail?.why, ok: r.ok });
       }
-      return R(['Unknown command: ' + t[0], '(Lab: chế độ vận hành — "configure" để cấu hình; show session all · show routing route · show interface all · test security-policy-match · ping host <ip>)']);
+      return R(['Unknown command: ' + t[0], '(Lab: chế độ vận hành — "configure" để cấu hình; show system info · show session all · show routing route · show interface all · test security-policy-match · ping host <ip>)']);
     }
     if (cmd === 'exit' || cmd === 'quit') {
       s.panCfg = false;

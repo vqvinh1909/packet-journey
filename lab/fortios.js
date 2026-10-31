@@ -8,6 +8,7 @@
 
 import * as N from './net.js';
 import { nextChoices, completeLine } from './vhelp.js';
+import { compileBpf, sniffQuery, fortiLine, flowsOf } from './sniff.js';
 
 const BUILTIN_SVC = {
   ALL: 'any', HTTP: [{ proto: 'tcp', port: 80 }], HTTPS: [{ proto: 'tcp', port: 443 }], DNS: [{ proto: 'udp', port: 53 }, { proto: 'tcp', port: 53 }],
@@ -188,6 +189,44 @@ export function makeForti(h) {
     return R(L, { why: r.ok ? null : r.fail?.why, ok: r.ok });
   }
 
+  // ---------------------------------------------------------------- diagnose: sniffer và debug flow
+  function sniffer(d, line) {
+    const m = line.match(/^\S+\s+sniffer\s+packet\s+(\S+)(?:\s+(?:['"]([^'"]*)['"]|(\S+)))?(?:\s+\d+)?(?:\s+(\d+))?\s*$/i);
+    if (!m) return R(['Command fail. Return code -61', "(Lab: diagnose sniffer packet <cổng|any> '<bộ lọc>' <verbose> <số gói>)"]);
+    const ifn = m[1].toLowerCase();
+    if (ifn !== 'any' && !d.ifaces[ifn]) return R(['Command fail. Return code -61']);
+    const expr = m[2] ?? m[3] ?? 'none';
+    const fn = compileBpf(expr === 'none' ? [] : expr.split(/\s+/).filter(Boolean));
+    if (!fn) return R(['Invalid filter expression.']);
+    const pkts = sniffQuery(net, d.id, ifn === 'any' ? null : ifn, fn, m[4] ? +m[4] : 30);
+    return R([`interfaces=[${ifn}]`, `filters=[${expr}]`, ...pkts.map((p) => fortiLine(p, pkts[0].t)), '', `${pkts.length} packets received by filter`, '0 packets dropped by kernel', '(Lab: in lại các gói gần đây đi qua thiết bị; tạo lưu lượng rồi gõ lại)']);
+  }
+  function debugFlow(d, s, w) {
+    const sub = w.slice(2).join(' ').toLowerCase(), dbg = (s.fzDbg ||= { on: false, addr: null });
+    if (w[1]?.toLowerCase() !== 'debug') return R(['Command fail. Return code -61']);
+    if (sub === 'enable') { dbg.on = true; return R([]); }
+    if (sub === 'disable') { dbg.on = false; return R([]); }
+    if (sub === 'reset') { s.fzDbg = { on: false, addr: null }; return R([]); }
+    if (sub === 'flow show function-name enable') return R(['show function name']);
+    const a = sub.match(/^flow filter addr (\S+)$/);
+    if (a && N.isIp(a[1])) { dbg.addr = a[1]; return R([]); }
+    const t = sub.match(/^flow trace start (\d+)$/);
+    if (!t) return R(['Command fail. Return code -61', '(Lab: diagnose debug enable · diagnose debug flow filter addr <ip> · diagnose debug flow show function-name enable · diagnose debug flow trace start <n> · diagnose debug reset)']);
+    if (!dbg.on) return R(['(Lab: chưa bật debug, gõ diagnose debug enable trước)']);
+    const num = { icmp: 1, tcp: 6, udp: 17 };
+    const flows = flowsOf(net, d.id, dbg.addr).slice(-+t[1]);
+    const L = flows.flatMap((f, i) => {
+      const pre = `id=20085 trace_id=${i + 1} func=`;
+      return [
+        `${pre}print_pkt_detail line=5820 msg="vd-root:0 received a packet(proto=${num[f.proto] ?? 0}, ${f.src}:${f.sport ?? 0}->${f.dst}:${f.dport ?? 0}) from ${f.inIf}."`,
+        f.established ? `${pre}resolve_ip_tuple_fast line=5900 msg="Find an existing session"` : `${pre}init_ip_session_common line=6080 msg="allocate a new session"`,
+        `${pre}vf_ip_route_input_common line=2598 msg="find a route: via ${f.outIf}"`,
+        f.allow ? `${pre}fw_forward_handler line=880 msg="Allowed by Policy-${f.rule}:"` : `${pre}fw_forward_handler line=760 msg="Denied by forward policy check (policy ${f.rule})"`,
+      ];
+    });
+    return R(L.length ? L : ['(Lab: chưa có gói nào qua firewall khớp bộ lọc; tạo lưu lượng rồi gõ lại)']);
+  }
+
   // ---------------------------------------------------------------- thực thi 1 dòng
   function exec(d, s, line) {
     if (line.endsWith('?')) return help(d, s, line.slice(0, -1));
@@ -256,6 +295,7 @@ export function makeForti(h) {
     if (cmd === 'get' && w.slice(1).join(' ').toLowerCase() === 'system status') return R(sysStatus(d));
     if (cmd === 'get' && w.slice(1).join(' ') === 'system session list') return R(showSessions(d));
     if (cmd === 'execute' && w[1] === 'ping' && N.isIp(w[2])) return fortiPing(d, w[2]);
+    if (cmd === 'diagnose' || cmd === 'diag') return w[1]?.toLowerCase() === 'sniffer' ? sniffer(d, line) : debugFlow(d, s, w);
     if (cmd === 'abort' && st.edit) { st.edit = null; return R([]); }
     return R(['Unknown action 0', 'Command fail. Return code -61']);
   }
@@ -282,7 +322,8 @@ export function makeForti(h) {
       return L;
     }
     return [...TABLES.map((t) => [`config ${t}`, `Configure ${t}.`]), ...TABLES.map((t) => [`show ${t}`, `Show ${t} configuration.`]),
-      ['get system status', 'System status.'], ['get system session list', 'List system sessions.'], ['get router info routing-table all', 'Show all routing table entries.'], ['execute ping <ip>', 'Send ICMP ECHO_REQUEST packets to network hosts.']];
+      ['get system status', 'System status.'], ['get system session list', 'List system sessions.'], ['get router info routing-table all', 'Show all routing table entries.'], ['execute ping <ip>', 'Send ICMP ECHO_REQUEST packets to network hosts.'],
+      ['diagnose sniffer packet <interface>', 'Show recent packets on an interface.'], ['diagnose debug enable', 'Enable debug output.'], ['diagnose debug flow filter addr <ip>', 'Filter flow trace by address.'], ['diagnose debug flow trace start <n>', 'Trace packets through the firewall.'], ['diagnose debug reset', 'Reset debug settings.']];
   }
   function help(d, s, text) {
     const L = nextChoices(entries(s), text, WORDS);

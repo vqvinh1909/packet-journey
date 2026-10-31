@@ -6,6 +6,7 @@
 // Việc xét gói (stateful) nằm ở lab/fw.js; NAT/định tuyến dùng chung engine lab/net.js.
 
 import * as N from './net.js';
+import { fwCheck } from './fw.js';
 
 const { longIf, prefixToMask, maskToPrefix, isIp, netOf, PORT_NAMES } = N;
 const ASA_PORT = { 80: 'www', 443: 'https', 22: 'ssh', 23: 'telnet', 21: 'ftp', 53: 'domain', 25: 'smtp' };
@@ -193,6 +194,43 @@ export function makeAsa(h) {
     return L;
   }
 
+  /** packet-tracer: xét gói giả định theo đúng cấu hình đang chạy (un-NAT → route → ACL → firewall), không gửi gói thật. */
+  function packetTracer(d, nameif, proto, src, sport, dst, dport) {
+    const inIf = ifByName(d, nameif);
+    if (!inIf) return R([`ERROR: interface "${nameif}" không tồn tại (dùng tên nameif, vd inside)`]);
+    const L = [];
+    let n = 0, outIf = null, realDst = dst, realPort = dport;
+    const phase = (type, sub, ok, info) => L.push(`Phase: ${++n}`, `Type: ${type}`, `Subtype: ${sub}`, `Result: ${ok ? 'ALLOW' : 'DROP'}`, 'Additional Information:', ...(info ? [info] : []), '');
+    const finish = (reason) => {
+      const st = (ifn) => { const up = N.ifUp(net, d.id, ifn); return [`status: ${up ? 'up' : 'down'}`, `line-status: ${up ? 'up' : 'down'}`]; };
+      L.push('Result:', `input-interface: ${nameif}`, ...st(inIf).map((x) => `input-${x}`), ...(outIf ? [`output-interface: ${d.ifaces[outIf].nameif || outIf}`, ...st(outIf).map((x) => `output-${x}`)] : []), `Action: ${reason ? 'drop' : 'allow'}`, ...(reason ? [`Drop-reason: ${reason}`] : []));
+      return R(L);
+    };
+    if (!N.ifUp(net, d.id, inIf)) return finish('(interface-down) Interface is down');
+    const st = d.nat.statics.find((s) => s.asaObj && s.global === dst && (!s.proto || (s.proto === proto && s.gport === dport)));
+    if (st) {
+      realDst = st.local;
+      if (st.proto) realPort = st.lport;
+      phase('UN-NAT', 'static', true, `NAT divert to egress: ${dst} → ${realDst}`);
+    }
+    const ctx = N.makeCtx(net);
+    const rt = N.lookup(ctx, d.id, realDst);
+    if (!rt) { phase('ROUTE-LOOKUP', 'input', false, `Không có route tới ${realDst}`); return finish(`(no-route) No route to host ${realDst}`); }
+    outIf = rt.iface;
+    phase('ROUTE-LOOKUP', 'input', true, `found next-hop ${rt.nextHop || realDst} using egress ifc ${d.ifaces[outIf].nameif || outIf}`);
+    const pkt = { proto, src, dst: realDst, sport, dport: realPort };
+    for (const [acl, dir] of [[d.ifaces[inIf].aclIn, 'in'], [d.ifaces[outIf].aclOut, 'out']]) {
+      if (!acl) continue;
+      const ok = N.aclEval(d, acl, pkt, false).action === 'permit';
+      phase('ACCESS-LIST', 'log', ok, `access-group ${acl} ${dir} interface ${d.ifaces[dir === 'in' ? inIf : outIf].nameif}`);
+      if (!ok) return finish('(acl-drop) Flow is denied by configured rule');
+    }
+    const v = fwCheck(ctx, d, pkt, inIf, outIf);
+    if (!v.allow) { phase('ACCESS-LIST', '', false, v.why); return finish('(acl-drop) Flow is denied by configured rule'); }
+    phase('FLOW-CREATION', '', true, `${v.why}. New flow created`);
+    return finish(null);
+  }
+
   // ---------------------------------------------------------------- bảng lệnh theo mode
   const SHOWS = [
     c('show running-config', (x) => R(runCfg(x.d))),
@@ -205,6 +243,7 @@ export function makeAsa(h) {
     c('show xlate', (x) => R(showXlate(x.d))),
     c('show nat', (x) => R(showNat(x.d))),
     c('show access-list', (x) => R(showAcl(x.d))),
+    c('show failover', () => R(['Failover Off', 'Failover unit Primary', 'Failover LAN Interface: not Configured', '(Lab: chưa mô phỏng failover)'])),
     c('show version', (x) => R([`Cisco Adaptive Security Appliance Software Version 9.8(4)`, '', `${x.d.name} up 2 hours 13 mins`, 'Hardware:   ASA5506, 4096 MB RAM', '(Lab: mô phỏng tập lệnh cốt lõi của ASA)'])),
   ];
   const EXEC = [
@@ -220,6 +259,8 @@ export function makeAsa(h) {
     c('disable', (x) => { x.s.mode = 'user'; return R([]); }),
     c('write memory', (x) => { h.saveCfg(x); return R(['Building configuration...', 'Cryptochecksum: 3f2a1b9c 7e4d5a6b 0c1d2e3f 4a5b6c7d', '[OK]']); }),
     c('copy running-config startup-config', (x) => { h.saveCfg(x); return R(['Cryptochecksum: 3f2a1b9c 7e4d5a6b 0c1d2e3f 4a5b6c7d', '[OK]']); }),
+    c('packet-tracer input <word> {tcp|udp} <ip> <num> <ip> <num>', (x) => packetTracer(x.d, x.a[0], x.a[1], x.a[2], +x.a[3], x.a[4], +x.a[5])),
+    c('packet-tracer input <word> icmp <ip> <num> <num> <ip>', (x) => packetTracer(x.d, x.a[0], 'icmp', x.a[1], undefined, x.a[4], undefined)),
     c('clear xlate', (x) => { x.d.natTable = []; return R([]); }),
     c('clear conn', (x) => { x.d.fw.conns = []; return R([]); }),
     c('clear access-list <word> counters', (x) => { for (const e of x.d.acls[x.a[0]]?.entries || []) e.matches = 0; return R([]); }),
