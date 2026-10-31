@@ -2,6 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { deflateRawSync } from 'node:zlib';
+import { readFileSync } from 'node:fs';
 import * as D from '../lab/diagram.js';
 import * as Sandbox from '../lab/sandbox.js';
 import { diagramFromSandbox, sandboxFromDiagram } from '../lab/diagram-bridge.js';
@@ -341,7 +342,129 @@ test('bridge: dây serial giữ đúng tên cổng khi có, thiếu cổng thì 
   D.addEdge(d, a.id, b.id, { la: 'Serial0/0/1', lb: 's0/2/0' });
   const net = sandboxFromDiagram(d), [l] = net.links;
   assert.equal(l.ap, 's0/0/1');
-  assert.ok(l.bp.startsWith('s'));
+  assert.equal(l.bp, 's0/2/0');
+});
+
+test('bridge: giữ đúng tên cổng đã ghi; dây không ghi tên không chiếm cổng của dây khác', () => {
+  const d = D.emptyDiagram(), r = D.addShape(d, 'router', 0, 0), sw = D.addShape(d, 'switch', 200, 0), r2 = D.addShape(d, 'router', 0, 200);
+  D.addEdge(d, r.id, r2.id); // không ghi tên, đứng trước: không được lấy g0/0 của dây sau
+  D.addEdge(d, r.id, sw.id, { la: 'Gi0/0', lb: 'Gi0/24' });
+  D.addEdge(d, sw.id, r2.id, { la: 'FastEthernet0/5', lb: 'GigabitEthernet0/7' });
+  const net = sandboxFromDiagram(d), rn = Object.values(net.devices).find((x) => x.name === r.label);
+  const ports = net.links.flatMap((l) => [l.ap, l.bp]);
+  for (const p of ['g0/0', 'g0/24', 'fa0/5', 'g0/7']) assert.ok(ports.includes(p), p);
+  assert.notEqual(net.links[0].ap, 'g0/0');
+  assert.ok(rn.ifaces['g0/0']);
+});
+
+test('điểm nối phụ chỉ có trên cạnh đủ dài, dây bám đúng điểm và giữ qua JSON', () => {
+  const d = D.emptyDiagram(), small = D.addShape(d, 'rect', 0, 0, { w: 80, h: 40 }), big = D.addShape(d, 'rect', 300, 0, { w: 200, h: 200 });
+  assert.deepEqual(D.portsOf(small), ['n', 'e', 's', 'w']);
+  assert.equal(D.portsOf(big).length, 12);
+  assert.deepEqual(D.portPoint(big, 'w1'), { x: 300, y: 50 });
+  assert.deepEqual(D.portPoint(big, 'n2'), { x: 450, y: 0 });
+  assert.equal(D.portPoint(big, 'x9'), null);
+  assert.equal(D.nearestPort(big, 290, 45), 'w1');
+  assert.equal(D.nearestPort(small, 40, -5), 'n');
+  const e = D.addEdge(d, small.id, big.id, { portA: 'e', portB: 'w2' });
+  assert.deepEqual(D.edgePath(d, e).b, { x: 300, y: 150 });
+  const back = D.importJson(D.exportJson(d));
+  assert.deepEqual(D.edgePath(back, back.edges[0]).b, { x: 300, y: 150 });
+});
+
+test('draw.io nhiều trang: xuất → nhập giữ tên, thứ tự, nội dung; đọc được trang nén và trang trống', async () => {
+  const a = D.TEMPLATES[0].build(), b = D.TEMPLATES[1].build();
+  const xml = D.exportDrawioPages([{ name: 'Tầng 1 & <A>', d: a }, { name: 'Page-2', d: b }]);
+  const pages = await D.importDrawioPages(xml);
+  assert.deepEqual(pages.map((p) => p.name), ['Tầng 1 & <A>', 'Page-2']);
+  assert.equal(pages[0].d.shapes.length, a.shapes.length);
+  assert.equal(pages[1].d.edges.length, b.edges.length);
+  const model = '<mxGraphModel><root><mxCell id="0"/><mxCell id="1" parent="0"/><mxCell id="2" parent="1" vertex="1" value="X"><mxGeometry x="1" y="2" width="50" height="50" as="geometry"/></mxCell></root></mxGraphModel>';
+  const packed = deflateRawSync(Buffer.from(encodeURIComponent(model))).toString('base64');
+  const mixed = await D.importDrawioPages(`<mxfile><diagram name="Trống"/><diagram name="Rỗng"></diagram><diagram name="Nén">${packed}</diagram></mxfile>`);
+  assert.deepEqual(mixed.map((p) => [p.name, p.d.shapes.length]), [['Rỗng', 0], ['Nén', 1]]);
+  assert.equal((await D.importDrawioFile(`<mxfile><diagram name="Rỗng"></diagram><diagram>${model}</diagram></mxfile>`)).shapes[0].label, 'X');
+  await assert.rejects(D.importDrawioPages('<mxfile><diagram name="a"></diagram></mxfile>'), /Không tìm thấy hình/);
+});
+
+test('dây gấp khúc: không đi xuyên hình chắn kể cả hình ở xa; sơ đồ 500 hình vẫn nhanh', () => {
+  const seg = (p) => [...p.d.matchAll(/[ML]([-\d.]+) ([-\d.]+)/g)].map((m) => ({ x: +m[1], y: +m[2] }));
+  const crosses = (pts, r) => pts.slice(1).some((b, i) => { const a = pts[i]; return Math.max(a.x, b.x) > r.x && Math.min(a.x, b.x) < r.x + r.w && Math.max(a.y, b.y) > r.y && Math.min(a.y, b.y) < r.y + r.h; });
+  // bức tường dài vượt xa vùng tìm gần: đường vòng phải tính cả hình ở xa
+  const w = D.emptyDiagram(), a = D.addShape(w, 'rect', 0, 300, { w: 40, h: 40 }), b = D.addShape(w, 'rect', 800, 300, { w: 40, h: 40 }), walls = [];
+  for (let i = 0; i < 12; i++) walls.push(D.addShape(w, 'rect', 400, -400 + i * 130, { w: 40, h: 120 }));
+  const pts = seg(D.edgePath(w, D.addEdge(w, a.id, b.id, { style: 'ortho', portA: 'e', portB: 'w' })));
+  assert.ok(walls.every((r) => !crosses(pts, r)));
+  const big = D.emptyDiagram(), ids = [];
+  for (let i = 0; i < 500; i++) ids.push(D.addShape(big, 'switch', (i % 25) * 140, Math.floor(i / 25) * 140).id);
+  for (let i = 1; i < 500; i++) D.addEdge(big, ids[i - 1], ids[i], { style: 'ortho' });
+  const t = performance.now(); big.edges.forEach((e) => D.edgePath(big, e));
+  assert.ok(performance.now() - t < 3000, 'định tuyến 499 dây phải dưới 3 giây');
+});
+
+// Khung bao gần đúng từ thuộc tính SVG (điểm điều khiển đường cong cũng tính, nên chỉ có thể rộng hơn thật).
+function artBox(svg) {
+  const xs = [], ys = [], add = (x, y) => { xs.push(x); ys.push(y); }, attr = (s, k) => +(s.match(new RegExp(`\\b${k}="(-?[\\d.]+)"`))?.[1] ?? 0);
+  for (const [, tag, a] of svg.replace(/<text\b[^>]*>[^<]*<\/text>/g, '').matchAll(/<(path|rect|circle|ellipse)\b([^>]*)>/g)) {
+    if (tag === 'rect') { add(attr(a, 'x'), attr(a, 'y')); add(attr(a, 'x') + attr(a, 'width'), attr(a, 'y') + attr(a, 'height')); }
+    else if (tag !== 'path') { const rx = attr(a, 'r') || attr(a, 'rx'), ry = attr(a, 'r') || attr(a, 'ry'); add(attr(a, 'cx') - rx, attr(a, 'cy') - ry); add(attr(a, 'cx') + rx, attr(a, 'cy') + ry); }
+    else {
+      let x = 0, y = 0, sx = 0, sy = 0;
+      for (const [, c, raw] of a.match(/\bd="([^"]*)"/)[1].matchAll(/([MmLlHhVvCcQqTtAaZz])([^MmLlHhVvCcQqTtAaZz]*)/g)) {
+        const n = (raw.match(/-?\d*\.?\d+/g) || []).map(Number), rel = c === c.toLowerCase(), C = c.toUpperCase();
+        if (C === 'Z') { x = sx; y = sy; continue; }
+        const size = { M: 2, L: 2, H: 1, V: 1, C: 6, Q: 4, T: 2, A: 7 }[C];
+        for (let i = 0; i + size <= n.length; i += size) {
+          const p = n.slice(i, i + size), ox = rel ? x : 0, oy = rel ? y : 0;
+          if (C === 'H') x = ox + p[0]; else if (C === 'V') y = oy + p[0];
+          else if (C === 'A') { const nx = ox + p[5], ny = oy + p[6]; add(Math.min(x, nx), Math.min(y, ny)); add(Math.max(x, nx), Math.max(y, ny)); x = nx; y = ny; }
+          else { for (let j = 0; j + 2 < size; j += 2) add(ox + p[j], oy + p[j + 1]); x = ox + p[size - 2]; y = oy + p[size - 1]; }
+          add(x, y);
+          if (C === 'M' && i === 0) { sx = x; sy = y; }
+        }
+      }
+    }
+  }
+  return { x0: Math.min(...xs), y0: Math.min(...ys), x1: Math.max(...xs), y1: Math.max(...ys) };
+}
+const ICON_TYPES = Object.keys(D.SHAPES).filter((t) => !D.SHAPES[t].container && !['text', 'rect', 'round', 'ellipse', 'note', 'pipeline', 'callout', 'table', 'terminator', 'decision', 'flowData', 'document', 'connector', 'lifeline', 'activation', 'messageCall', 'messageReturn', 'umlClass'].includes(t));
+const iconAt = (t, x = 0, y = 0, o = {}) => D.shapeSvg(D.addShape(D.emptyDiagram(), t, x, y, { label: '', sub: '', ...o }));
+
+test('icon: nét vẽ không vượt khung, cú pháp SVG hợp lệ', () => {
+  for (const t of ICON_TYPES) {
+    const svg = iconAt(t), S = D.SHAPES[t], b = artBox(svg);
+    assert.ok(!/undefined|NaN|[a-zA-Z]- \d/.test(svg), `${t}: tham số SVG hỏng`);
+    assert.ok(b.x0 >= -4 && b.y0 >= -4 && b.x1 <= S.w + 4 && b.y1 <= S.h + 4, `${t}: vượt khung ${S.w}×${S.h}: ${JSON.stringify(b)}`);
+  }
+});
+
+test('icon: dời vị trí chỉ đổi toạ độ gốc, kéo to thì co giãn theo', () => {
+  const inner = (svg) => svg.replace(/^<g data-id="[^"]*" class="dg-shape">/, '').replace(/translate\([^)]*\)/, '');
+  for (const t of ICON_TYPES.filter((x) => !['router', 'switch', 'l3switch', 'firewall', 'server', 'pc', 'laptop', 'phone', 'ap', 'wlc', 'printer', 'cloud', 'rack', 'triangle', 'hexagon', 'cylinder', 'star', 'lock', 'blockArrow'].includes(x))) {
+    assert.equal(inner(iconAt(t, 300, 200)), inner(iconAt(t, 0, 0)), `${t}: hình đổi khi dời vị trí`);
+  }
+  assert.match(iconAt('pod', 10, 20, { w: 128, h: 104 }), /translate\(10 20\) scale\(2 2\)/);
+});
+
+test('icon: mỗi loại có hình riêng; hình cơ bản không còn là ô vuông', () => {
+  const norm = (svg) => svg.replace(/data-id="[^"]*"/, '').replace(/#[0-9a-f]{3,8}/gi, '#');
+  const seen = new Map();
+  for (const t of ICON_TYPES) {
+    const k = norm(iconAt(t));
+    assert.ok(!seen.has(k), `${t} trùng icon với ${seen.get(k)}`);
+    seen.set(k, t);
+  }
+  for (const t of ['triangle', 'hexagon', 'cylinder', 'star', 'lock', 'blockArrow']) {
+    assert.match(iconAt(t), /<path/, t);
+    assert.equal(D.addShape(D.emptyDiagram(), t, 0, 0).label, '', `${t}: không tự mang chữ`);
+  }
+});
+
+test('icon: tên mặc định ngắn; không khai báo trùng trong hàm vẽ', () => {
+  for (const [t, S] of Object.entries(D.SHAPES)) if (S.prefix && S.defaultLabel === undefined) assert.ok(S.prefix.length <= 8, `${t}: ${S.prefix}`);
+  const src = readFileSync(new URL('../lab/diagram.js', import.meta.url), 'utf8'), body = src.slice(src.indexOf('function drawIcon'), src.indexOf('const PARAMETRIC'));
+  const cases = [...body.matchAll(/case '(\w+)':/g)].map((m) => m[1]);
+  assert.deepEqual(cases.filter((c, i) => cases.indexOf(c) !== i), []);
 });
 
 test('SVG: thoát ký tự đặc biệt, có mũi tên / nhãn cổng / nét gạch; vùng vẽ dưới dây; khung bao gồm chữ', () => {

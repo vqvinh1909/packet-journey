@@ -1,5 +1,12 @@
 # Ghi chú làm tiếp — Packet Journey
 
+## ✅ Hoàn thiện trình vẽ (2026-10-31)
+- Điểm nối phụ ở 1/4 và 3/4 cạnh dài từ 120px (`portsOf`, `nearestPort`). `.drawio` xuất/nhập đủ mọi trang (`exportDrawioPages`, `importDrawioPages`).
+- Nhập file nhiều trang phải xác nhận; file 1 trang chỉ thay trang đang mở, hoàn tác được.
+- Cầu nối sơ đồ → workspace giữ đúng tên cổng đã ghi, kể cả serial. Giới hạn: tường lửa luôn thành ASA nên tên cổng hãng khác (port1, eth1…) không giữ được.
+- Định tuyến dây gấp khúc: thử đường chữ L trước, rồi hình lân cận, sau cùng mới toàn sơ đồ. Sửa lỗi mất điểm uốn đầu tiên khi đi vòng.
+- Icon: vẽ trong khung mặc định của hình rồi `icon()` dời và co giãn; chỉ `PARAMETRIC` vẽ theo w/h thật. Icon mới thêm vào `ART` (toạ độ 64×52) hoặc `drawIcon`. Test kiểm tra vượt khung, trùng hình, tên ≤ 8 ký tự. Giới hạn: icon màu cố định nên ô Nền/Viền không đổi được màu.
+
 ## ✅ Tiếp tục kế hoạch vẽ mạng (2026-10-29)
 - Hoàn tất **B1 — Điểm nối cố định**: dây lưu `portA`/`portB` (n/e/s/w), kéo hình không làm đổi cạnh nối; áp dụng cho dây thẳng, cong, gấp khúc. Tạo dây bằng cách kéo từ chấm xanh; đích chọn cạnh theo chấm xanh hoặc theo cạnh gần vị trí thả.
 - Hoàn tất **B2–B6**: waypoint kéo/sửa/xoá, tự đi vòng hình chắn, kéo đầu dây để nối lại, nhiều dây song song, kiểu cáp (Ethernet/quang/Serial/Wi-Fi/VPN/console), tự gợi ý nhãn cổng không trùng.
