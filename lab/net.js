@@ -15,6 +15,7 @@
 // Mọi hàm đều thuần (không DOM). Khi cần animation, gói được dựng thành BYTE THẬT qua
 // serialize() của engine sẵn có → xem được cây trường/hex và xuất .pcap như các kịch bản.
 
+import { plEval, rmEval, rmPacket, asPathOk, ribPolicy, timeActive, qosEval } from './policy.js';
 import { Sim, diffFields } from '../engine/simulate.js';
 import { ipToInt, intToIp, parseIp } from '../packet/addr.js';
 import { pingData } from '../scenarios/_common.js';
@@ -136,7 +137,7 @@ export function newPort() {
   // modeSet=false: chưa gõ "switchport mode" → cổng DTP "dynamic auto" (mặc định của switch Cisco)
   return { mode: 'access', modeSet: false, dyn: 'auto', vlan: 1, allowed: null, native: 1, shutdown: false, errdis: false, desc: '', group: null, chMode: null, portfast: false, bpduguard: false, ps: null, trust: false, daiTrust: false, ipsg: false, dhcpRate: null, nonegotiate: false, protected: false, cdp: true, pv: null };
 }
-function newIf(name) {
+export function newIf(name) {
   return { ip: null, prefix: null, shutdown: !name.startsWith('lo') && !name.startsWith('tu'), tunSrc: null, tunDst: null, desc: '', encap: null, native: false, nat: null, aclIn: null, aclOut: null, standby: {}, vrrp: {}, helper: [], ospfCost: null, ospfArea: null, ospfPid: null, ospfHello: null, ospfPrio: null, bw: null, clock: null, l2enc: name.startsWith('s') ? 'hdlc' : null, cdp: true, proxyArp: true, cryptoMap: null, ipv6: [], ipv6Enable: false, ll: null, ospf6: null };
 }
 export function newSubIf(name) { const f = newIf(name); f.shutdown = false; return f; }
@@ -420,12 +421,56 @@ function underlayOk(net, d, dst) {
 /** Tunnel up/up khi: không shutdown, có source (cổng up) + destination, và underlay tới được destination. */
 export function tunnelUp(net, d, ifn) {
   const f = d.ifaces[ifn];
-  if (!f || f.shutdown || !f.tunDst) return false;
+  if (!f || f.shutdown || (!f.tunDst && f.tunMode !== 'mgre')) return false;
   const src = tunnelSrcIp(d, f);
   if (!src) return false;
   const srcIf = isIp(f.tunSrc) ? Object.keys(d.ifaces).find((n) => d.ifaces[n].ip === src) : f.tunSrc;
   if (!srcIf || srcIf.startsWith('tu') || !ifUp(net, d.id, srcIf)) return false;
-  return underlayOk(net, d, f.tunDst);
+  return f.tunMode === 'mgre' || underlayOk(net, d, f.tunDst);
+}
+/** tunnel protection ipsec: hai đầu phải cùng bật, cùng transform-set, cùng khóa ISAKMP (theo IP đối phương hoặc 0.0.0.0). */
+function tunIpsecOk(a, fa, b, fb) {
+  if (!fa.tunProtect && !fb.tunProtect) return true;
+  if (!fa.tunProtect || !fb.tunProtect) return false;
+  const ts = (d, f) => d.crypto.tsets[d.crypto.profiles?.[f.tunProtect]?.tset];
+  const key = (d, f, o) => d.crypto.keys[tunnelSrcIp(o, f)] ?? d.crypto.keys['0.0.0.0'];
+  const ta = ts(a, fa), tb = ts(b, fb);
+  return !!ta && !!tb && ta.join() === tb.join() && Object.keys(a.crypto.isakmp).length > 0 && Object.keys(b.crypto.isakmp).length > 0 && key(a, fb, b) != null && key(a, fb, b) === key(b, fa, a);
+}
+/** Spoke đã đăng ký NHRP với hub: khai đúng NHS, map đúng NBMA, cùng tunnel key và mật khẩu NHRP, underlay tới được hub. */
+export function nhrpSpokes(net, hub, hubIf) {
+  const h = hub.ifaces[hubIf], nbma = tunnelSrcIp(hub, h), out = [];
+  if (h.tunMode !== 'mgre' || h.nhrp?.id == null || !nbma) return out;
+  for (const P of Object.values(net.devices)) {
+    if (P.type !== 'router' || P.id === hub.id) continue;
+    for (const [n, g] of Object.entries(P.ifaces)) {
+      if (!n.startsWith('tu') || !g.ip || g.nhrp?.id == null || !g.nhrp.nhs?.includes(h.ip) || !tunnelUp(net, P, n)) continue;
+      if ((g.nhrp.map?.[h.ip] ?? g.tunDst) !== nbma || (g.tunKey ?? null) !== (h.tunKey ?? null) || (g.nhrp.auth ?? null) !== (h.nhrp.auth ?? null) || !underlayOk(net, P, nbma) || !tunIpsecOk(P, g, hub, h)) continue;
+      out.push({ dev: P.id, ifn: n, ip: g.ip, nbma: tunnelSrcIp(P, g), mgre: g.tunMode === 'mgre' });
+    }
+  }
+  return out;
+}
+const tunAt = (net, ip) => { for (const P of Object.values(net.devices)) if (P.type === 'router') for (const [n, g] of Object.entries(P.ifaces)) if (n.startsWith('tu') && g.ip === ip && tunnelUp(net, P, n)) return { P, n, g }; return null; };
+/** Đổi IP tunnel kế tiếp thành đầu mGRE/GRE thật: cache shortcut (pha 3), map tĩnh, bảng đăng ký hub, hoặc hỏi NHS (pha 2). */
+export function nhrpResolve(net, d, ifn, nh, dst) {
+  const f = d.ifaces[ifn];
+  for (const e of d.nhrpCache || []) {
+    if (e.ifn === ifn && inNet(dst, e.net, e.prefix) && net.devices[e.peer] && tunnelUp(net, net.devices[e.peer], e.peerIf)) return { dev: e.peer, ifn: e.peerIf, nbma: e.nbma, ip: e.ip };
+  }
+  const t = tunAt(net, nh);
+  if (!t || t.P.id === d.id) return null;
+  const peer = { dev: t.P.id, ifn: t.n, nbma: tunnelSrcIp(t.P, t.g), ip: nh };
+  if (f.nhrp?.map?.[nh] === peer.nbma && t.g.tunMode === 'mgre') return tunIpsecOk(d, f, t.P, t.g) ? peer : null;
+  if (nhrpSpokes(net, d, ifn).some((s) => s.dev === t.P.id)) return peer;
+  // spoke hỏi NHS: đối phương phải đăng ký cùng hub và cũng là mGRE thì mới đi thẳng được
+  for (const hubIp of f.nhrp?.nhs || []) {
+    const h = tunAt(net, hubIp);
+    if (!h) continue;
+    const reg = nhrpSpokes(net, h.P, h.n);
+    if (reg.some((s) => s.dev === d.id) && reg.some((s) => s.dev === t.P.id && s.mgre) && tunIpsecOk(d, f, t.P, t.g)) return peer;
+  }
+  return null;
 }
 /** Đầu kia của tunnel: router có tunnel với source/destination đối xứng. */
 export function tunnelPeer(net, d, ifn) {
@@ -434,7 +479,9 @@ export function tunnelPeer(net, d, ifn) {
   for (const P of Object.values(net.devices)) {
     if (P.type !== 'router' || P.id === d.id) continue;
     for (const [n, g] of Object.entries(P.ifaces)) {
-      if (!n.startsWith('tu') || g.tunDst !== src || tunnelSrcIp(P, g) !== f.tunDst) continue;
+      if (!n.startsWith('tu') || tunnelSrcIp(P, g) !== f.tunDst) continue;
+      if (g.tunMode === 'mgre') { if (nhrpSpokes(net, P, n).some((s) => s.dev === d.id && s.ifn === ifn)) return { dev: P.id, ifn: n }; continue; }
+      if (g.tunDst !== src || !tunIpsecOk(d, f, P, g)) continue;
       if (tunnelUp(net, P, n)) return { dev: P.id, ifn: n };
     }
   }
@@ -475,6 +522,15 @@ export function flood(net, src, diag) {
     const f = d0.ifaces[src.ifn];
     if (src.ifn.startsWith('tu')) {
       // tunnel = đường ảo điểm-điểm: "nhìn thấy" đúng router ở đầu kia (frame thật đi trong GRE)
+      if (f.tunMode === 'mgre') {
+        // mGRE: hub gửi multicast cho spoke đã đăng ký ("map multicast dynamic"), spoke gửi cho NHS đã map multicast
+        if (f.nhrp?.mcastDyn) for (const s of nhrpSpokes(net, d0, src.ifn)) add(s.dev, s.ifn, []);
+        for (const ip of f.nhrp?.nhs || []) {
+          const h = tunAt(net, ip);
+          if (h && f.nhrp.mcast?.includes(tunnelSrcIp(h.P, h.g)) && nhrpSpokes(net, h.P, h.n).some((s) => s.dev === src.dev && s.ifn === src.ifn)) add(h.P.id, h.n, []);
+        }
+        return out;
+      }
       const p = tunnelPeer(net, d0, src.ifn);
       if (p) add(p.dev, p.ifn, []);
       return out;
@@ -607,7 +663,7 @@ function hostInfo(net, d) {
 /** Priority hiệu lực của HSRP (trừ điểm khi cổng được track bị down). */
 function hsrpPri(net, d, s) {
   let p = s.priority ?? 100;
-  for (const t of s.track || []) if (!ifUp(net, d.id, t.ifn)) p -= t.dec ?? 10;
+  for (const t of s.track || []) if (t.obj != null ? !trackUp(net, d, t.obj) : !ifUp(net, d.id, t.ifn)) p -= t.dec ?? 10;
   return p;
 }
 /** Thiết bị cấu hình theo mô hình riêng của hãng hoặc trang web, không theo lệnh IOS (ASA vẫn tính là kiểu IOS). */
@@ -705,17 +761,20 @@ export function makeCtx(net, record = false) {
   return { net, record, base: {}, full: {}, ospf: null, eigrp: null, nat: [], arpc: {}, firstArp: false };
 }
 
-export function baseRoutes(ctx, rid) {
-  if (ctx.base[rid]) return ctx.base[rid];
+export function baseRoutes(ctx, rid, vrf = null) {
+  const key = rid + '|' + (vrf || '');
+  if (ctx.base[key]) return ctx.base[key];
   const net = ctx.net, r = net.devices[rid], out = [];
-  if (!isL3(r)) return (ctx.base[rid] = out);
+  if (!isL3(r)) return (ctx.base[key] = out);
   for (const [n, f] of Object.entries(l3ifs(r))) {
-    if (!f.ip || !ifUp(net, rid, n)) continue;
+    if ((f.vrf || null) !== vrf || !f.ip || !ifUp(net, rid, n)) continue;
     out.push({ code: 'C', net: netOf(f.ip, f.prefix), prefix: f.prefix, ad: 0, metric: 0, iface: n });
     out.push({ code: 'L', net: f.ip, prefix: 32, ad: 0, metric: 0, iface: n });
   }
   const conn = out.filter((x) => x.code === 'C');
   for (const s of r.routes) {
+    if ((s.vrf || null) !== vrf || (s.track != null && !trackUp(net, r, s.track))) continue;
+    if (s.discard) { out.push({ code: s.prefix === 0 ? 'S*' : 'S', net: s.net, prefix: s.prefix, ad: s.ad ?? 1, metric: 0, iface: 'null0', discard: true }); continue; }
     let iface = s.iface || null;
     const nh = s.nh || null;
     if (iface) {
@@ -728,13 +787,15 @@ export function baseRoutes(ctx, rid) {
     }
     out.push({ code: s.prefix === 0 ? 'S*' : 'S', net: s.net, prefix: s.prefix, ad: s.ad ?? 1, metric: 0, nextHop: nh, iface });
   }
-  return (ctx.base[rid] = out);
+  return (ctx.base[key] = out);
 }
 
-export function routeTable(ctx, rid) {
-  if (ctx.full[rid]) return ctx.full[rid];
-  const o = ospfAll(ctx);
-  const all = [...baseRoutes(ctx, rid), ...(o.routes[rid] || []), ...(eigrpAll(ctx).routes[rid] || []), ...(eigrpExt(ctx)[rid] || []), ...(bgpAll(ctx).routes[rid] || [])];
+export function routeTable(ctx, rid, vrf = null) {
+  const key = rid + '|' + (vrf || '');
+  if (ctx.full[key]) return ctx.full[key];
+  const o = ospfAll(ctx), d = ctx.net.devices[rid], same = (p) => (p?.vrf || null) === vrf;
+  const dyn = [...(same(d.ospf) ? o.routes[rid] || [] : []), ...(same(d.eigrp) ? [...(eigrpAll(ctx).routes[rid] || []), ...(eigrpExt(ctx)[rid] || [])] : []), ...(same(d.bgp) ? bgpAll(ctx).routes[rid] || [] : [])];
+  const all = [...baseRoutes(ctx, rid, vrf), ...dyn.map((r) => ribPolicy(d, r)).filter(Boolean)];
   const best = new Map();
   for (const r of all) {
     const k = r.code === 'L' ? 'L' + r.net : r.net + '/' + r.prefix;
@@ -742,13 +803,28 @@ export function routeTable(ctx, rid) {
     if (!b || r.ad < b.ad || (r.ad === b.ad && r.metric < b.metric)) best.set(k, r);
   }
   const res = [...best.values()].sort((a, b) => ip2n(a.net) - ip2n(b.net) || a.prefix - b.prefix);
-  return (ctx.full[rid] = res);
+  return (ctx.full[key] = res);
 }
 /** Longest-prefix match. */
-export function lookup(ctx, rid, dst) {
+export function lookup(ctx, rid, dst, vrf = null) {
   let best = null;
-  for (const r of routeTable(ctx, rid)) if (inNet(dst, r.net, r.prefix) && (!best || r.prefix > best.prefix)) best = r;
+  for (const r of routeTable(ctx, rid, vrf)) if (inNet(dst, r.net, r.prefix) && (!best || r.prefix > best.prefix)) best = r;
   return best;
+}
+
+export const timeRangeOn = timeActive;
+// ---------- Track, IP SLA ----------
+let TRACKING = false;
+/** Object track: cổng hoặc IP SLA. SLA ping thật ra mạng. Khi đang đo, route có track coi như up để gói đo đi đúng đường chính. */
+export function trackUp(net, d, id) {
+  const t = d.tracks?.[id];
+  if (!t) return false;
+  if (t.ifn) return ifUp(net, d.id, t.ifn);
+  if (TRACKING) return true;
+  const s = d.slas?.[t.sla];
+  if (!s?.target || !s.scheduled) return false;
+  TRACKING = true;
+  try { return sendPacket(net, { src: d.id, dst: s.target }).ok; } finally { TRACKING = false; }
 }
 
 // ---------- OSPF ----------
@@ -758,7 +834,7 @@ export function ospfIfaces(ctx, rid) {
   if (!r.ospf || !isL3(r)) return [];
   const res = [];
   for (const [n, f] of Object.entries(l3ifs(r))) {
-    if (!f.ip || !ifUp(net, rid, n)) continue;
+    if ((f.vrf || null) !== (r.ospf.vrf || null) || !f.ip || !ifUp(net, rid, n)) continue;
     let area = null;
     if (f.ospfPid != null && f.ospfPid === r.ospf.pid) area = f.ospfArea;
     else {
@@ -769,7 +845,10 @@ export function ospfIfaces(ctx, rid) {
     const passive = r.ospf.passiveDefault ? !r.ospf.noPassive.includes(n) : r.ospf.passive.includes(n);
     // kiểu mạng OSPF: Serial / tunnel mặc định point-to-point, Ethernet mặc định broadcast (đổi bằng "ip ospf network")
     const ntype = f.ospfNet || (kindOf(n) === 's' || n.startsWith('tu') ? 'p2p' : 'broadcast');
-    res.push({ ifn: n, ip: f.ip, prefix: f.prefix, area: String(area), cost: ospfCost(n, f), passive, hello: f.ospfHello ?? 10, prio: f.ospfPrio ?? 1, ntype });
+    const ac = r.ospf.areas?.[area] || {};
+    const authT = f.ospfAuth ?? ac.auth ?? 'null';
+    const auth = authT === 'md5' ? `md5:${f.ospfMd5?.id}:${f.ospfMd5?.key}` : authT === 'plain' ? `plain:${f.ospfKey}` : 'null';
+    res.push({ ifn: n, ip: f.ip, prefix: f.prefix, area: String(area), cost: ospfCost(n, f), passive, hello: f.ospfHello ?? (ntype === 'p2mp' || ntype === 'nbma' ? 30 : 10), prio: f.ospfPrio ?? 1, ntype, auth, authT, areaType: ac.type || '' });
   }
   return res;
 }
@@ -801,11 +880,14 @@ export function ospfAll(ctx) {
         if (e.area !== e2.area) { issues[r.id].push(`${longIf(e.ifn)}: area ${e.area} ≠ area ${e2.area} của ${s.name} (mismatch area)`); continue; }
         if (e.hello !== e2.hello) { issues[r.id].push(`${longIf(e.ifn)}: hello ${e.hello}s ≠ ${e2.hello}s của ${s.name}`); continue; }
         if (rid[s.id] === rid[r.id]) { issues[r.id].push(`Trùng router-id ${rid[r.id]} với ${s.name}`); continue; }
+        if (e.areaType !== e2.areaType) { issues[r.id].push(`${longIf(e.ifn)}: cờ stub/NSSA của area ${e.area} lệch với ${s.name}`); continue; }
+        if (e.auth !== e2.auth) { issues[r.id].push(`${longIf(e.ifn)}: xác thực OSPF lệch với ${s.name} (${e.authT} ≠ ${e2.authT} hoặc khác key)`); continue; }
+        if (e.ntype === 'nbma' && !r.ospf.nbrs?.includes(e2.ip) && !s.ospf.nbrs?.includes(e.ip)) { issues[r.id].push(`${longIf(e.ifn)}: non-broadcast không gửi multicast, cần lệnh neighbor ${e2.ip}`); continue; }
         // lệch kiểu mạng (point-to-point ↔ broadcast): hello cùng 10 s nên vẫn lên láng giềng, nhưng LSA hai bên mô tả
         // link khác nhau → SPF không dùng được link này (route bị thiếu) — lỗi kinh điển khi chỉ đổi một đầu
         const mismatch = e.ntype !== e2.ntype;
-        if (mismatch) issues[r.id].push(`${longIf(e.ifn)}: network type ${e.ntype === 'p2p' ? 'POINT_TO_POINT' : 'BROADCAST'} ≠ ${e2.ntype === 'p2p' ? 'POINT_TO_POINT' : 'BROADCAST'} của ${s.name} → láng giềng lên nhưng không có route qua link này`);
-        adj[r.id].push({ to: s.id, cost: e.cost, nh: e2.ip, outIf: e.ifn, theirIf: t.ifn, area: e.area, serial: kindOf(e.ifn) === 's', p2p: e.ntype === 'p2p', mismatch, prio: e2.prio, myPrio: e.prio });
+        if (mismatch) issues[r.id].push(`${longIf(e.ifn)}: network type ${OSPF_NT[e.ntype]} ≠ ${OSPF_NT[e2.ntype]} của ${s.name} → láng giềng lên nhưng không có route qua link này`);
+        adj[r.id].push({ to: s.id, cost: e.cost, nh: e2.ip, outIf: e.ifn, theirIf: t.ifn, area: e.area, serial: kindOf(e.ifn) === 's', p2p: e.ntype === 'p2p' || e.ntype === 'p2mp', mismatch, prio: e2.prio, myPrio: e.prio });
       }
     }
   }
@@ -816,6 +898,26 @@ export function ospfAll(ctx) {
   for (const s of rs) ads[s.id] = en[s.id].map((e) => ({ net: netOf(e.ip, e.prefix), prefix: e.prefix, cost: e.cost, area: e.area }));
   const spf = {}, intRoutes = {}, myNetsOf = {};
   Object.assign(ctx.ospf, { spf, intRoutes });
+  // virtual link nối area xa về area 0: hai đầu cùng cấu hình, cùng có mặt trong area transit, area đó không được là stub
+  const vlinks = (ctx.ospf.vlinks = {}), areasOf = {}, areaInfo = {};
+  for (const r of rs) {
+    areasOf[r.id] = new Set(en[r.id].map((e) => e.area));
+    for (const [a, c0] of Object.entries(r.ospf.areas || {})) { const i = (areaInfo[a] ||= {}); if (c0.type) i.type = c0.type; if (c0.noSummary) i.noSummary = true; if (c0.nssaDefault) i.nssaDefault = true; }
+  }
+  for (const r of rs) {
+    vlinks[r.id] = (r.ospf.vlinks || []).map((v) => {
+      const s = rs.find((x) => rid[x.id] === v.rid);
+      const up = !!s && !areaInfo[v.area]?.type && areasOf[r.id].has(String(v.area)) && areasOf[s.id].has(String(v.area)) && !!s.ospf.vlinks?.some((w) => w.rid === rid[r.id] && w.area === v.area);
+      return { rid: v.rid, area: v.area, peer: s?.id || null, up };
+    });
+  }
+  for (const r of rs) if (vlinks[r.id].some((v) => v.up)) areasOf[r.id].add('0');
+  const has0 = rs.some((r) => areasOf[r.id].has('0'));
+  const attached = (a) => a === '0' || rs.some((x) => areasOf[x.id].has(a) && areasOf[x.id].has('0'));
+  // area không chạm area 0 thì không trao đổi route liên vùng, trừ khi mạng không dùng area 0
+  const visible = (mine, a) => mine.has(a) || !has0 || (attached(a) && [...mine].some(attached));
+  const rangeOf = (a, p) => { for (const s of rs) for (const g of s.ospf.areas?.[a]?.ranges || []) if (areasOf[s.id].has(a) && areasOf[s.id].size > 1 && p.prefix >= g.prefix && netOf(p.net, g.prefix) === g.net) return g; return null; };
+  const filteredIA = (a, mine, p) => rs.some((s) => areasOf[s.id].size > 1 && ((s.ospf.areas?.[a]?.flOut && !plEval(s, s.ospf.areas[a].flOut, p.net, p.prefix)) || [...mine].some((m) => s.ospf.areas?.[m]?.flIn && !plEval(s, s.ospf.areas[m].flIn, p.net, p.prefix))));
   // ---- pha 1: route nội bộ OSPF (O / O IA) ----
   for (const r of rs) {
     const dist = { [r.id]: 0 }, first = {}, done = new Set();
@@ -831,17 +933,33 @@ export function ospfAll(ctx) {
     }
     spf[r.id] = { dist, first };
     const myNets = (myNetsOf[r.id] = new Set(Object.entries(l3ifs(r)).filter(([n, f]) => f.ip && ifUp(net, r.id, n)).map(([, f]) => netOf(f.ip, f.prefix) + '/' + f.prefix)));
-    const myAreas = new Set(en[r.id].map((e) => e.area));
+    const myAreas = areasOf[r.id];
     const best = new Map();
+    const stubOnly = myAreas.size > 0 && [...myAreas].every((a) => areaInfo[a]?.type);
+    const totally = stubOnly && [...myAreas].every((a) => areaInfo[a].noSummary);
     for (const s of rs) {
       if (s.id === r.id || dist[s.id] == null) continue;
       for (const ad of ads[s.id]) {
-        const k = ad.net + '/' + ad.prefix;
+        if (!visible(myAreas, ad.area)) continue;
+        const inter = !myAreas.has(ad.area);
+        if (inter && (totally || filteredIA(ad.area, myAreas, ad))) continue;
+        const g = inter ? rangeOf(ad.area, ad) : null;
+        if (g?.hide) continue;
+        const k = g ? g.net + '/' + g.prefix : ad.net + '/' + ad.prefix;
         if (myNets.has(k)) continue;
         const cost = dist[s.id] + ad.cost;
         const cur = best.get(k);
-        if (!cur || cost < cur.metric) best.set(k, { code: myAreas.has(ad.area) ? 'O' : 'O IA', net: ad.net, prefix: ad.prefix, ad: 110, metric: cost, nextHop: first[s.id].nh, iface: first[s.id].outIf });
+        // đường trong area luôn thắng đường liên vùng, bất kể cost
+        if (!cur || (!inter && cur.code !== 'O') || (inter === (cur.code !== 'O') && cost < cur.metric)) best.set(k, { code: inter ? 'O IA' : 'O', net: g ? g.net : ad.net, prefix: g ? g.prefix : ad.prefix, ad: 110, metric: cost, nextHop: first[s.id].nh, iface: first[s.id].outIf });
       }
+    }
+    // ABR tự tạo route Null0 cho dải đã tóm tắt để chống lặp
+    for (const a of myAreas) if (myAreas.size > 1) for (const g of r.ospf.areas?.[a]?.ranges || []) if (!g.hide && ads[r.id].concat(...rs.map((s) => ads[s.id])).some((p) => p.area === a && p.prefix > g.prefix && netOf(p.net, g.prefix) === g.net)) best.set(g.net + '/' + g.prefix, { code: 'O', net: g.net, prefix: g.prefix, ad: 110, metric: 0, iface: 'null0', discard: true });
+    // area stub/NSSA: ABR gần nhất đưa default route vào thay cho route bị cắt
+    if (stubOnly && !best.has('0.0.0.0/0')) {
+      let abr = null;
+      for (const s of rs) if (s.id !== r.id && dist[s.id] != null && areasOf[s.id].has('0') && [...myAreas].some((a) => areasOf[s.id].has(a) && (areaInfo[a].type === 'stub' || areaInfo[a].noSummary || areaInfo[a].nssaDefault)) && (!abr || dist[s.id] < dist[abr.id])) abr = s;
+      if (abr) best.set('0.0.0.0/0', { code: 'O*IA', net: '0.0.0.0', prefix: 0, ad: 110, metric: dist[abr.id] + 1, nextHop: first[abr.id].nh, iface: first[abr.id].outIf });
     }
     intRoutes[r.id] = [...best.values()];
     routes[r.id] = [...intRoutes[r.id]];
@@ -853,13 +971,22 @@ export function ospfAll(ctx) {
     const { dist, first } = spf[r.id];
     const have = new Set([...myNetsOf[r.id], ...intRoutes[r.id].map((x) => x.net + '/' + x.prefix)]);
     const best = new Map();
+    const mine = areasOf[r.id], rStub = mine.size > 0 && [...mine].every((a) => areaInfo[a]?.type);
     for (const s of rs) {
       if (s.id === r.id || dist[s.id] == null) continue;
+      const sA = [...areasOf[s.id]];
+      if (sA.length && sA.every((a) => areaInfo[a]?.type === 'stub')) continue; // router trong area stub không tạo LSA external
+      if (!sA.some((a) => visible(mine, a))) continue;
+      const nssa = sA.find((a) => areaInfo[a]?.type === 'nssa' && mine.has(a));
+      if (rStub && !nssa) continue;
       for (const e of ext[s.id]) {
         const k = e.def ? '0.0.0.0/0' : e.net + '/' + e.prefix;
         if (have.has(k)) continue;
+        const t1 = e.type === 1, m = t1 ? e.metric + dist[s.id] : e.metric;
+        const code = (e.def ? 'O*' : 'O ') + (nssa ? 'N' : 'E') + (t1 ? '1' : '2');
         const cur = best.get(k);
-        if (!cur || dist[s.id] < cur.fwd) best.set(k, { code: e.def ? 'O*E2' : 'O E2', net: e.def ? '0.0.0.0' : e.net, prefix: e.def ? 0 : e.prefix, ad: 110, metric: e.metric, fwd: dist[s.id], nextHop: first[s.id].nh, iface: first[s.id].outIf });
+        // E1 thắng E2; cùng loại thì metric nhỏ hơn, rồi tới ASBR gần hơn
+        if (!cur || (t1 && !cur.t1) || (t1 === cur.t1 && (m < cur.metric || (m === cur.metric && dist[s.id] < cur.fwd)))) best.set(k, { code, t1, net: e.def ? '0.0.0.0' : e.net, prefix: e.def ? 0 : e.prefix, ad: 110, metric: m, fwd: dist[s.id], nextHop: first[s.id].nh, iface: first[s.id].outIf, tag: e.tag });
       }
     }
     routes[r.id].push(...best.values());
@@ -877,8 +1004,10 @@ function ospfExternals(ctx, s) {
     if (!cfg.subnets && r.prefix > classfulPrefix(r.net)) return; // thiếu "subnets" → chỉ mạng classful
     const k = r.net + '/' + r.prefix;
     if (own.has(k) || seen.has(k)) return;
+    const set = cfg.routeMap ? rmEval(s, cfg.routeMap, r, ctx.record) : {};
+    if (!set) return;
     seen.add(k);
-    out.push({ net: r.net, prefix: r.prefix, metric: cfg.metric ?? 20 });
+    out.push({ net: r.net, prefix: r.prefix, metric: set.metric ?? cfg.metric ?? 20, tag: set.tag ?? cfg.tag ?? r.tag, type: set.metricType ?? cfg.metricType ?? 2 });
   };
   for (const [src, cfg] of Object.entries(o.redist || {})) {
     if (src === 'connected') base.filter((r) => r.code === 'C').forEach((r) => take(r, cfg));
@@ -893,6 +1022,13 @@ function ospfExternals(ctx, s) {
     const hasDef = base.some((x) => x.prefix === 0) || (bgpAll(ctx).routes[s.id] || []).some((x) => x.prefix === 0);
     if (hasDef || o.defaultAlways) out.push({ def: true, metric: 1 });
   }
+  // summary-address trên ASBR: thay các route external con bằng một route tóm tắt
+  for (const g of o.summaries || []) {
+    const kids = out.filter((e) => !e.def && e.prefix > g.prefix && netOf(e.net, g.prefix) === g.net);
+    if (!kids.length) continue;
+    for (const e of kids) out.splice(out.indexOf(e), 1);
+    if (!g.hide) out.push({ net: g.net, prefix: g.prefix, metric: Math.min(...kids.map((e) => e.metric)), type: kids[0].type });
+  }
   return out;
 }
 /** Bầu DR/BDR trên 1 segment: priority cao nhất (0 = không bao giờ làm DR), rồi router-id cao nhất. */
@@ -900,7 +1036,7 @@ const ospfKey = (rid, a) => `ospf|${rid}|${a.outIf}|${a.to}`;
 export function ospfRoles(ctx, rid, ifn) {
   const o = ospfAll(ctx);
   const me = (o.en[rid] || []).find((e) => e.ifn === ifn);
-  if (me?.ntype === 'p2p') return { dr: null, bdr: null }; // point-to-point: không bầu DR/BDR
+  if (me?.ntype === 'p2p' || me?.ntype === 'p2mp') return { dr: null, bdr: null }; // point-to-point: không bầu DR/BDR
   const seg = [{ id: rid, prio: me ? me.prio : 1 }, ...(o.adj[rid] || []).filter((x) => x.outIf === ifn).map((x) => ({ id: x.to, prio: x.prio }))];
   const cand = seg.filter((x) => x.prio > 0).sort((a, b) => b.prio - a.prio || ip2n(o.rid[b.id]) - ip2n(o.rid[a.id]));
   return { dr: cand[0]?.id || null, bdr: cand[1]?.id || null };
@@ -925,20 +1061,22 @@ export function ospfNeighbors(ctx, rid) {
   });
 }
 
+const OSPF_NT = { p2p: 'POINT_TO_POINT', broadcast: 'BROADCAST', p2mp: 'POINT_TO_MULTIPOINT', nbma: 'NON_BROADCAST' };
 // ---------- EIGRP ----------
 const EBW = { g: 1000000, fa: 100000, e: 10000, s: 1544, lo: 8000000, vlan: 1000000 };
 const EDLY = { g: 1, fa: 10, e: 100, s: 2000, lo: 500, vlan: 1 };
 function ifBw(ifn, f) { return f.bw ?? EBW[kindOf(ifn)] ?? 100000; }
-function ifDly(ifn) { return EDLY[kindOf(ifn)] ?? 10; }
+function ifDly(ifn, f) { return f.dly ?? EDLY[kindOf(ifn)] ?? 10; }
 export function eigrpIfaces(ctx, rid) {
   const net = ctx.net, r = net.devices[rid];
   if (!r.eigrp || !isL3(r)) return [];
   const res = [];
   for (const [n, f] of Object.entries(l3ifs(r))) {
-    if (!f.ip || !ifUp(net, rid, n)) continue;
+    if ((f.vrf || null) !== (r.eigrp.vrf || null) || !f.ip || !ifUp(net, rid, n)) continue;
     const ok = r.eigrp.networks.some((s) => (s.wild ? wildMatch(f.ip, s.net, s.wild) : netOf(f.ip, classfulPrefix(s.net)) === netOf(s.net, classfulPrefix(s.net))));
     if (!ok) continue;
-    res.push({ ifn: n, ip: f.ip, prefix: f.prefix, passive: r.eigrp.passive.includes(n), bw: ifBw(n, f), dly: ifDly(n) });
+    const af = { ...r.eigrp.afIf?.default, ...r.eigrp.afIf?.[n] }, au = af.auth || f.eigrpAuth, keys = au?.chain ? Object.values(r.keyChains?.[au.chain] || {}).map((k) => k.str).filter(Boolean) : [];
+    res.push({ ifn: n, ip: f.ip, prefix: f.prefix, passive: r.eigrp.passive.includes(n) || !!af.passive, bw: ifBw(n, f), dly: ifDly(n, f), authMode: au?.mode || null, keys, sh: f.eigrpNoSH !== true && af.noSH !== true, nhSelf: f.eigrpNoNhs !== true && af.noNhs !== true, summaries: af.summaries || f.eigrpSummaries || [] });
   }
   return res;
 }
@@ -946,11 +1084,12 @@ export function eigrpAll(ctx) {
   if (ctx.eigrp) return ctx.eigrp;
   const net = ctx.net;
   const rs = Object.values(net.devices).filter((d) => isL3(d) && d.eigrp);
-  const en = {}, adj = {}, routes = {};
-  ctx.eigrp = { en, adj, routes };
+  const en = {}, adj = {}, routes = {}, issues = {};
+  ctx.eigrp = { en, adj, routes, issues };
   for (const r of rs) en[r.id] = eigrpIfaces(ctx, r.id);
   for (const r of rs) {
     adj[r.id] = [];
+    issues[r.id] = [];
     for (const e of en[r.id]) {
       if (e.passive) continue;
       for (const t of flood(net, { dev: r.id, ifn: e.ifn }).values()) {
@@ -959,7 +1098,9 @@ export function eigrpAll(ctx) {
         const e2 = (en[s.id] || []).find((x) => x.ifn === t.ifn);
         if (!e2 || e2.passive) continue;
         if (netOf(e.ip, e.prefix) !== netOf(e2.ip, e2.prefix)) continue;
-        adj[r.id].push({ to: s.id, nh: e2.ip, outIf: e.ifn, bw: e.bw, dly: e.dly });
+        if ((r.eigrp.k || '') !== (s.eigrp.k || '')) { issues[r.id].push(`${longIf(e.ifn)}: K-value lệch với ${s.name}`); continue; }
+        if (e.authMode !== e2.authMode || (e.authMode && !e.keys.some((k) => e2.keys.includes(k)))) { issues[r.id].push(`${longIf(e.ifn)}: xác thực EIGRP lệch với ${s.name}`); continue; }
+        adj[r.id].push({ to: s.id, nh: e2.ip, outIf: e.ifn, theirIf: t.ifn, bw: e.bw, dly: e.dly });
       }
     }
   }
@@ -969,33 +1110,72 @@ export function eigrpAll(ctx) {
   const comp = eigrpComp;
   ctx.eigrp.paths = {};
   for (const r of rs) {
-    const st = { [r.id]: { bw: Infinity, dly: 0, m: 0 } }, first = {}, done = new Set();
+    const st = { [r.id]: { bw: Infinity, dly: 0, m: 0 } }, first = {}, done = new Set(), arr = {};
     ctx.eigrp.paths[r.id] = { st, first };
     for (;;) {
       let u = null;
       for (const k of Object.keys(st)) if (!done.has(k) && (u === null || st[k].m < st[u].m)) u = k;
       if (u === null) break;
       done.add(u);
+      if (u !== r.id && net.devices[u].eigrp.stub) continue; // router stub không làm đường trung chuyển
       for (const a of adj[u] || []) {
+        // hub DMVPN: split horizon chặn route spoke này gửi sang spoke khác trên cùng cổng mGRE
+        const same = u !== r.id && arr[u] === a.outIf, hubIf = same && a.outIf.startsWith('tu') ? en[u].find((e) => e.ifn === a.outIf) : null;
+        if (hubIf?.sh) continue;
         const bw = Math.min(st[u].bw, a.bw), dly = st[u].dly + a.dly, m = comp(bw, dly);
-        if (!st[a.to] || m < st[a.to].m) { st[a.to] = { bw, dly, m }; first[a.to] = u === r.id ? { nh: a.nh, outIf: a.outIf } : first[u]; }
+        if (!st[a.to] || m < st[a.to].m) { st[a.to] = { bw, dly, m }; arr[a.to] = a.theirIf; first[a.to] = u === r.id ? { nh: a.nh, outIf: a.outIf } : hubIf && !hubIf.nhSelf ? { nh: a.nh, outIf: first[u].outIf } : first[u]; }
       }
     }
     const myNets = new Set(Object.entries(l3ifs(r)).filter(([n, f]) => f.ip && ifUp(net, r.id, n)).map(([, f]) => netOf(f.ip, f.prefix) + '/' + f.prefix));
     const best = new Map();
     for (const s of rs) {
       if (s.id === r.id || !st[s.id]) continue;
+      if (s.eigrp.stub && !s.eigrp.stub.includes('connected')) continue;
       for (const e of en[s.id]) {
         const k = netOf(e.ip, e.prefix) + '/' + e.prefix;
         if (myNets.has(k)) continue;
-        const m = comp(Math.min(st[s.id].bw, e.bw), st[s.id].dly + e.dly);
+        const rbw = Math.min(st[s.id].bw, e.bw), rdly = st[s.id].dly + e.dly, m = comp(rbw, rdly);
         const cur = best.get(k);
-        if (!cur || m < cur.metric) best.set(k, { code: 'D', net: netOf(e.ip, e.prefix), prefix: e.prefix, ad: 90, metric: m, nextHop: first[s.id].nh, iface: first[s.id].outIf });
+        if (!cur || m < cur.metric) best.set(k, { code: 'D', net: netOf(e.ip, e.prefix), prefix: e.prefix, ad: 90, metric: m, nextHop: first[s.id].nh, iface: first[s.id].outIf, origin: s.id, rbw, rdly });
       }
     }
     routes[r.id] = [...best.values()];
   }
+  // summary trên cổng: láng giềng phía sau cổng đó chỉ nhận route tóm tắt, router tóm tắt có route Null0 chống lặp
+  for (const s of rs) {
+    for (const e of en[s.id]) {
+      for (const g of e.summaries) {
+        for (const r of rs) {
+          if (r.id === s.id || ctx.eigrp.paths[s.id].first[r.id]?.outIf !== e.ifn) continue;
+          const P = ctx.eigrp.paths, kids = routes[r.id].filter((x) => x.prefix > g.prefix && netOf(x.net, g.prefix) === g.net && (x.origin === s.id || (P[s.id].st[x.origin] && P[r.id].st[s.id] && P[r.id].st[s.id].dly + P[s.id].st[x.origin].dly === P[r.id].st[x.origin]?.dly)));
+          if (!kids.length) continue;
+          const low = kids.reduce((a, b) => (b.metric < a.metric ? b : a));
+          routes[r.id] = routes[r.id].filter((x) => !kids.includes(x));
+          routes[r.id].push({ ...low, net: g.net, prefix: g.prefix });
+        }
+        if (routes[s.id].some((x) => x.prefix > g.prefix && netOf(x.net, g.prefix) === g.net) || en[s.id].some((x) => x.prefix > g.prefix && netOf(x.ip, g.prefix) === g.net)) routes[s.id].push({ code: 'D', net: g.net, prefix: g.prefix, ad: 5, metric: 0, iface: 'null0', discard: true });
+      }
+    }
+  }
+  for (const r of rs) for (const rt of routes[r.id]) if (!rt.discard) rt.alts = eigrpPaths(ctx, r, rt).filter((p) => p.inRib && p.nh !== rt.nextHop);
   return ctx.eigrp;
+}
+/** Bảng topology EIGRP của một route: mọi láng giềng quảng bá nó, kèm RD, FD, successor, feasible successor. */
+export function eigrpPaths(ctx, r, rt) {
+  const E = ctx.eigrp, out = [];
+  for (const a of E.adj[r.id] || []) {
+    const n = ctx.net.devices[a.to], k = rt.net + '/' + rt.prefix;
+    const own = !n.eigrp.stub || n.eigrp.stub.includes('connected') ? E.en[a.to].find((e) => netOf(e.ip, e.prefix) + '/' + e.prefix === k) : null;
+    const got = !own && !n.eigrp.stub ? E.routes[a.to]?.find((x) => x.net + '/' + x.prefix === k && !x.discard) : null;
+    if (!own && !got) continue;
+    if (got && got.iface === a.theirIf && E.en[a.to].find((e) => e.ifn === a.theirIf)?.sh !== false) continue; // split horizon
+    if (got?.origin === r.id) continue;
+    const rbw = own ? own.bw : got.rbw, rdly = own ? own.dly : got.rdly;
+    out.push({ nh: a.nh, outIf: a.outIf, rd: eigrpComp(rbw, rdly), m: eigrpComp(Math.min(a.bw, rbw), a.dly + rdly) });
+  }
+  const fd = Math.min(rt.metric, ...out.map((p) => p.m)), v = r.eigrp.variance || 1;
+  for (const p of out) { p.fd = fd; p.succ = p.m === fd; p.fs = !p.succ && p.rd < fd; p.inRib = p.succ || (p.fs && p.m <= fd * v); }
+  return out.sort((a, b) => a.m - b.m);
 }
 function eigrpComp(bw, dly) { return 256 * (Math.floor(1e7 / bw) + dly); }
 /**
@@ -1022,8 +1202,10 @@ export function eigrpExt(ctx) {
         if (r.code === 'L') return;
         const k = r.net + '/' + r.prefix;
         if (own.has(k) || seen.has(k)) return;
+        const set = cfg.routeMap ? rmEval(s, cfg.routeMap, r, ctx.record) : {};
+        if (!set) return;
         seen.add(k);
-        list.push({ net: r.net, prefix: r.prefix, bw: seed[0], dly: seed[1] });
+        list.push({ net: r.net, prefix: r.prefix, bw: seed[0], dly: seed[1], tag: set.tag ?? cfg.tag ?? r.tag });
       };
       const base = baseRoutes(ctx, s.id);
       if (src === 'connected') base.filter((r) => r.code === 'C').forEach(take);
@@ -1043,12 +1225,13 @@ export function eigrpExt(ctx) {
     const best = new Map();
     for (const s of rs) {
       if (s.id === r.id || !st[s.id] || s.eigrp.as !== r.eigrp.as) continue;
+      if (s.eigrp.stub && !s.eigrp.stub.includes('redistributed')) continue;
       for (const e of ext[s.id]) {
         const k = e.net + '/' + e.prefix;
         if (have.has(k)) continue;
         const m = eigrpComp(Math.min(st[s.id].bw, e.bw), st[s.id].dly + e.dly);
         const cur = best.get(k);
-        if (!cur || m < cur.metric) best.set(k, { code: 'D EX', net: e.net, prefix: e.prefix, ad: 170, metric: m, nextHop: first[s.id].nh, iface: first[s.id].outIf });
+        if (!cur || m < cur.metric) best.set(k, { code: 'D EX', net: e.net, prefix: e.prefix, ad: 170, metric: m, nextHop: first[s.id].nh, iface: first[s.id].outIf, tag: e.tag });
       }
     }
     res[r.id] = [...best.values()];
@@ -1057,6 +1240,8 @@ export function eigrpExt(ctx) {
 }
 
 // ---------- BGP ----------
+/** Cấu hình hiệu lực của một neighbor: peer-group rồi tới lệnh riêng của neighbor. */
+export const bgpCfg = (r, ip) => { const n = r.bgp?.neighbors?.[ip]; return n && { ...(n.group ? r.bgp.groups?.[n.group] : null), ...n }; };
 /**
  * BGP (path-vector): phiên eBGP cần neighbor nối TRỰC TIẾP (TTL 1), iBGP chỉ cần IGP tới được.
  * "network" chỉ quảng bá khi prefix có ĐÚNG trong bảng định tuyến; chống lặp bằng AS-path;
@@ -1070,7 +1255,7 @@ export function bgpAll(ctx) {
   const rs = Object.values(net.devices).filter((d) => d.type === 'router' && d.bgp);
   const sessions = {}, tables = {}, routes = {}, rid = {};
   const res = (ctx.bgp = { sessions, tables, routes, rid });
-  const igp = (id) => [...baseRoutes(ctx, id), ...(ctx.ospf.intRoutes?.[id] || []), ...(eigrpAll(ctx).routes[id] || [])];
+  const igp = (id) => [...baseRoutes(ctx, id, net.devices[id].bgp?.vrf || null), ...(ctx.ospf.intRoutes?.[id] || []), ...(eigrpAll(ctx).routes[id] || [])];
   const igpLookup = (id, ip) => { let b = null; for (const r of igp(id)) if (inNet(ip, r.net, r.prefix) && (!b || r.prefix > b.prefix)) b = r; return b; };
   for (const r of rs) {
     const ips = Object.entries(r.ifaces).filter(([n, f]) => f.ip && ifUp(net, r.id, n)).map(([, f]) => f.ip);
@@ -1078,7 +1263,8 @@ export function bgpAll(ctx) {
   }
   for (const r of rs) {
     sessions[r.id] = [];
-    for (const [nip, ncfg] of Object.entries(r.bgp.neighbors || {})) {
+    for (const [nip, n0] of Object.entries(r.bgp.neighbors || {})) {
+      const ncfg = bgpCfg(r, nip) || n0;
       const P = rs.find((x) => Object.entries(x.ifaces).some(([n, f]) => f.ip === nip && ifUp(net, x.id, n)));
       const rt = igpLookup(r.id, nip);
       let state = 'Idle';
@@ -1089,9 +1275,10 @@ export function bgpAll(ctx) {
         myIp = us?.ip && ifUp(net, r.id, ncfg.updateSource) ? us.ip : r.ifaces[rt.iface]?.ip;
         state = 'Active';
         if (P && P.bgp.as === ncfg.remoteAs) {
-          const back = P.bgp.neighbors?.[myIp];
+          const back = bgpCfg(P, myIp);
           const ebgp = r.bgp.as !== P.bgp.as;
-          if (back && back.remoteAs === r.bgp.as && (!ebgp || rt.code === 'C') && igpLookup(P.id, myIp)) state = 'Established';
+          // eBGP mặc định TTL 1 nên phải nối trực tiếp; qua loopback cần ebgp-multihop ở cả hai đầu. Lệch mật khẩu MD5 thì TCP không lên.
+          if (back && back.remoteAs === r.bgp.as && !ncfg.shutdown && !back.shutdown && (ncfg.password || '') === (back.password || '') && (!ebgp || rt.code === 'C' || (ncfg.multihop && back.multihop)) && igpLookup(P.id, myIp)) state = 'Established';
         }
       }
       // ⏱ phiên BGP: Active → OpenSent → OpenConfirm → Established
@@ -1104,30 +1291,67 @@ export function bgpAll(ctx) {
   for (const r of rs) {
     local[r.id] = [];
     const tbl = igp(r.id);
-    for (const n of r.bgp.networks || []) if (tbl.some((x) => x.net === n.net && x.prefix === n.prefix && x.code !== 'L')) local[r.id].push({ net: n.net, prefix: n.prefix, asPath: [], nh: '0.0.0.0', local: true, from: null, ebgp: false });
+    for (const n of r.bgp.networks || []) if (tbl.some((x) => x.net === n.net && x.prefix === n.prefix && x.code !== 'L')) local[r.id].push({ net: n.net, prefix: n.prefix, asPath: [], nh: '0.0.0.0', local: true, from: null, ebgp: false, weight: 32768, origin: 'i' });
+    for (const [src, cfg] of Object.entries(r.bgp.redist || {})) {
+      const pre = { connected: 'C', static: 'S', ospf: 'O', eigrp: 'D' }[src];
+      for (const x of tbl) {
+        if (x.code === 'L' || x.code[0] !== pre || x.prefix === 0 || local[r.id].some((l) => l.net === x.net && l.prefix === x.prefix)) continue;
+        const set = cfg.routeMap ? rmEval(r, cfg.routeMap, x, ctx.record) : {};
+        if (set) local[r.id].push({ net: x.net, prefix: x.prefix, asPath: [], nh: '0.0.0.0', local: true, from: null, ebgp: false, weight: 32768, origin: '?', med: set.metric ?? 0, lp: set.localPref, tag: set.tag });
+      }
+    }
   }
-  const pick = (list) => [...list].sort((a, b) => (b.local ? 1 : 0) - (a.local ? 1 : 0) || a.asPath.length - b.asPath.length || (b.ebgp ? 1 : 0) - (a.ebgp ? 1 : 0) || ip2n(a.fromIp || '0.0.0.0') - ip2n(b.fromIp || '0.0.0.0'))[0];
+  const igpM = (id, b) => (b.local ? 0 : igpLookup(id, b.nh)?.metric ?? 1e9);
+  const ORG = { i: 0, e: 1, '?': 2 };
+  // thứ tự chọn đường BGP: weight, local-pref, tự sinh, AS-path, origin, MED, eBGP trước iBGP, IGP tới next-hop, router-id
+  const pick = (list, id) => [...list].sort((a, b) => (b.weight || 0) - (a.weight || 0) || (b.lp ?? 100) - (a.lp ?? 100) || (b.local ? 1 : 0) - (a.local ? 1 : 0) || a.asPath.length - b.asPath.length || ORG[a.origin || 'i'] - ORG[b.origin || 'i'] || (a.med || 0) - (b.med || 0) || (b.ebgp ? 1 : 0) - (a.ebgp ? 1 : 0) || igpM(id, a) - igpM(id, b) || ip2n(a.fromRid || '0.0.0.0') - ip2n(b.fromRid || '0.0.0.0') || ip2n(a.fromIp || '0.0.0.0') - ip2n(b.fromIp || '0.0.0.0'))[0];
+  const within = (b, g) => b.prefix > g.prefix && netOf(b.net, g.prefix) === g.net;
+  const suppressed = (r, b) => (r.bgp.aggregates || []).some((g) => g.summaryOnly && within(b, g));
   let best = {};
   for (const r of rs) { best[r.id] = {}; for (const p of local[r.id]) best[r.id][p.net + '/' + p.prefix] = p; }
   for (let round = 0; round < rs.length + 3; round++) {
     const cand = {};
-    for (const r of rs) { cand[r.id] = {}; for (const p of local[r.id]) (cand[r.id][p.net + '/' + p.prefix] ||= []).push(p); }
+    for (const r of rs) {
+      cand[r.id] = {};
+      for (const p of local[r.id]) (cand[r.id][p.net + '/' + p.prefix] ||= []).push(p);
+      for (const g of r.bgp.aggregates || []) if (Object.values(best[r.id]).some((b) => within(b, g))) (cand[r.id][g.net + '/' + g.prefix] ||= []).push({ net: g.net, prefix: g.prefix, asPath: [], nh: '0.0.0.0', local: true, agg: true, from: null, ebgp: false, weight: 32768, origin: 'i' });
+    }
     for (const r of rs) {
       for (const s of sessions[r.id]) {
         if (s.state !== 'Established') continue;
         const P = net.devices[s.peer];
-        const out = Object.values(best[r.id]).filter((b) => !(b.from === P.id) && !(!s.ebgp && b.ibgp));
+        const rx = sessions[P.id].find((x) => x.peer === r.id && x.state === 'Established');
+        // iBGP không chuyển tiếp route học từ iBGP, trừ route reflector: route từ client đi tới mọi nơi, route từ non-client chỉ tới client
+        const out = Object.values(best[r.id]).filter((b) => b.from !== P.id && !suppressed(r, b) && (s.ebgp || !b.ibgp || b.fromClient || s.cfg.rrClient));
         if (s.cfg.defaultOriginate) out.push({ net: '0.0.0.0', prefix: 0, asPath: [], nh: '0.0.0.0', orig: true });
         for (const b of out) {
-          const asPath = s.ebgp ? [r.bgp.as, ...b.asPath] : b.asPath;
-          if (asPath.includes(P.bgp.as)) continue; // chống lặp AS-path
+          let path0 = b.asPath;
+          if (s.ebgp && s.cfg.removePrivate) path0 = path0.filter((a) => a < 64512 || a > 65534);
           const nh = s.ebgp || b.nh === '0.0.0.0' || s.cfg.nextHopSelf ? s.myIp : b.nh;
-          (cand[P.id][b.net + '/' + b.prefix] ||= []).push({ net: b.net, prefix: b.prefix, asPath, nh, from: r.id, fromIp: s.myIp, ebgp: s.ebgp, ibgp: !s.ebgp });
+          let e = { net: b.net, prefix: b.prefix, asPath: s.ebgp ? [r.bgp.as, ...path0] : path0, nh, from: r.id, fromIp: s.myIp, fromRid: rid[r.id], ebgp: s.ebgp, ibgp: !s.ebgp, origin: b.origin || 'i', med: b.med || 0, lp: s.ebgp ? 100 : b.lp ?? 100, tag: b.tag, originator: s.ebgp ? null : b.originator ?? (b.ibgp ? b.fromRid : rid[r.id]) };
+          if (e.originator && e.originator === rid[P.id]) continue; // route do chính mình phát qua RR quay về
+          const policy = (dev, c0, dir) => {
+            if (c0[`pl${dir}`] && !plEval(dev, c0[`pl${dir}`], e.net, e.prefix)) return false;
+            if (c0[`fl${dir}`] && !asPathOk(dev, c0[`fl${dir}`], e.asPath)) return false;
+            if (!c0[`rm${dir}`]) return true;
+            const st = rmEval(dev, c0[`rm${dir}`], { ...e, metric: e.med }, false);
+            if (!st) return false;
+            e = { ...e, lp: st.localPref ?? e.lp, med: st.metric ?? e.med, weight: st.weight ?? e.weight, tag: st.tag ?? e.tag, asPath: st.prepend ? [...st.prepend, ...e.asPath] : e.asPath };
+            return true;
+          };
+          if (!policy(r, s.cfg, 'Out')) continue;
+          if (e.asPath.includes(P.bgp.as)) continue; // chống lặp AS-path
+          if (rx) {
+            e.weight = rx.cfg.weight ?? 0;
+            if (!policy(P, rx.cfg, 'In')) continue;
+            if (rx.cfg.rrClient) e.fromClient = true;
+          }
+          (cand[P.id][b.net + '/' + b.prefix] ||= []).push(e);
         }
       }
     }
     const nb = {};
-    for (const r of rs) { nb[r.id] = {}; for (const [k, l] of Object.entries(cand[r.id])) nb[r.id][k] = pick(l); }
+    for (const r of rs) { nb[r.id] = {}; for (const [k, l] of Object.entries(cand[r.id])) nb[r.id][k] = pick(l, r.id); }
     const same = JSON.stringify(nb) === JSON.stringify(best);
     best = nb;
     Object.assign(tables, Object.fromEntries(rs.map((r) => [r.id, cand[r.id]])));
@@ -1137,10 +1361,11 @@ export function bgpAll(ctx) {
     tables[r.id] ||= {};
     routes[r.id] = [];
     for (const b of Object.values(best[r.id])) {
+      if (b.agg) routes[r.id].push({ code: 'B', net: b.net, prefix: b.prefix, ad: 200, metric: 0, iface: 'null0', discard: true });
       if (b.local) continue;
       const via = igpLookup(r.id, b.nh);
       if (!via) continue; // next-hop không tới được → route không vào RIB
-      routes[r.id].push({ code: 'B', net: b.net, prefix: b.prefix, ad: b.ebgp ? 20 : 200, metric: 0, nextHop: b.nh, iface: via.iface, asPath: b.asPath });
+      routes[r.id].push({ code: 'B', net: b.net, prefix: b.prefix, ad: b.ebgp ? 20 : 200, metric: b.med || 0, nextHop: b.nh, fwdNh: via.nextHop, iface: via.iface, asPath: b.asPath, tag: b.tag });
     }
   }
   res.best = best;
@@ -1180,7 +1405,7 @@ export function aclEval(dev, name, pkt, record) {
   const acl = dev.acls?.[name];
   if (!acl) return { action: 'permit', missing: true }; // IOS: ACL chưa định nghĩa = permit all
   for (const e of acl.entries) {
-    if (e.remark != null) continue;
+    if (e.remark != null || (e.timeRange && !timeActive(dev, e.timeRange))) continue;
     if (aceMatch(acl.type, e, pkt)) {
       if (record) e.matches = (e.matches || 0) + 1;
       return { action: e.action, entry: e };
@@ -1193,7 +1418,7 @@ function portText(p) { return !p ? '' : p.op === 'range' ? ` range ${p.port} ${p
 export function aceText(type, e) {
   if (e.remark != null) return `remark ${e.remark}`;
   if (type === 'standard') return `${e.action} ${e.src.any ? 'any' : e.src.wild === '0.0.0.0' ? e.src.ip : `${e.src.ip}, wildcard bits ${e.src.wild}`}`;
-  return `${e.action} ${e.proto} ${addrText(e.src)}${portText(e.sport)} ${addrText(e.dst)}${portText(e.dport)}${e.icmpType ? ' ' + e.icmpType : ''}${e.established ? ' established' : ''}${e.log ? ' log' : ''}`;
+  return `${e.action} ${e.proto} ${addrText(e.src)}${portText(e.sport)} ${addrText(e.dst)}${portText(e.dport)}${e.icmpType ? ' ' + e.icmpType : ''}${e.established ? ' established' : ''}${e.timeRange ? ' time-range ' + e.timeRange : ''}${e.log ? ' log' : ''}`;
 }
 
 export function poolAddrs(p) {
@@ -1372,10 +1597,10 @@ function routeRows(ctx, rid, hl) {
   };
 }
 /** Thiết bị L3 có sở hữu IP này không (kể cả VIP HSRP/VRRP đang active). */
-function ownsIp(net, d, ip) {
+function ownsIp(net, d, ip, vrf) {
   if (d.type === 'pc' || d.type === 'server') return d.ip === ip;
   for (const [n, f] of Object.entries(l3ifs(d))) {
-    if (!ifUp(net, d.id, n)) continue;
+    if ((vrf !== undefined && (f.vrf || null) !== vrf) || !ifUp(net, d.id, n)) continue;
     if (f.ip === ip) return true;
     for (const s of [...Object.values(f.standby || {}), ...Object.values(f.vrrp || {})]) {
       if (s.ip === ip && hsrpView(net, d.id, n).some((a) => a.vip === ip && a.ep.dev === d.id && a.ep.ifn === n)) return true;
@@ -1551,6 +1776,7 @@ function walk(ctx, R, pkt, start, opts = {}) {
     } else {
       const IF = l3ifs(d);
       const inIf = node.origin ? null : node.ifn;
+      const vrf = inIf ? IF[inIf]?.vrf || null : pkt.vrf || null;
       let changed = [];
       if (inIf) {
         const fi = IF[inIf];
@@ -1571,17 +1797,47 @@ function walk(ctx, R, pkt, start, opts = {}) {
           if (t) { changed = ['ip.dst', 'ip.checksum']; R.proc(node.dev, { l: 3, side: 'forward', title: `${d.name} NAT: đích ${before} → ${pkt.dst}`, ex: `Gói vào cổng "ip nat outside" mang địa chỉ inside global ${before}; tra bảng NAT${t.stat ? ' (NAT tĩnh)' : ''} → đổi về inside local ${pkt.dst} rồi mới định tuyến.`, tables: natRows(ctx, d) }); }
         }
         if (aclAfterNat) { const x = aclIn(); if (x) return x; }
-        if (ownsIp(net, d, pkt.dst)) return { ok: true, at: { dev: node.dev, ifn: inIf }, hops };
+        if (fi.qosIn) {
+          const q = qosEval(d, fi.qosIn, pkt, ctx.record);
+          if (q?.drop) return fail(node.dev, 'qos', `${d.name}: policy-map ${fi.qosIn} (chiều IN trên ${longIf(inIf)}) có class ${q.cls} với hành động drop.`, '.');
+          if (q?.dscp) pkt.dscp = q.dscp;
+        }
+        // uRPF: route ngược về IP nguồn phải tồn tại (loose) và đi đúng cổng vừa nhận (strict)
+        if (fi.urpf) {
+          const b = lookup(ctx, node.dev, pkt.src, vrf);
+          if (!b || b.discard || (b.prefix === 0 && !fi.urpf.allowDefault) || (fi.urpf.mode === 'rx' && b.iface !== inIf)) {
+            if (ctx.record) fi.urpfDrops = (fi.urpfDrops || 0) + 1;
+            return fail(node.dev, 'urpf', `${d.name}: uRPF ${fi.urpf.mode} trên ${longIf(inIf)} bỏ gói nguồn ${pkt.src}: ${!b ? 'không có route về nguồn' : `route về nguồn đi ra ${longIf(b.iface)}, không phải cổng nhận`}.`, '.');
+          }
+        }
+        if (ctx.record) flowCount(d, pkt, inIf, 'in');
+        if (ownsIp(net, d, pkt.dst, vrf)) {
+          // CoPP: lưu lượng gửi cho chính router đi qua policy trên control-plane
+          const q = d.copp?.input ? qosEval(d, d.copp.input, pkt, ctx.record) : null;
+          if (q?.drop || (q?.police != null && q.police < 8000)) return fail(node.dev, 'copp', `${d.name}: CoPP (control-plane) class ${q.cls} ${q.drop ? 'drop' : `police ${q.police} bps`} bỏ gói gửi cho router.`, '.');
+          return { ok: true, at: { dev: node.dev, ifn: inIf }, hops };
+        }
         pkt.ttl -= 1;
         hops.push({ dev: node.dev, ip: fi.ip });
         if (pkt.ttl <= 0) return fail(node.dev, 'ttl', `${d.name}: TTL về 0 → hủy gói (ICMP Time Exceeded). Có thể có vòng lặp định tuyến.`, '.');
-      } else if (ownsIp(net, d, pkt.dst)) {
+      } else if (ownsIp(net, d, pkt.dst, vrf)) {
         return { ok: true, at: { dev: node.dev, ifn: null }, hops };
       }
-      const rt = lookup(ctx, node.dev, pkt.dst);
+      // PBR: gói vào cổng có "ip policy route-map" khớp match thì đi theo set ip next-hop (next-hop phải nối trực tiếp)
+      let rt = null;
+      if (inIf && IF[inIf].policy) {
+        const st = rmPacket(d, IF[inIf].policy, pkt, ctx.record);
+        const conn = st?.nextHop ? lookup(ctx, node.dev, st.nextHop, vrf) : null;
+        if (conn?.code === 'C') {
+          rt = { code: 'PBR', net: pkt.dst, prefix: 32, nextHop: st.nextHop, iface: conn.iface };
+          R.proc(node.dev, { l: 3, side: 'forward', title: `${d.name} PBR: route-map ${IF[inIf].policy} → next-hop ${st.nextHop}`, ex: 'Policy-based routing quyết định trước bảng định tuyến, dựa trên nguồn hoặc cổng trong ACL.' });
+        }
+      }
+      rt ||= lookup(ctx, node.dev, pkt.dst, vrf);
+      if (rt?.discard) return fail(node.dev, 'null0', `${d.name}: ${pkt.dst} khớp route ${rt.net}/${rt.prefix} trỏ về Null0 (route tóm tắt chống lặp) → hủy gói.`, 'U');
       if (!rt) return fail(node.dev, 'noroute', `${d.name}: KHÔNG có route nào khớp ${pkt.dst} (kể cả default route) → hủy gói, báo ICMP Destination Unreachable.`, 'U', inIf ? IF[inIf].ip : null);
       const outIf = rt.iface;
-      nh = rt.nextHop || pkt.dst;
+      nh = rt.fwdNh || rt.nextHop || pkt.dst; // BGP: next-hop xa đã phân giải đệ quy qua IGP
       if (!pkt.src) pkt.src = IF[outIf].ip;
       R.proc(node.dev, { l: 3, side: 'forward', changed, title: `${d.name} tra bảng định tuyến: ${pkt.dst} → ${rt.code} ${rt.net}/${rt.prefix}`, ex: `Longest-prefix match chọn ${rt.code} ${rt.net}/${rt.prefix}${rt.nextHop ? ` via ${rt.nextHop}` : ' (mạng nối trực tiếp)'} ra ${longIf(outIf)}.${inIf ? ` TTL ${pkt.ttl + 1}→${pkt.ttl}, tính lại checksum IP.` : ''}`, tables: routeRows(ctx, node.dev, rt) });
       // Firewall stateful (ASA / ZBF / rule base): xét trên địa chỉ THẬT, trước NAT chiều ra
@@ -1605,21 +1861,37 @@ function walk(ctx, R, pkt, start, opts = {}) {
         else R.proc(node.dev, { l: 3, side: 'forward', title: `${d.name}: KHÔNG NAT cho ${before}`, ex: `Gói đi inside → outside nhưng ${before} không khớp quy tắc NAT nào (ACL của "ip nat inside source list" không permit dải này) → đi ra với IP gốc.` });
       }
       const fo = IF[outIf];
+      if (ctx.record) flowCount(d, pkt, outIf, 'out');
+      if (fo.qosOut) {
+        const q = qosEval(d, fo.qosOut, pkt, ctx.record);
+        if (q?.drop) return fail(node.dev, 'qos', `${d.name}: policy-map ${fo.qosOut} (chiều OUT trên ${longIf(outIf)}) có class ${q.cls} với hành động drop.`, '.');
+        if (q?.dscp) pkt.dscp = q.dscp;
+      }
       if (fo.aclOut && !(d.fw && fwEstablished(ctx, d, pkt))) {
         const a = aclEval(d, fo.aclOut, pkt, ctx.record);
         if (a.action === 'deny') return fail(node.dev, 'acl', `${d.name}: ACL "${fo.aclOut}" (chiều OUT trên ${longIf(outIf)}) chặn gói — ${a.implicit ? 'không khớp dòng permit nào → "deny any" NGẦM ĐỊNH' : 'khớp dòng: ' + aceText(d.acls[fo.aclOut].type, a.entry)}.`, 'U', inIf ? IF[inIf].ip : fo.ip);
       }
       // GRE: ra cổng tunnel → bọc gói gốc trong IP/GRE (proto 47) gửi qua underlay tới đầu kia
       if (d.type === 'router' && outIf.startsWith('tu')) {
-        const peer = tunnelPeer(net, d, outIf);
-        if (!peer) return fail(node.dev, 'tunnel', `${d.name}: ${longIf(outIf)} không có đầu kia khớp (tunnel source/destination 2 bên phải đối xứng) hoặc underlay không tới được ${fo.tunDst}.`, '.');
-        const tsrc = tunnelSrcIp(d, fo);
-        R.proc(node.dev, { l: 3, side: 'encap', title: `${d.name}: đóng gói GRE → ${fo.tunDst}`, ex: `Gói ${pkt.src} → ${pkt.dst} ra ${longIf(outIf)}: router thêm header GRE + IP mới ${tsrc} → ${fo.tunDst} (protocol 47). Internet chỉ định tuyến theo IP ngoài; gói gốc nằm nguyên bên trong (GRE KHÔNG mã hoá).` });
-        const outer = { src: tsrc, dst: fo.tunDst, proto: 'gre', ttl: 255, ipId: 0x6e6e, inner: `${pkt.src} → ${pkt.dst}` };
+        const mg = fo.tunMode === 'mgre';
+        const peer = mg ? nhrpResolve(net, d, outIf, nh, pkt.dst) : tunnelPeer(net, d, outIf);
+        if (!peer) return fail(node.dev, 'tunnel', mg ? `${d.name}: NHRP không phân giải được ${nh} ra địa chỉ NBMA trên ${longIf(outIf)} (kiểm tra ip nhrp nhs, map, network-id).` : `${d.name}: ${longIf(outIf)} không có đầu kia khớp (tunnel source/destination 2 bên phải đối xứng) hoặc underlay không tới được ${fo.tunDst}.`, '.');
+        const tsrc = tunnelSrcIp(d, fo), tdst = mg ? peer.nbma : fo.tunDst;
+        // DMVPN pha 3: hub thấy gói vào và ra cùng cổng mGRE thì gửi NHRP redirect, spoke có shortcut lưu đường đi thẳng
+        if (mg && inIf === outIf && fo.nhrp?.redirect && ctx.record && node.tunFrom) {
+          const sp = net.devices[node.tunFrom];
+          if (sp.ifaces[node.tunFromIf]?.nhrp?.shortcut && peer.dev !== sp.id) {
+            sp.nhrpCache = (sp.nhrpCache || []).filter((e) => !(e.net === rt.net && e.prefix === rt.prefix));
+            sp.nhrpCache.push({ ifn: node.tunFromIf, net: rt.net, prefix: rt.prefix, peer: peer.dev, peerIf: peer.ifn, nbma: peer.nbma, ip: peer.ip });
+            R.proc(node.dev, { l: 3, side: 'forward', title: `${d.name}: NHRP redirect tới ${sp.name}`, ex: `Gói vào và ra cùng ${longIf(outIf)}. Hub báo cho ${sp.name} rằng ${rt.net}/${rt.prefix} nằm sau ${peer.nbma}, các gói sau sẽ đi thẳng.` });
+          }
+        }
+        R.proc(node.dev, { l: 3, side: 'encap', title: `${d.name}: đóng gói GRE → ${tdst}`, ex: `Gói ${pkt.src} → ${pkt.dst} ra ${longIf(outIf)}: router thêm header GRE + IP mới ${tsrc} → ${fo.tunDst} (protocol 47). Internet chỉ định tuyến theo IP ngoài; gói gốc nằm nguyên bên trong (GRE KHÔNG mã hoá).` });
+        const outer = { src: tsrc, dst: tdst, proto: fo.tunProtect ? 'esp' : 'gre', ttl: 255, ipId: 0x6e6e, inner: `${pkt.src} → ${pkt.dst}` };
         const tun = walk(ctx, R, outer, { dev: node.dev, ifn: null, origin: true }, opts);
         if (!tun.ok) return { ok: false, fail: { ...tun.fail, why: '(GRE underlay) ' + tun.fail.why }, hops };
         R.proc(peer.dev, { l: 3, side: 'decap', title: `${net.devices[peer.dev].name}: gỡ GRE → gói gốc ${pkt.src} → ${pkt.dst}`, ex: `Gói tới ${longIf(peer.ifn)} của đầu kia, bỏ header ngoài và định tuyến tiếp gói gốc.` });
-        node = { dev: peer.dev, ifn: peer.ifn };
+        node = { dev: peer.dev, ifn: peer.ifn, tunFrom: node.dev, tunFromIf: outIf };
         continue;
       }
       // IPsec: gói "interesting" ra cổng có crypto map → mã hoá ESP, đi qua Internet tới peer
@@ -1666,6 +1938,7 @@ export function portOpen(d, port) {
   if (port === 22) return (tr === 'all' || tr.includes('ssh')) && sshReady(d);
   if (port === 80) return !!d.httpServer;
   if (port === 443) return !!d.httpsServer;
+  if (port === 830) return !!d.netconf;
   return false;
 }
 export function sshReady(d) {
@@ -1705,8 +1978,25 @@ function debugPackets(net, pkts) {
   for (const p of pkts) {
     const ip = p.layers.find((l) => l.proto === 'ipv4')?.fields;
     if (!ip) continue;
-    for (const [id, act] of [[p.from, 'sending'], [p.to, 'rcvd 3']]) if (net.devices[id]?.debug?.ipPacket) logPush(net, id, `IP: s=${ip.src}, d=${ip.dst}, len ${Math.max(0, p.len - 14)}, ${act}`, true);
+    for (const [id, act] of [[p.from, 'sending'], [p.to, 'rcvd 3']]) if (net.devices[id]?.debug?.ipPacket && debugCond(net, id, ip, p)) logPush(net, id, `IP: s=${ip.src}, d=${ip.dst}, len ${Math.max(0, p.len - 14)}, ${act}`, true);
   }
+}
+/** debug condition: chỉ in gói khớp IP hoặc đi qua cổng đã khai. */
+function debugCond(net, id, ip, p) {
+  const c = net.devices[id].debug.cond;
+  if (!c) return true;
+  if (c.ip && ip.src !== c.ip && ip.dst !== c.ip) return false;
+  if (c.ifn) { const l = net.links.find((x) => x.id === p.link); if (!l || (l.a === id ? l.ap : l.b === id ? l.bp : null) !== c.ifn) return false; }
+  return true;
+}
+/** NetFlow: gom gói theo 5-tuple trên cổng bật "ip flow" hoặc "ip flow monitor". */
+function flowCount(d, pkt, ifn, dir) {
+  const f = l3ifs(d)[ifn];
+  if (!f?.flow?.[dir]) return;
+  const k = [pkt.src, pkt.dst, pkt.proto, pkt.sport ?? 0, pkt.dport ?? 0, ifn, dir].join('|');
+  const c = (d.flowCache ||= {});
+  const n = pkt.proto === 'icmp' ? 5 : 1;
+  (c[k] ||= { src: pkt.src, dst: pkt.dst, proto: pkt.proto, sport: pkt.proto === 'icmp' ? 0 : pkt.sport, dport: pkt.proto === 'icmp' ? 0 : pkt.dport, ifn, dir, pkts: 0, monitor: f.flow[dir] }).pkts += n;
 }
 function sendPacketInner(net, o) {
   const ctx = makeCtx(net, !!o.record);
@@ -1719,7 +2009,7 @@ function sendPacketInner(net, o) {
   const id0 = o.icmpId || (isHost ? 1 : 0x7a69);
   // TTL gốc: máy kiểu Windows / Packet Tracer 128, VPCS (EVE-NG/GNS3) 64, router/switch Cisco 255
   const hostTtl = (d) => (d.shell ? 64 : 128);
-  const pkt = { src: null, dst: o.dst, proto, ttl: isHost ? hostTtl(srcDev) : 255, ipId: 0x1a2b, icmpId: id0, seq: 1, reply: false, sport: 49152 + (id0 % 16384), dport: o.dport, flags: { syn: true }, tseq: 1000, tack: 0 };
+  const pkt = { src: o.srcIp || null, dst: o.dst, proto, ttl: isHost ? hostTtl(srcDev) : 255, ipId: 0x1a2b, icmpId: id0, seq: 1, reply: false, vrf: o.vrf || null, sport: 49152 + (id0 % 16384), dport: o.dport, flags: { syn: true }, tseq: 1000, tack: 0 };
   const wopts = { noCrypto: !!o.noCrypto };
   const done = (r) => {
     if (o.record) { persistNat(net, ctx); persistFw(net, ctx); }
@@ -1736,7 +2026,8 @@ function sendPacketInner(net, o) {
     return done({ ok: false, kind: 'timeout', fail: { dev: dd.id, kind: 'hostfw', why, code: '.' }, hops: fwd.hops });
   }
   let open = true;
-  const reply = { ...pkt, dst0: undefined, src: pkt.dst, dst: pkt.src, reply: true, ttl: dd.type === 'router' || dd.type === 'switch' ? 255 : hostTtl(dd), ipId: 0x3c4d };
+  const replyVrf = isL3(dd) && fwd.at.ifn ? l3ifs(dd)[fwd.at.ifn]?.vrf || null : pkt.vrf;
+  const reply = { ...pkt, vrf: replyVrf, dst0: undefined, src: pkt.dst, dst: pkt.src, reply: true, ttl: dd.type === 'router' || dd.type === 'switch' ? 255 : hostTtl(dd), ipId: 0x3c4d };
   if (proto === 'tcp') {
     open = portOpen(dd, pkt.dport);
     // access-class trên VTY: chỉ cho phép nguồn nằm trong ACL quản trị

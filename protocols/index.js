@@ -25,6 +25,7 @@ import mstp from './mstp.js';
 import dhcpv6 from './dhcpv6.js';
 import mpls from './mpls.js';
 import vxlan from './vxlan.js';
+import { igmp, pim, gre, nhrp, lisp, bfd, ldp, esp } from './np.js';
 
 export const PROTOCOLS = {
   ethernet,
@@ -50,6 +51,14 @@ export const PROTOCOLS = {
   dhcpv6,
   mpls,
   vxlan,
+  igmp,
+  pim,
+  gre,
+  nhrp,
+  lisp,
+  bfd,
+  ldp,
+  esp,
 };
 
 export function getProtocol(id) {

@@ -87,13 +87,92 @@ export const ROADMAP = [
     ],
   },
   {
+    id: 'encor', name: 'CCNP ENCOR 350-401 v1.2 (không tính tiến độ CCNA)', weight: 0, optional: true,
+    topics: [
+      { ref: '1.1', title: 'Thiết kế mạng doanh nghiệp, HA, FHRP, SSO', lessons: [], sc: [], core: [], more: [], notes: [
+        'Ba lớp access, distribution, core để mở rộng; collapsed core gộp hai lớp trên cho site nhỏ. Leaf-spine dùng cho trung tâm dữ liệu: mọi leaf cách nhau đúng hai chặng.',
+        'On-premises chủ động về dữ liệu nhưng tự gánh phần cứng. Cloud trả theo mức dùng, co giãn nhanh nhưng phụ thuộc đường truyền. Hybrid là phổ biến nhất.',
+        'Sẵn sàng cao trên switch: StackWise gộp nhiều switch thành một, SSO giữ trạng thái khi supervisor chuyển đổi, NSF giữ chuyển tiếp trong lúc control plane khởi động lại.',
+      ] },
+      { ref: '1.2', title: 'SD-WAN: vBond, vSmart, vManage, OMP', lessons: [], sc: ['s37'], core: [], more: [] },
+      { ref: '1.3', title: 'SD-Access: fabric, LISP, VXLAN, SGT', lessons: [], sc: ['s36'], core: [], more: [] },
+      { ref: '1.4, 3.3', title: 'QoS, NTP, NAT, FHRP', lessons: [], sc: [], core: [], more: ['E11'] },
+      { ref: '2.1', title: 'Ảo hoá thiết bị: VM, switch ảo, container', lessons: [], sc: [], core: [], more: [], notes: [
+        'Hypervisor type 1 chạy trực tiếp trên phần cứng (ESXi, KVM, Hyper-V), type 2 chạy trên một hệ điều hành khác (VirtualBox).',
+        'Switch ảo (vSwitch, OVS) nối VM trong cùng máy, hoạt động giống switch L2 và có thể chạy VLAN, trunk tới switch thật.',
+        'Container dùng chung kernel, nhẹ và khởi động nhanh hơn VM. Trên Catalyst có thể chạy ứng dụng container qua IOx.',
+      ] },
+      { ref: '2.3', title: 'LISP và VXLAN', lessons: [], sc: ['s35', 's30'], core: [], more: [] },
+      { ref: '2.2', title: 'VRF, GRE, IPsec', lessons: [], sc: [], core: [], more: ['E01'] },
+      { ref: '3.1', title: 'RSTP, MST, Root Guard, BPDU Guard', lessons: [], sc: [], core: [], more: ['E03'] },
+      { ref: '3.2', title: 'OSPF nhiều vùng, tóm tắt, lọc; so với EIGRP', lessons: [], sc: [], core: [], more: ['E02'], notes: [
+        'EIGRP là distance vector nâng cao: tính bằng DUAL, có đường dự phòng feasible successor nên hội tụ ngay, cân bằng tải không đều bằng variance.',
+        'OSPF là link-state: mọi router trong vùng có cùng bản đồ và chạy SPF, cân bằng tải chỉ khi chi phí bằng nhau, chia vùng để giới hạn phạm vi cập nhật.',
+      ] },
+      { ref: '3.3', title: 'Multicast: RPF, PIM SM, IGMP, SSM, BIDIR, MSDP', lessons: [], sc: ['s33'], core: [], more: [] },
+      { ref: '3.3', title: 'PTP', lessons: [], sc: [], core: [], more: [], notes: [
+        'PTP (IEEE 1588) đồng bộ tới mức dưới micro giây nhờ phần cứng đóng dấu thời gian. NTP thường chỉ đạt mức mili giây.',
+        'Grandmaster là nguồn gốc. Boundary clock nhận thời gian rồi phát lại ở từng chặng, transparent clock ghi thêm thời gian gói nằm trong switch.',
+      ] },
+      { ref: '4.2, 4.3, 4.4', title: 'NetFlow, SPAN, IP SLA', lessons: [], sc: [], core: [], more: ['E04', 'E05', 'E06'] },
+      { ref: '4.5', title: 'Catalyst Center: quản lý, assurance, AI', lessons: [], sc: [], core: [], more: [], notes: [
+        'Khác cách quản lý truyền thống: thiết kế và chính sách đặt tập trung, thiết bị nhận cấu hình tự động thay vì gõ CLI từng máy.',
+        'Workflow gồm Design, Policy, Provision, Assurance. Plug and Play đưa thiết bị mới vào mạng không cần gõ tay.',
+        'Assurance gom telemetry, chấm điểm sức khoẻ thiết bị, máy khách, ứng dụng. AI giúp phát hiện bất thường theo so sánh với mức nền, và gợi ý cách xử lý.',
+      ] },
+      { ref: '4.6, 6.2, 6.3, 6.5', title: 'NETCONF, RESTCONF, YANG, JSON', lessons: [], sc: [], core: [], more: ['E07'], notes: [
+        'YANG là mô hình dữ liệu: mô tả cấu trúc cấu hình và trạng thái. NETCONF (SSH 830, XML) và RESTCONF (HTTPS, JSON hoặc XML) là cách truyền dữ liệu theo mô hình đó.',
+        'NETCONF có các kho running, candidate, startup và thao tác khoá, xác nhận. RESTCONF ánh xạ CRUD sang GET, POST, PUT, PATCH, DELETE.',
+      ] },
+      { ref: '5.3', title: 'Bảo mật REST API', lessons: [], sc: [], core: [], more: [], notes: [
+        'Luôn dùng HTTPS và kiểm tra chứng chỉ. Cờ -k của curl chỉ dùng trong lab.',
+        'Xác thực bằng token có hạn dùng thay vì gửi mật khẩu mỗi lần. Không ghi token vào mã nguồn, dùng biến môi trường hoặc kho bí mật.',
+        'Cấp quyền tối thiểu, giới hạn số yêu cầu, kiểm tra dữ liệu đầu vào và ghi log các lần truy cập.',
+      ] },
+      { ref: '5.4', title: 'Thiết kế bảo mật: TrustSec, MACsec, 802.1X (SGT: xem kịch bản SD-Access)', lessons: [], sc: [], core: [], more: [], notes: [
+        'Threat defense gồm nhiều lớp: NGFW và IPS, phòng chống mã độc, phân tích lưu lượng. Endpoint security bảo vệ từng máy.',
+        'TrustSec gán SGT theo danh tính, thực thi bằng SGACL, truyền nhãn inline hoặc qua SXP. MACsec (802.1AE) mã hoá từng đoạn cáp ở lớp 2, khoá trao đổi bằng MKA.',
+      ] },
+      { ref: '5.1, 5.2', title: 'AAA, CoPP', lessons: [], sc: [], core: [], more: ['E08', 'E09'] },
+      { ref: '6.1, 6.4', title: 'Python và API', lessons: [], sc: [], core: [], more: [], notes: [
+        'Đọc được mã: requests.get(url, auth=(u, p), verify=True), r.json()["items"], vòng for, if, hàm. Thi yêu cầu hiểu kết quả của đoạn mã ngắn, không phải viết chương trình lớn.',
+        'Mã HTTP cần nhớ: 200, 201, 204 thành công; 400 sai yêu cầu; 401 chưa xác thực; 403 không có quyền; 404 không thấy; 500 lỗi phía máy chủ.',
+        'Catalyst Center và SD-WAN Manager đều có REST API: lấy token trước rồi gửi kèm header ở các lần gọi sau.',
+      ] },
+      { ref: '6.6', title: 'EEM', lessons: [], sc: [], core: [], more: ['E10'] },
+    ],
+  },
+  {
+    id: 'enarsi', name: 'CCNP ENARSI 300-410 v1.1 (không tính tiến độ CCNA)', weight: 0, optional: true,
+    topics: [
+      { ref: '1.1–1.6', title: 'AD, route-map, chống lặp, redistribution, tóm tắt, PBR', lessons: [], sc: [], core: [], more: ['R13', 'R01', 'R02'] },
+      { ref: '1.8', title: 'BFD', lessons: [], sc: ['s39'], core: [], more: [] },
+      { ref: '1.9', title: 'EIGRP classic và named, xác thực, stub, variance', lessons: [], sc: [], core: [], more: ['R05', 'R06'] },
+      { ref: '1.10', title: 'OSPF: loại area, virtual link, xác thực', lessons: [], sc: [], core: [], more: ['R03', 'R04'] },
+      { ref: '1.11', title: 'BGP: chọn đường, RR, peer group, multihop', lessons: [], sc: [], core: [], more: ['R07', 'R08'] },
+      { ref: '2.1, 2.2', title: 'MPLS, LDP, L3VPN', lessons: [], sc: ['s29', 's34'], core: [], more: [] },
+      { ref: '2.3', title: 'DMVPN một hub', lessons: [], sc: ['s38'], core: [], more: ['R09'] },
+      { ref: '3.2', title: 'uRPF, ACL theo giờ', lessons: [], sc: [], core: [], more: ['R10'] },
+      { ref: '3.4', title: 'Bảo mật IPv6 lớp truy cập', lessons: [], sc: [], core: [], more: [], notes: [
+        'RA Guard chặn RA giả từ cổng máy trạm. DHCPv6 Guard chặn máy chủ DHCPv6 giả.',
+        'Binding table ghi cặp IPv6, MAC, cổng, nhờ ND Inspection và Source Guard kiểm tra được gói giả.',
+        'Lỗi hay gặp: bật RA Guard mà không đặt cổng nối router là device-role router, nên máy trạm mất default gateway.',
+      ] },
+      { ref: '4.3, 4.4, 1.8', title: 'Debug có điều kiện, DHCPv6, BFD', lessons: [], sc: [], core: [], more: ['R11', 'R12'] },
+      { ref: '4.7', title: 'Catalyst Center Assurance', lessons: [], sc: [], core: [], more: [], notes: [
+        'Dashboard theo sức khoẻ: Network, Client, Application. Bấm vào một máy khách để xem cả quá trình kết nối theo thời gian.',
+        'Path Trace vẽ đường đi giữa hai điểm và chỉ ra chỗ ACL chặn. Issue đưa sẵn nguyên nhân có thể và bước xử lý gợi ý.',
+      ] },
+    ],
+  },
+  {
     id: 'beyond', name: 'Sau CCNA v2.0 (không tính tiến độ)', weight: 0, optional: true,
     topics: [
       { ref: 'CCNP', title: 'OSPF nhiều vùng, EIGRP, BGP, redistribution', lessons: [15], sc: ['s18', 's08', 's17', 's21'], core: [], more: ['L12', 'D04', 'X03'] },
       { ref: 'CCNP', title: 'VTP, DTP nâng cao, Private VLAN, MST', lessons: [], sc: ['s24'], core: [], more: ['A11', 'D01', 'A26', 'D02'] },
       { ref: 'WAN', title: 'Serial, PPP, GRE', lessons: [], sc: [], core: [], more: ['C02', 'X02'] },
       { ref: 'QoS', title: 'Đánh dấu và xếp hàng', lessons: [], sc: ['s20', 's25'], core: [], more: [] },
-      { ref: 'SP/DC', title: 'MPLS, Segment Routing, VXLAN và EVPN', lessons: [], sc: ['s29', 's30', 's31', 's32'], core: [], more: [] },
+      { ref: 'SP/DC', title: 'MPLS, Segment Routing, VXLAN và EVPN', lessons: [], sc: ['s31', 's32'], core: [], more: [] },
       { ref: 'Firewall', title: 'Firewall nhiều hãng', lessons: [28], sc: [], core: [], more: ['F01', 'F02', 'F03', 'F04', 'Z01', 'Z02', 'Z03', 'FG01', 'FG02', 'PA01', 'PA02', 'SP01', 'SP02', 'CP01', 'CP02', 'PF01', 'PF02'] },
     ],
   },

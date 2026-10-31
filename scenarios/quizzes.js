@@ -175,6 +175,49 @@ export const QUIZZES = {
     { q: 'Vì sao nhãn node SID giữ nguyên qua từng chặng?', options: ['Mọi router dùng chung dải SRGB', 'Router lỗi', 'Không có LFIB', 'TTL bằng 0'], correct: 0, explainVi: 'Dùng chung SRGB thì SID 4 luôn là nhãn 16004 trên toàn miền.' },
     { q: 'Penultimate Hop Popping nghĩa là?', options: ['Chặng áp chót gỡ nhãn của segment', 'Chặng đầu gỡ mọi nhãn', 'Xoá gói', 'Thêm nhãn mới'], correct: 0, explainVi: 'Router cuối segment đỡ phải tra hai lần.' },
   ],
+  's33-multicast': [
+    { q: 'Vì sao cần RPF check trong multicast?', options: ['Để mã hoá luồng', 'Để chống lặp: chỉ nhận gói từ cổng dùng để đi về nguồn', 'Để chọn RP', 'Để tăng TTL'], correct: 1, explainVi: 'Gói vào sai cổng so với đường unicast về nguồn thì bị bỏ.' },
+    { q: 'IGMP chạy ở đâu?', options: ['Giữa các router lõi', 'Giữa máy nhận và router cuối', 'Giữa RP và nguồn', 'Giữa hai switch'], correct: 1, explainVi: 'Giữa các router dùng PIM.' },
+    { q: 'Router đầu tiên gửi gì tới RP khi nguồn bắt đầu phát?', options: ['PIM Register unicast', 'IGMP Report', 'PIM Hello', 'Prune'], correct: 0, explainVi: 'Register bọc gói multicast trong gói unicast.' },
+    { q: 'SSM cần gì ở máy nhận?', options: ['IGMPv1', 'IGMPv2', 'IGMPv3 để nêu nguồn', 'Biết địa chỉ RP'], correct: 2, explainVi: 'IGMPv3 có danh sách nguồn, nên không cần RP.' },
+    { q: 'MSDP dùng để làm gì?', options: ['Chia sẻ thông tin nguồn giữa các RP ở các miền', 'Mã hoá multicast', 'Thay IGMP', 'Tạo VLAN'], correct: 0, explainVi: 'Mỗi miền giữ RP riêng và dùng MSDP để biết nguồn của miền khác.' },
+  ],
+  's34-l3vpn': [
+    { q: 'Nhãn ngoài trong L3VPN do ai cấp?', options: ['MP-BGP', 'LDP', 'OSPF', 'CE'], correct: 1, explainVi: 'Nhãn ngoài đưa gói tới PE đích. Nhãn trong do MP-BGP cấp để vào đúng VRF.' },
+    { q: 'Vai trò của Route Distinguisher?', options: ['Quyết định VRF nào nhập route', 'Làm prefix trùng nhau thành khác nhau trong VPNv4', 'Mã hoá gói', 'Chọn next hop'], correct: 1, explainVi: 'RT mới quyết định việc nhập route.' },
+    { q: 'Vì sao router P không cần bảng route khách hàng?', options: ['P chỉ chuyển theo nhãn ngoài', 'P dùng NAT', 'P chạy VRF', 'P học qua CE'], correct: 0, explainVi: 'Đây là lợi ích chính khi đặt BGP ở biên.' },
+    { q: 'Sau PHP, gói L3VPN tới PE đích còn gì?', options: ['Không còn nhãn', 'Nhãn VPN', 'Hai nhãn', 'Nhãn LDP mới'], correct: 1, explainVi: 'P chỉ gỡ nhãn vận chuyển. PE dùng nhãn VPN để chọn VRF.' },
+  ],
+  's35-lisp': [
+    { q: 'EID và RLOC khác nhau thế nào?', options: ['EID là danh tính của máy, RLOC là vị trí trong underlay', 'Hai tên của cùng một địa chỉ', 'EID là MAC, RLOC là VLAN', 'EID chỉ dùng cho IPv6'], correct: 0, explainVi: 'LISP tách hai vai trò mà địa chỉ IP thường gộp làm một.' },
+    { q: 'ETR đăng ký EID bằng bản tin nào?', options: ['Map-Request', 'Map-Reply', 'Map-Register', 'Join'], correct: 2, explainVi: 'Map-Register gửi tới Map-Server, UDP 4342.' },
+    { q: 'Dữ liệu LISP dùng cổng nào?', options: ['UDP 4341', 'UDP 4789', 'TCP 179', 'UDP 3784'], correct: 0, explainVi: 'UDP 4342 dành cho điều khiển, UDP 4789 là VXLAN.' },
+    { q: 'Router lõi có cần biết mạng EID không?', options: ['Có, mọi EID', 'Không, chỉ cần RLOC', 'Chỉ khi dùng NAT', 'Chỉ với IPv6'], correct: 1, explainVi: 'Bảng định tuyến lõi nhỏ đi nhờ vậy.' },
+  ],
+  's36-sd-access': [
+    { q: 'Mặt phẳng điều khiển trong SD-Access là gì?', options: ['LISP', 'BGP EVPN', 'OMP', 'STP'], correct: 0, explainVi: 'Control plane node là LISP Map-Server.' },
+    { q: 'SGT nằm ở đâu khi gói qua fabric?', options: ['Trong header VXLAN-GPO', 'Trong TTL', 'Trong MAC', 'Trong DNS'], correct: 0, explainVi: 'Group Policy ID nằm trong header VXLAN.' },
+    { q: 'SGACL thường thực thi ở đâu?', options: ['Edge nguồn', 'Edge đích', 'Catalyst Center', 'ISE'], correct: 1, explainVi: 'Tại đó biết được nhóm của cả nguồn và đích.' },
+    { q: 'Phân đoạn vi mô khác phân đoạn vĩ mô thế nào?', options: ['Vi mô tách nhóm trong cùng VN, vĩ mô tách VN', 'Vi mô dùng VLAN, vĩ mô dùng STP', 'Không khác nhau', 'Vi mô chỉ dùng cho Wi-Fi'], correct: 0, explainVi: 'SGT là vi mô. VN, tương ứng VRF, là vĩ mô.' },
+  ],
+  's37-sd-wan': [
+    { q: 'vSmart làm nhiệm vụ gì?', options: ['Mặt phẳng điều khiển, phát OMP và chính sách', 'Chuyển dữ liệu người dùng', 'Xác thực ban đầu và NAT traversal', 'Chỉ lưu log'], correct: 0, explainVi: 'vBond điều phối, vManage quản lý, WAN Edge chuyển dữ liệu.' },
+    { q: 'TLOC gồm những gì?', options: ['System IP, màu, đóng gói', 'MAC và VLAN', 'SGT và VNI', 'RD và RT'], correct: 0, explainVi: 'TLOC định danh một đầu đường hầm.' },
+    { q: 'SD-WAN dùng gì để đo chất lượng đường?', options: ['BFD trong đường hầm', 'STP', 'ARP', 'SNMP trap'], correct: 0, explainVi: 'Kết quả dùng cho Application-Aware Routing.' },
+    { q: 'Mất vSmart thì dữ liệu sao?', options: ['Dừng ngay', 'Vẫn chạy một thời gian nhờ graceful restart', 'Đổi sang STP', 'Đổi sang NAT'], correct: 1, explainVi: 'vSmart không nằm trên đường dữ liệu.' },
+  ],
+  's38-dmvpn': [
+    { q: 'NHRP trong DMVPN làm gì?', options: ['Ánh xạ địa chỉ tunnel sang địa chỉ NBMA', 'Mã hoá gói', 'Chọn root bridge', 'Cấp DHCP'], correct: 0, explainVi: 'Nó giống ARP cho mạng đa truy cập không broadcast.' },
+    { q: 'Lệnh nào trên hub tạo Traffic Indication?', options: ['ip nhrp redirect', 'ip nhrp shortcut', 'tunnel mode gre', 'ip nhrp map'], correct: 0, explainVi: 'Spoke dùng shortcut để cài route.' },
+    { q: 'Phase 3 hơn phase 2 ở chỗ nào?', options: ['Hub tóm tắt route được mà spoke vẫn nói chuyện trực tiếp', 'Không cần GRE', 'Không cần NHRP', 'Chỉ có hub-and-spoke'], correct: 0, explainVi: 'Phase 2 buộc next hop giữ nguyên nên không tóm tắt được.' },
+    { q: 'GRE Protocol Type của NHRP là?', options: ['0x0800', '0x2001', '0x8847', '0x86DD'], correct: 1, explainVi: '0x0800 là IPv4 bên trong.' },
+  ],
+  's39-bfd': [
+    { q: 'Thời gian phát hiện với interval 50 ms, multiplier 3 là?', options: ['50 ms', '150 ms', '3 giây', '40 giây'], correct: 1, explainVi: '3 × 50 ms.' },
+    { q: 'BFD có tự tìm láng giềng không?', options: ['Có, bằng multicast', 'Không, giao thức khách báo cho nó', 'Có, qua DNS', 'Có, qua CDP'], correct: 1, explainVi: 'OSPF, EIGRP, BGP đăng ký với BFD.' },
+    { q: 'Vì sao BFD có ích khi có switch giữa hai router?', options: ['Cổng của router vẫn up khi đoạn kia đứt', 'Switch chặn OSPF', 'Router không có MAC', 'Để giảm TTL'], correct: 0, explainVi: 'Không có tín hiệu lớp 1 để báo.' },
+    { q: 'BFD điều khiển một chặng dùng cổng nào?', options: ['UDP 3784', 'TCP 179', 'UDP 4789', 'IP 89'], correct: 0, explainVi: 'BFD đa chặng dùng UDP 4784.' },
+  ],
 };
 
 export function quizFor(id) {

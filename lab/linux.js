@@ -198,8 +198,38 @@ export function makeLinux({ net, R, sshConnect, iosRun, iosConfig }) {
     L.push(` ${++n}  ${r.ok ? `${h.ip}  ${n}.0 ms` : '* * *'}`);
     return R(L, { sim: r.sim, simLabel: `${d.name} traceroute ${h.ip}`, why: r.ok ? null : r.fail?.why, ok: r.ok });
   }
+  /** RESTCONF kiểu IOS-XE: cần "restconf", "ip http secure-server" và user privilege 15. */
+  function restconf(d, w, t, path, x) {
+    const flag = (f) => { const i = w.indexOf(f); return i >= 0 ? w[i + 1] : null; };
+    const body0 = flag('-d') || flag('--data');
+    const method = (flag('-X') || (body0 ? 'POST' : 'GET')).toUpperCase();
+    const res = (code, text, body) => R([`HTTP/1.1 ${code} ${text}`, 'Content-Type: application/yang-data+json', '', ...(body ? JSON.stringify(body, null, 2).split('\n') : [])], { ...x, ok: code < 400 });
+    if (!w.includes('-k') && !w.includes('--insecure')) return R(['curl: (60) SSL certificate problem: self signed certificate', '(Lab: chứng chỉ tự ký của router, thêm -k khi học lab)'], { ...x, ok: false });
+    if (!t.restconf) return res(404, 'Not Found');
+    const [user, pw] = String(flag('-u') || '').split(':');
+    if (t.users?.[user]?.pw !== pw || (t.users[user].priv ?? 1) < 15) return res(401, 'Unauthorized', { errors: { error: [{ 'error-tag': 'access-denied' }] } });
+    const p = decodeURIComponent(path.replace(/^\/restconf\/data\/?/, ''));
+    const ifJson = (n, f) => ({ name: N.longIf(n), type: 'iana-if-type:ethernetCsmacd', enabled: !f.shutdown, 'ietf-ip:ipv4': f.ip ? { address: [{ ip: f.ip, netmask: N.prefixToMask(f.prefix) }] } : {} });
+    if (p === 'Cisco-IOS-XE-native:native/hostname' && method === 'GET') return res(200, 'OK', { 'Cisco-IOS-XE-native:hostname': t.name });
+    if (p === 'ietf-interfaces:interfaces' && method === 'GET') return res(200, 'OK', { 'ietf-interfaces:interfaces': { interface: Object.entries(t.ifaces || {}).map(([n, f]) => ifJson(n, f)) } });
+    const m = p.match(/^ietf-interfaces:interfaces\/interface=(.+)$/);
+    if (!m) return res(404, 'Not Found', { errors: { error: [{ 'error-tag': 'invalid-value', 'error-message': 'uri keypath not found' }] } });
+    const ifn = N.normIf(m[1]);
+    if (method === 'GET') return ifn && t.ifaces[ifn] ? res(200, 'OK', { 'ietf-interfaces:interface': ifJson(ifn, t.ifaces[ifn]) }) : res(404, 'Not Found');
+    if (method === 'DELETE') { if (!ifn || !t.ifaces[ifn]) return res(404, 'Not Found'); if (!ifn.startsWith('lo')) return res(400, 'Bad Request'); delete t.ifaces[ifn]; return R(['HTTP/1.1 204 No Content'], { ...x, ok: true }); }
+    if (method !== 'PUT' && method !== 'POST' && method !== 'PATCH') return res(405, 'Method Not Allowed');
+    const raw = body0?.startsWith('@') ? (d.fs?.[body0.slice(1)] || []).join('\n') : body0;
+    let js;
+    try { js = JSON.parse(raw); } catch { return res(400, 'Bad Request', { errors: { error: [{ 'error-tag': 'malformed-message', 'error-message': 'JSON sai cú pháp' }] } }); }
+    if (!ifn || !ifn.startsWith('lo')) return res(400, 'Bad Request');
+    const a = js['ietf-interfaces:interface']?.['ietf-ip:ipv4']?.address?.[0];
+    const fresh = !t.ifaces[ifn];
+    t.ifaces[ifn] ||= N.newIf(ifn);
+    if (a) { t.ifaces[ifn].ip = a.ip; t.ifaces[ifn].prefix = N.maskToPrefix(a.netmask); }
+    return fresh ? res(201, 'Created') : R(['HTTP/1.1 204 No Content'], { ...x, ok: true });
+  }
   function curl(d, w) {
-    const url = w.slice(1).find((x) => !x.startsWith('-'));
+    const url = w.slice(1).find((x, i, a) => !x.startsWith('-') && !['-u', '-X', '-d', '-H', '--data'].includes(a[i - 1]));
     const m = String(url || '').match(/^(?:(https?):\/\/)?([^/:]+)(?::(\d+))?/i);
     if (!m) return R(['curl: try \'curl <url>\'']);
     const host = m[2], port = m[3] ? +m[3] : m[1]?.toLowerCase() === 'https' ? 443 : 80;
@@ -210,6 +240,7 @@ export function makeLinux({ net, R, sshConnect, iosRun, iosConfig }) {
     if (r.kind === 'refused') return R([`curl: (7) Failed to connect to ${host} port ${port}: Connection refused`], { ...x, why: 'Mạng thông nhưng không có dịch vụ nghe cổng này.' });
     if (!r.ok) return R([`curl: (28) Failed to connect to ${host} port ${port}: Connection timed out`], { ...x, why: r.fail?.why });
     const t = net.devices[r.at.dev];
+    if (/\/restconf\b/.test(url)) return restconf(d, w, t, url.slice(url.indexOf('/restconf')), x);
     if (t.lb?.[port]) { const a = lbReply(t, port, d.ip); return R(a.lines, { ...x, ok: a.ok, why: a.why }); }
     return R(port === 80 || port === 443 ? ['HTTP/1.1 200 OK', `Server: ${net.devices[r.at.dev].name}`, '', '<h1>It works</h1>'] : [`curl: (52) Empty reply from server (cổng ${port} mở nhưng không phải web)`], x);
   }
@@ -512,6 +543,11 @@ export function makeLinux({ net, R, sshConnect, iosRun, iosConfig }) {
       if (w[1] === 'dns' && w[2] === 'eth0' && N.isIp(w[3])) { d.dns = w[3]; return R([]); }
       if (w[1] === 'status' || !w[1]) return R([`Link 2 (eth0)`, `  Current DNS Server: ${d.dns || '(chưa có)'}`]);
       return R(['Cú pháp: resolvectl dns eth0 <IP> | resolvectl status']);
+    }
+    if (cmd === 'python3' && w[1] === '-m' && w[2] === 'json.tool') {
+      const txt = (d.fs?.[w[3]] || []).join('\n');
+      if (!d.fs?.[w[3]]) return R([`Could not open file ${w[3] ?? ''}`]);
+      try { return R(JSON.stringify(JSON.parse(txt), null, 4).split('\n')); } catch (e) { return R([e.message], { ok: false }); }
     }
     if (cmd === 'cat' && d.fs?.[w[1]]) return R(d.fs[w[1]]);
     if (cmd === 'cat') return R(w[1] === '/etc/resolv.conf' ? (d.dns ? [`nameserver ${d.dns}`] : ['# chưa có DNS']) : [`cat: ${w[1] || ''}: lab chỉ mô phỏng /etc/resolv.conf`]);

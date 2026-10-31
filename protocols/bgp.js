@@ -21,6 +21,7 @@ export default {
    *  OPEN:      { type:1, version=4, myAs, holdTime=180, bgpId }
    *  UPDATE:    { type:2, origin=0, asPath:[..], nextHop, nlri:{prefix,len} }
    *  UPDATE EVPN: { type:2, evpn:{ rd, mac, ip, vni, nextHop, rt:[as,num] } } — route type 2, RFC 7432 + 8365
+   *  UPDATE VPNv4: { type:2, vpnv4:{ rd:[as,num], prefix, len, label, nextHop, rt:[as,num] } } — RFC 4364
    *  KEEPALIVE: { type:4 }
    */
   build(fields) {
@@ -53,6 +54,23 @@ export default {
         { meta: { name: 'bgp.extcomm', nameVi: 'Attr: Extended Communities', descriptionVi: 'Route Target quyết định VTEP nào nhập route. Encapsulation báo kiểu đóng gói, 8 là VXLAN.', display: `RT ${e.rt[0]}:${e.rt[1]}, encap VXLAN` }, bytes: ext },
         { meta: { name: 'bgp.mpreach', nameVi: 'Attr: MP_REACH_NLRI', descriptionVi: 'Thuộc tính đa giao thức: AFI 25 (L2VPN), SAFI 70 (EVPN), next hop là VTEP.', display: `L2VPN EVPN, next hop ${e.nextHop}` }, bytes: mpAttr.slice(0, 4 + 9) },
         { meta: { name: 'bgp.evpn', nameVi: 'EVPN NLRI type 2', descriptionVi: 'MAC/IP Advertisement: RD, ESI, Ethernet Tag, MAC, IP và VNI đặt trong trường nhãn.', display: `RD ${e.rd}:1, MAC ${e.mac}, IP ${e.ip}, VNI ${e.vni}` }, bytes: mpAttr.slice(4 + 9) },
+      ];
+    } else if (type === BGP_TYPE.UPDATE && fields.vpnv4) {
+      const v = fields.vpnv4, u16 = (n) => [(n >> 8) & 0xff, n & 0xff], u32 = (n) => [...u16(n >>> 16), ...u16(n & 0xffff)];
+      const rd = [0, 0, ...u16(v.rd[0]), ...u32(v.rd[1])], lab = (v.label << 4) | 1;
+      const route = [24 + 64 + v.len, (lab >> 16) & 0xff, (lab >> 8) & 0xff, lab & 0xff, ...rd, ...parseIp(v.prefix).slice(0, Math.ceil(v.len / 8))];
+      const mp = [...u16(1), 128, 12, 0, 0, 0, 0, 0, 0, 0, 0, ...parseIp(v.nextHop), 0, ...route];
+      const origin = [0x40, 1, 1, 0], aspath = [0x40, 2, 0], lpref = [0x40, 5, 4, 0, 0, 0, 100];
+      const ext = [0xc0, 16, 8, 0x00, 0x02, ...u16(v.rt[0]), ...u32(v.rt[1])];
+      const mpAttr = [0x90, 14, ...u16(mp.length), ...mp], palen = origin.length + aspath.length + lpref.length + ext.length + mpAttr.length;
+      body = [
+        { meta: { name: 'bgp.wlen', nameVi: 'Withdrawn Len', descriptionVi: 'Độ dài route bị rút (0 nếu không rút).', display: '0' }, bytes: [0, 0] },
+        { meta: { name: 'bgp.palen', nameVi: 'Path Attr Len', descriptionVi: 'Tổng độ dài các thuộc tính đường đi.', display: String(palen) }, bytes: u16(palen) },
+        { meta: { name: 'bgp.origin', nameVi: 'Attr: ORIGIN', descriptionVi: 'Nguồn gốc route.', display: '0 (IGP)' }, bytes: origin },
+        { meta: { name: 'bgp.aspath', nameVi: 'Attr: AS_PATH', descriptionVi: 'iBGP trong cùng AS nên chuỗi AS rỗng.', display: '(rỗng)' }, bytes: aspath },
+        { meta: { name: 'bgp.localpref', nameVi: 'Attr: LOCAL_PREF', descriptionVi: 'Độ ưu tiên trong AS, bắt buộc với iBGP.', display: '100' }, bytes: lpref },
+        { meta: { name: 'bgp.extcomm', nameVi: 'Attr: Route Target', descriptionVi: 'Route Target quyết định VRF nào nhập route này.', display: `RT ${v.rt[0]}:${v.rt[1]}` }, bytes: ext },
+        { meta: { name: 'bgp.mpreach', nameVi: 'Attr: MP_REACH_NLRI', descriptionVi: 'AFI 1, SAFI 128 (VPNv4). Next hop dài 12 byte: RD bằng 0 và IP của PE. NLRI gồm nhãn, RD và prefix.', display: `VPNv4, RD ${v.rd[0]}:${v.rd[1]}, ${v.prefix}/${v.len}, nhãn ${v.label}, next hop ${v.nextHop}` }, bytes: mpAttr },
       ];
     } else if (type === BGP_TYPE.UPDATE) {
       const asArr = fields.asPath || [];

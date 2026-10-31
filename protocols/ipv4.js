@@ -6,7 +6,7 @@
 import { BitWriter } from '../packet/bytes.js';
 import { parseIp } from '../packet/addr.js';
 
-export const IP_PROTO = { ICMP: 1, TCP: 6, UDP: 17, EIGRP: 88, OSPF: 89 };
+export const IP_PROTO = { ICMP: 1, IGMP: 2, TCP: 6, UDP: 17, GRE: 47, ESP: 50, EIGRP: 88, OSPF: 89, PIM: 103 };
 
 function protoName(p) {
   for (const [k, v] of Object.entries(IP_PROTO)) if (v === p) return k;

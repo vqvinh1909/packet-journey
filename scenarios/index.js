@@ -34,11 +34,19 @@ import * as s29 from './s29-mpls.js';
 import * as s30 from './s30-vxlan.js';
 import * as s31 from './s31-evpn.js';
 import * as s32 from './s32-sr-mpls.js';
+import * as s33 from './s33-multicast.js';
+import * as s34 from './s34-l3vpn.js';
+import * as s35 from './s35-lisp.js';
+import * as s36 from './s36-sd-access.js';
+import * as s37 from './s37-sd-wan.js';
+import * as s38 from './s38-dmvpn.js';
+import * as s39 from './s39-bfd.js';
 
 export const SCENARIOS = [
   s01, s02, s03, s04, s05, s06, s07, s08, s09, s10, s11, s12,
   s13, s14, s15, s16, s17, s18, s19, s20, s21, s22, s23,
   s24, s25, s26, s27, s28, s29, s30, s31, s32,
+  s33, s34, s35, s36, s37, s38, s39,
 ];
 
 export function getScenario(id) {

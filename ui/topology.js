@@ -214,17 +214,20 @@ export function renderTables(container, tables, t) {
     ['mac', t('colMac')],
     ['routing', t('colRoute')],
     ['nat', t('colNat')],
+    ['list', null], // bảng tự đặt cột: { title, cols, rows:[[...]] }
   ];
   let any = false;
   for (const [kind, cols] of defs) {
     const data = tables?.[kind];
     if (!data) continue;
     any = true;
+    const head = cols || data.cols;
     const box = document.createElement('div');
     box.className = 'dev-table';
     const rowsHtml = (data.rows || []).map((r) => {
       let cells;
-      if (kind === 'arp') cells = [r.ip, r.mac];
+      if (kind === 'list') cells = r;
+      else if (kind === 'arp') cells = [r.ip, r.mac];
       else if (kind === 'mac') cells = [r.mac, r.port];
       else if (kind === 'nat') cells = [r.insideLocal, r.insideGlobal, r.outside, r.proto];
       else cells = [r.network, '/' + r.prefix, r.nextHop, r.iface, r.kind];
@@ -233,8 +236,8 @@ export function renderTables(container, tables, t) {
       return `<tr${hl}>${cells.map((c) => `<td>${esc(c)}</td>`).join('')}</tr>`;
     }).join('');
     box.innerHTML = `<h4>${esc(data.title)}</h4><table>` +
-      `<thead><tr>${cols.map((c) => `<th>${esc(c)}</th>`).join('')}</tr></thead>` +
-      `<tbody>${rowsHtml || `<tr><td colspan="${cols.length}" class="empty">(trống)</td></tr>`}</tbody></table>`;
+      `<thead><tr>${head.map((c) => `<th>${esc(c)}</th>`).join('')}</tr></thead>` +
+      `<tbody>${rowsHtml || `<tr><td colspan="${head.length}" class="empty">(trống)</td></tr>`}</tbody></table>`;
     container.appendChild(box);
   }
   container.style.display = any ? 'flex' : 'none';

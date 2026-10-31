@@ -8,7 +8,7 @@ import * as B from '../lab/breaker.js';
 
 const fails = (tasks, net) => checkLab({ tasks }, net, {}).filter((x) => !x).length;
 // lab chỉ chấm cấu hình (description/CDP, priority STP) file đã chép xong (SCP/SFTP), kết quả playbook, số đo RF — không loại lỗi nào trong thư viện làm hỏng được
-const UNBREAKABLE = ['A07', 'A12', 'N18', 'N22', 'W05'];
+const UNBREAKABLE = ['A07', 'A12', 'N18', 'N22', 'W05', 'E03', 'E04', 'E05', 'E08', 'E10', 'E11'];
 
 test('mọi lab có lời giải: gài lỗi → ≥ 1 nhiệm vụ trượt; áp lệnh sửa → mọi nhiệm vụ đạt', () => {
   let n = 0;
