@@ -38,6 +38,7 @@ export function build() {
       { id: 'tld', type: 'host', name: 'TLD .com', x: 820, y: 180, color: '#a0433a', lines: ['192.5.6.30'] },
       { id: 'auth', type: 'host', name: 'example.com', x: 820, y: 290, color: '#a0433a', lines: ['93.184.216.1'] },
     ],
+    ports: false, // đường logic giữa các máy chủ DNS, không phải dây nối trực tiếp
     links: [
       { id: 'lc', a: 'cli', b: 'res' },
       { id: 'lr', a: 'res', b: 'root' },

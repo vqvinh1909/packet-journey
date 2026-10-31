@@ -38,7 +38,7 @@ export function build() {
     ],
     links: [
       { id: 'lin', a: 'pc', b: 'r1', labelMid: 'inside (private)' },
-      { id: 'lout', a: 'r1', b: 'srv', labelMid: 'outside (public)' },
+      { id: 'lout', a: 'r1', b: 'srv', bp: '', labelMid: 'outside (public)' },
     ],
   };
 

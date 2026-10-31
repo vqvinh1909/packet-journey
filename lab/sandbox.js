@@ -19,7 +19,7 @@ const svc = (vendor, label, prefix, badge, services, extraNote = [], extra = () 
  * ports = null: số cổng cố định (PC/Server một cổng Fa0). make(id, name, x, y, danhSáchCổng).
  */
 export const SANDBOX_KINDS = {
-  router: { vendor: 'cisco', label: 'Router', prefix: 'R', ports: { def: 3, min: 1, max: 8, unit: 'cổng Gigabit (+ 2 Serial)', names: (n) => [...range(n, (i) => `g0/${i}`), 's0/0/0', 's0/0/1'] }, make: (id, name, x, y, ps) => N.router(id, name, x, y, ps) },
+  router: { vendor: 'cisco', label: 'Router', prefix: 'R', ports: { def: 3, min: 1, max: 4, unit: 'cổng Gigabit (+ 2 Serial)', names: (n) => [...range(n, (i) => `g0/${i}`), 's0/0/0', 's0/0/1'] }, make: (id, name, x, y, ps) => N.router(id, name, x, y, ps) },
   sw2960: { vendor: 'cisco', label: 'Switch 2960', prefix: 'SW', ports: { def: 24, choices: [8, 24, 48], unit: 'cổng FastEthernet (+ 2 Gigabit uplink)', names: (n) => fa(n, ['g0/1', 'g0/2']) }, make: (id, name, x, y, ps) => N.sw(id, name, x, y, ps) },
   sw3560: { vendor: 'cisco', label: 'Switch L3 3560', prefix: 'L3SW', ports: { def: 24, choices: [8, 24, 48], unit: 'cổng FastEthernet (+ 2 Gigabit uplink)', names: (n) => fa(n, ['g0/1', 'g0/2']) }, make: (id, name, x, y, ps) => { const d = N.sw(id, name, x, y, ps); d.model = '3560'; return d; } },
   asa: { vendor: 'cisco', label: 'ASA Firewall', prefix: 'ASA', ports: { def: 4, min: 2, max: 8, unit: 'cổng Gigabit', names: (n) => range(n, (i) => `g1/${i + 1}`) }, make: (id, name, x, y, ps) => N.firewall(id, name, x, y, ps, 'asa') },
@@ -40,7 +40,7 @@ export const SANDBOX_KINDS = {
   lb: { vendor: 'service', label: 'Load Balancer', prefix: 'LB', ports: null, note: ['Load Balancer (mô phỏng) đang khởi động ...', 'Đặt IP: ip addr add 10.0.1.100/24 dev eth0 rồi ip route add default via 10.0.1.1', 'Thêm backend: lb add 80 10.0.2.11 · lb add 80 10.0.2.12 · lb show', 'Thử từ máy khác: curl <IP của LB>, gọi nhiều lần để thấy chia tải.'], make: lbDevice },
   syslog: svc('netmgmt', 'Syslog (UDP 514)', 'SYSLOG', 'LOG', [514], ['Lab chỉ mô phỏng cổng mở, log của router chưa được gửi tới đây.']),
   ntp: svc('netmgmt', 'NTP (UDP 123)', 'NTP', 'NTP', [123], ['Router: ntp server <IP> rồi show ntp status']),
-  tacacs: svc('netmgmt', 'TACACS+ (TCP 49)', 'TACACS', 'AAA', [49], ['Lab chỉ mô phỏng cổng mở, router chưa xác thực qua máy này.']),
+  tacacs: svc('netmgmt', 'TACACS+ (TCP 49)', 'TACACS', 'AAA', [49], ['Khai báo: tacacs secret <chuỗi> · tacacs user <tên> <mật khẩu> · tacacs show. Router: tacacs server, aaa authentication login.'], () => ({ tacacs: { secret: '', users: {} } })),
   nms: svc('netmgmt', 'Monitoring (161, 3000)', 'NMS', 'NMS', [161, 3000]),
   wlc: { vendor: 'wifi', label: 'WLC', prefix: 'WLC', ports: null, note: ['WLC (mô phỏng) đang khởi động ...', 'Trang quản trị web sẵn sàng.'], make: (id, name, x, y) => wlcDevice(id, name, x, y) },
   ap: { vendor: 'wifi', label: 'Access Point', prefix: 'AP', ports: null, note: ['Access Point (mô phỏng) đang khởi động ...', 'Đặt IP: ip 10.10.0.11/24 10.10.0.1 hoặc ip dhcp', 'AP join khi tới được IP quản trị của WLC (xem tab Wireless trên WLC).'], make: (id, name, x, y) => Object.assign(N.pc(id, name, x, y), { shell: 'vpcs', isAp: true }) },
@@ -211,7 +211,7 @@ export function bootLog(d) {
 /** Cổng vật lý của thiết bị (không tính port-channel / subinterface / loopback / tunnel). */
 export function physPorts(d) {
   if (!d) return [];
-  if (d.type === 'pc' || d.type === 'server') return ['fa0'];
+  if (d.type === 'pc' || d.type === 'server') return d.phone ? ['fa0', 'pc0'] : ['fa0'];
   const all = Object.keys(d.type === 'switch' ? d.ports : d.ifaces);
   // bỏ Port-channel / Loopback / Tunnel (po1, lo0, tu0) — nhưng giữ "port1" của FortiGate / Sophos
   return all.filter((p) => !/^(po|lo|tu)\d/.test(p) && !p.includes('.')).sort(N.ifSort);

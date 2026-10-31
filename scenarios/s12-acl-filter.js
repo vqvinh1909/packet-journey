@@ -39,9 +39,9 @@ export function build() {
       { id: 'srv', type: 'host', name: 'Server', x: 850, y: 160, lines: ['10.0.0.5'] },
     ],
     links: [
-      { id: 'la', a: 'a', b: 'r1' },
-      { id: 'lb', a: 'b', b: 'r1' },
-      { id: 'ls', a: 'r1', b: 'srv' },
+      { id: 'la', a: 'a', b: 'r1', bp: 'Gi0/0' },
+      { id: 'lb', a: 'b', b: 'r1', bp: 'Gi0/0' },
+      { id: 'ls', a: 'r1', b: 'srv', ap: 'Gi0/1' },
     ],
   };
 

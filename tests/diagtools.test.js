@@ -108,6 +108,9 @@ test('ASA packet-tracer: theo đúng security-level, ACL, route và NAT tĩnh', 
   assert.equal(f.acls.OUT.entries[0].matches || 0, 0);
   // NAT tĩnh: đích là IP mapped được dịch về IP thật trước khi tra route và ACL
   runScript(cli, asa, ['configure terminal', 'object network WEB', 'host 10.1.1.10', 'nat (inside,outside) static 203.0.113.50', 'end']);
+  assert.match(pt('inside tcp 10.1.1.10 1000 203.0.113.9 80'), /Type: NAT[\s\S]*Static translate 10\.1\.1\.10\/?\d* to 203\.0\.113\.50/);
+  runScript(cli, asa, ['configure terminal', 'object network LAN', 'subnet 10.1.1.0 255.255.255.0', 'nat (inside,outside) dynamic interface', 'end']);
+  assert.match(pt('inside tcp 10.1.1.20 1000 203.0.113.9 80'), /Type: NAT[\s\S]*Dynamic translate 10\.1\.1\.20\/1000 to 203\.0\.113\.2/);
   const nat = pt('outside tcp 203.0.113.9 1000 203.0.113.50 80');
   assert.match(nat, /Type: UN-NAT/);
   assert.match(nat, /Action: allow/);

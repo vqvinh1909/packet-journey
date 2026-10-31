@@ -6,7 +6,8 @@ import { createCli, runScript } from '../lab/ios.js';
 import * as S from '../lab/sandbox.js';
 import * as N from '../lab/net.js';
 import * as V6 from '../lab/net6.js';
-import { linuxDevice } from '../lab/linux.js';
+import { linuxDevice, macDevice } from '../lab/linux.js';
+import { wlcDevice, rfStatus, apConfig } from '../lab/wlc.js';
 
 const cfg = (...l) => ['enable', 'configure terminal', ...l, 'end'];
 function mk(kinds, links) {
@@ -224,25 +225,186 @@ test('Ethernet: cổng Fa từ chối speed 1000, Gi nối Fa chạy theo Fa, 10
   assert.equal(N.ethMode(p.net, 'b', 'g0/1').duplex, 'full');
 });
 
-test('Voice VLAN và PoE: điện thoại vào VLAN thoại, PC cùng cấu hình ở VLAN dữ liệu, tắt PoE thì mất link', () => {
+test('Voice VLAN và PoE: điện thoại gắn thẻ VLAN thoại, PC sau điện thoại ở VLAN dữ liệu, tắt PoE thì cả hai mất mạng', () => {
   const net = N.makeNet([
     N.sw('s', 'S', 0, 0, ['fa0/1', 'fa0/2', 'fa0/3']),
     Object.assign(N.server('ph', 'PH', 0, 0, { ip: '10.0.0.1', services: [], cloud: false }), { phone: true }),
     N.pc('pc', 'PC', 0, 0, { ip: '10.0.0.2' }),
     N.server('c', 'C', 0, 0, { ip: '10.0.0.3' }),
-  ], [['ph', 'fa0', 's', 'fa0/1'], ['pc', 'fa0', 's', 'fa0/2'], ['c', 'fa0', 's', 'fa0/3']]);
-  const cli = createCli(net), set = 'switchport voice vlan 20';
-  const r = runScript(cli, 's', cfg('vlan 10', 'exit', 'interface range fa0/1 - 2', 'switchport mode access', 'switchport access vlan 10', set, 'interface fa0/3', 'switchport access vlan 20'));
+    N.server('dt', 'DT', 0, 0, { ip: '10.0.0.4' }),
+  ], [['ph', 'fa0', 's', 'fa0/1'], ['pc', 'fa0', 'ph', 'pc0'], ['c', 'fa0', 's', 'fa0/2'], ['dt', 'fa0', 's', 'fa0/3']]);
+  const cli = createCli(net), ping = (from, ip) => N.sendPacket(net, { src: from, dst: ip }).ok;
+  const r = runScript(cli, 's', cfg('vlan 10', 'exit', 'interface fa0/1', 'switchport mode access', 'switchport access vlan 10', 'switchport voice vlan 20', 'interface fa0/2', 'switchport access vlan 20', 'interface fa0/3', 'switchport access vlan 10'));
   assert.match(r.map((o) => o.out.join(' ')).join(' '), /Voice VLAN does not exist/);
-  assert.equal(N.effPort(net, net.devices.s, 'fa0/1').vlan, 20, 'điện thoại');
-  assert.equal(N.effPort(net, net.devices.s, 'fa0/2').vlan, 10, 'PC không gắn thẻ');
+  assert.ok(ping('ph', '10.0.0.3'), 'điện thoại tới máy VLAN thoại');
+  assert.ok(!ping('ph', '10.0.0.4'), 'điện thoại không vào VLAN dữ liệu');
+  assert.ok(ping('pc', '10.0.0.4'), 'PC tới máy VLAN dữ liệu');
+  assert.ok(!ping('pc', '10.0.0.3'), 'PC không vào VLAN thoại');
   assert.match(out(cli, 's', 'show interfaces fa0/1 switchport'), /Voice VLAN: 20/);
   assert.match(out(cli, 's', 'show running-config'), /switchport voice vlan 20/);
   assert.match(out(cli, 's', 'show power inline'), /Fa0\/1\s+auto\s+on\s+6\.3/);
-  assert.match(out(cli, 's', 'show power inline'), /Fa0\/2\s+auto\s+off/);
-  assert.equal(cli.exec('ph', 'ping 10.0.0.3').out.some((l) => /Reply from 10\.0\.0\.3/.test(l)), true);
   runScript(cli, 's', cfg('interface fa0/1', 'power inline never'));
   assert.ok(!N.statusUp(net, 's', 'fa0/1'), 'điện thoại mất nguồn');
-  assert.ok(N.statusUp(net, 's', 'fa0/2'), 'PC không cần PoE');
+  assert.ok(!ping('ph', '10.0.0.3') && !ping('pc', '10.0.0.4'), 'mất nguồn thì cả điện thoại lẫn PC phía sau mất mạng');
   assert.match(out(cli, 's', 'show running-config'), /power inline never/);
+});
+
+const trio = () => {
+  const net = N.makeNet([N.sw('a', 'A', 0, 0, ['g0/1', 'g0/2']), N.sw('b', 'B', 0, 0, ['g0/1', 'g0/2']), N.sw('c', 'C', 0, 0, ['g0/1', 'g0/2'])], [['a', 'g0/1', 'b', 'g0/1'], ['a', 'g0/2', 'c', 'g0/1'], ['b', 'g0/2', 'c', 'g0/2']]);
+  return { net, cli: createCli(net) };
+};
+
+test('Root Guard: BPDU tốt hơn bị chặn, gỡ guard thì root đổi lại; cổng không vi phạm vẫn chạy', () => {
+  const { net, cli } = trio();
+  runScript(cli, 'a', cfg('spanning-tree vlan 1 priority 4096'));
+  runScript(cli, 'b', cfg('interface g0/2', 'spanning-tree guard root'));
+  assert.equal(N.stpState(net, 1).root.b, 'a', 'chưa có BPDU tốt hơn');
+  assert.ok(!N.stpState(net, 1).ports['b|g0/2'].inc);
+  runScript(cli, 'c', cfg('spanning-tree vlan 1 priority 0'));
+  const st = N.stpState(net, 1);
+  assert.equal(st.ports['b|g0/2'].inc, 'Root');
+  assert.equal(st.ports['b|g0/2'].sts, 'BLK');
+  assert.match(out(cli, 'b', 'show spanning-tree inconsistentports'), /GigabitEthernet0\/2\s+Root Inconsistent/);
+  assert.match(out(cli, 'b', 'show running-config'), /spanning-tree guard root/);
+  runScript(cli, 'b', cfg('interface g0/2', 'no spanning-tree guard'));
+  assert.ok(!N.stpState(net, 1).ports['b|g0/2'].inc);
+});
+
+test('Loop Guard: cổng Alternate mất BPDU tự mở nếu không có guard, có guard thì bị chặn', () => {
+  const { net, cli } = trio();
+  runScript(cli, 'a', cfg('spanning-tree vlan 1 priority 4096'));
+  runScript(cli, 'b', cfg('spanning-tree vlan 1 priority 8192'));
+  assert.equal(N.stpState(net, 1).ports['c|g0/2'].sts, 'BLK', 'Alternate bình thường');
+  net.devices.c.ports['g0/2'].noBpduRx = true;
+  assert.equal(N.stpState(net, 1).ports['c|g0/2'].sts, 'FWD', 'mất BPDU: tự mở, nguy cơ loop');
+  runScript(cli, 'c', cfg('interface g0/2', 'spanning-tree guard loop'));
+  assert.equal(N.stpState(net, 1).ports['c|g0/2'].inc, 'Loop');
+  assert.equal(N.stpState(net, 1).ports['c|g0/2'].sts, 'BLK');
+});
+
+test('Storm Control: dưới ngưỡng forward, vượt ngưỡng Blocking; action shutdown thì err-disabled', () => {
+  const net = N.makeNet([N.sw('s', 'S', 0, 0, ['fa0/1']), Object.assign(N.pc('p', 'P', 0, 0), { stormPct: 40 })], [['p', 'fa0', 's', 'fa0/1']]);
+  const cli = createCli(net);
+  runScript(cli, 's', cfg('interface fa0/1', 'storm-control broadcast level 50'));
+  assert.match(out(cli, 's', 'show storm-control'), /Fa0\/1\s+Forwarding/);
+  runScript(cli, 's', cfg('interface fa0/1', 'storm-control broadcast level 10'));
+  assert.match(out(cli, 's', 'show storm-control'), /Fa0\/1\s+Blocking/);
+  assert.ok(N.statusUp(net, 's', 'fa0/1'));
+  runScript(cli, 's', cfg('interface fa0/1', 'storm-control action shutdown'));
+  assert.ok(N.errDisabled(net, net.devices.s, 'fa0/1'));
+});
+
+test('RA Guard: policy host chặn RA, role router cho qua', () => {
+  const net = N.makeNet([N.sw('s', 'S', 0, 0, ['fa0/1', 'fa0/2']), N.router('r', 'R', 0, 0, ['g0/0']), N.pc('p', 'P', 0, 0)], [['r', 'g0/0', 's', 'fa0/1'], ['p', 'fa0', 's', 'fa0/2']]);
+  const cli = createCli(net);
+  runScript(cli, 'r', cfg('ipv6 unicast-routing', 'interface g0/0', 'ipv6 address 2001:db8::1/64', 'no shutdown'));
+  assert.ok(V6.slaac(net, 'p').ok);
+  runScript(cli, 's', cfg('ipv6 nd raguard policy H', 'device-role host', 'exit', 'interface fa0/1', 'ipv6 nd raguard attach-policy H'));
+  assert.ok(!V6.slaac(net, 'p').ok);
+  runScript(cli, 's', cfg('ipv6 nd raguard policy H', 'device-role router'));
+  assert.ok(V6.slaac(net, 'p').ok);
+});
+
+const aaaNet = () => {
+  const net = N.makeNet([
+    N.sw('s', 'S', 0, 0, ['fa0/1', 'fa0/2', 'fa0/3']), N.router('r', 'R', 0, 0, ['g0/0']),
+    Object.assign(N.server('t', 'T', 0, 0, { ip: '10.0.0.9', services: [49] }), { tacacs: { secret: 'K', users: { u: 'p' } } }),
+    Object.assign(N.pc('a', 'A', 0, 0, { ip: '10.0.0.5' }), {}),
+  ], [['r', 'g0/0', 's', 'fa0/1'], ['t', 'fa0', 's', 'fa0/2'], ['a', 'fa0', 's', 'fa0/3']]);
+  const cli = createCli(net);
+  runScript(cli, 'r', cfg('hostname R', 'interface g0/0', 'ip address 10.0.0.1 255.255.255.0', 'no shutdown', 'exit', 'ip domain-name x.vn', 'crypto key generate rsa modulus 2048', 'username admin privilege 15 secret L', 'line vty 0 4', 'login local', 'transport input ssh', 'exit', 'aaa new-model', 'tacacs server T1', 'address ipv4 10.0.0.9', 'key K', 'exit', 'aaa authentication login default group tacacs+ local'));
+  return { net, cli };
+};
+const sshTry = (cli, user, pw) => { cli.exec('a', `ssh -l ${user} 10.0.0.1`); return cli.exec('a', pw).out.join(' '); };
+
+test('AAA: máy chủ trả lời thì theo máy chủ (sai là từ chối, không rơi về local); máy chủ chết hoặc sai khoá mới dùng local', () => {
+  const { net, cli } = aaaNet();
+  assert.equal(out(cli, 'r', 'test aaa group tacacs+ u p new-code'), 'User successfully authenticated');
+  assert.equal(out(cli, 'r', 'test aaa group tacacs+ u sai new-code'), 'User rejected');
+  assert.match(sshTry(cli, 'u', 'p'), /thành công/);
+  assert.match(sshTry(cli, 'admin', 'L'), /Authentication failed/, 'máy chủ không biết admin: từ chối');
+  runScript(cli, 'r', cfg('tacacs server T1', 'key SAI'));
+  assert.equal(out(cli, 'r', 'test aaa group tacacs+ u p new-code'), 'No authoritative response from any server.');
+  assert.match(sshTry(cli, 'admin', 'L'), /thành công/, 'sai khoá: coi như không trả lời, dùng local');
+  runScript(cli, 'r', cfg('tacacs server T1', 'key K'));
+  net.devices.t.services = [];
+  assert.match(sshTry(cli, 'admin', 'L'), /thành công/, 'máy chủ chết: dùng local');
+  assert.match(out(cli, 'r', 'show running-config'), /tacacs server T1[\s\S]*address ipv4 10\.0\.0\.9/);
+});
+
+test('SCP/SFTP: sai mật khẩu hoặc không có SSH thì từ chối, đúng thì có file', () => {
+  const net = N.makeNet([N.router('r', 'R', 0, 0, ['g0/0']), Object.assign(N.server('f', 'F', 0, 0, { ip: '10.0.0.5', services: [22] }), { users: { b: { pw: 'x' } } })], [['r', 'g0/0', 'f', 'fa0']]);
+  const cli = createCli(net), run = (...c) => runScript(cli, 'r', ['enable', ...c]).map((o) => o.out.join(' ')).join(' ');
+  runScript(cli, 'r', cfg('hostname R', 'interface g0/0', 'ip address 10.0.0.1 255.255.255.0', 'no shutdown'));
+  assert.match(run('copy running-config sftp:', '10.0.0.5', 'b', 'c1', 'sai'), /Permission denied/);
+  assert.ok(!(net.devices.f.files || []).some((x) => x.name === 'c1'));
+  assert.match(run('copy running-config sftp:', '10.0.0.5', 'b', 'c1', 'x'), /bytes copied/);
+  assert.equal(net.devices.f.files.find((x) => x.name === 'c1').via, 'sftp');
+  net.devices.f.services = [];
+  assert.match(run('copy running-config scp:', '10.0.0.5', 'b', 'c2', 'x'), /Connection refused|Timed out/);
+});
+
+test('SFP: khác module hoặc sai sợi, quá cự ly thì down; đúng thì up', () => {
+  const mk2 = (a, b) => { const net = N.makeNet([N.sw('a', 'A', 0, 0, ['g0/1']), N.sw('b', 'B', 0, 0, ['g0/1'])], [['a', 'g0/1', 'b', 'g0/1']]); Object.assign(net.devices.a.ports['g0/1'], a); Object.assign(net.devices.b.ports['g0/1'], b); return N.statusUp(net, 'a', 'g0/1'); };
+  assert.ok(mk2({ sfp: 'LX', fiber: 'SMF', fiberM: 2000 }, { sfp: 'LX', fiber: 'SMF', fiberM: 2000 }));
+  assert.ok(!mk2({ sfp: 'SX', fiber: 'SMF', fiberM: 100 }, { sfp: 'SX', fiber: 'SMF', fiberM: 100 }), 'sai sợi');
+  assert.ok(!mk2({ sfp: 'SX', fiber: 'MMF', fiberM: 900 }, { sfp: 'SX', fiber: 'MMF', fiberM: 900 }), 'quá cự ly');
+  assert.ok(!mk2({ sfp: 'SX' }, { sfp: 'LX' }), 'khác module');
+  assert.ok(!mk2({ sfp: 'SX' }, {}), 'một đầu không có module');
+});
+
+test('macOS và Linux: lệnh đúng theo hệ điều hành, tệp, apt, Ansible chạy qua SSH thật', () => {
+  const net = N.makeNet([
+    N.sw('s', 'S', 0, 0, ['fa0/1', 'fa0/2']),
+    Object.assign(linuxDevice('l', 'L', 0, 0), { ip: '10.0.0.10' }),
+    Object.assign(macDevice('m', 'M', 0, 0), { ip: '169.254.1.1', prefix: 16 }),
+  ], [['l', 'fa0', 's', 'fa0/1'], ['m', 'fa0', 's', 'fa0/2']]);
+  const cli = createCli(net), run = (d, c) => cli.exec(d, c).out.join('\n');
+  assert.match(run('m', 'ifconfig en0'), /inet 169\.254\.1\.1/);
+  assert.match(run('m', 'ip a'), /command not found/);
+  assert.equal(run('m', 'networksetup -setmanual Wi-Fi 10.0.0.20 255.255.255.0 10.0.0.1'), '');
+  assert.match(run('m', 'networksetup -getinfo Wi-Fi'), /IP address: 10\.0\.0\.20[\s\S]*Router: 10\.0\.0\.1/);
+  assert.match(cli.prompt('m'), /admin\$ $/);
+  assert.match(run('l', 'ansible all -m ping'), /command not found/);
+  run('l', 'apt install ansible');
+  run('l', 'echo "[sw]" >> /etc/ansible/hosts');
+  run('l', 'echo "10.0.0.2 ansible_user=admin ansible_password=P" >> /etc/ansible/hosts');
+  assert.match(run('l', 'cat /etc/ansible/hosts'), /\[sw\]\n10\.0\.0\.2/);
+  assert.match(run('l', 'ls /etc/ansible'), /hosts/);
+  assert.match(run('l', 'ansible sw -m ping'), /UNREACHABLE/, 'chưa có switch ở 10.0.0.2');
+  runScript(cli, 's', cfg('interface vlan 1', 'ip address 10.0.0.2 255.255.255.0', 'no shutdown', 'exit', 'ip domain-name x.vn', 'crypto key generate rsa modulus 2048', 'username admin privilege 15 secret P', 'line vty 0 4', 'login local', 'transport input ssh'));
+  assert.match(run('l', 'ansible sw -m ping'), /SUCCESS/);
+  assert.match(run('l', `ansible sw -m cisco.ios.ios_config -a "lines='vlan 77'"`), /CHANGED/);
+  assert.ok(net.devices.s.vlans[77]);
+  assert.match(run('l', `ansible sw -m cisco.ios.ios_config -a "lines='vlan 77'"`), /SUCCESS/, 'chạy lại không đổi gì');
+  assert.match(run('l', `ansible sw -m cisco.ios.ios_config -a "lines='lenh sai'"`), /FAILED/);
+  assert.match(run('l', `ansible sw -m cisco.ios.ios_command -a "commands='show vlan brief'"`), /VLAN0077/);
+});
+
+test('RF: nhiễu chồng kênh hạ SNR, băng 5 GHz tránh được nhiễu 2.4 GHz; dữ liệu sai bị từ chối', () => {
+  const net = N.makeNet([wlcDevice('w', 'W', 0, 0), Object.assign(N.pc('ap1', 'AP1', 0, 0), { isAp: true })], [['w', 'fa0', 'ap1', 'fa0']]);
+  const cli = createCli(net), w = net.devices.w;
+  w.wlc.rfEnv = [{ ch: 6, dbm: -55, src: 'x' }];
+  cli.exec('w', 'ap ap1 channel=7');
+  assert.equal(rfStatus(net, w)[0].noise, -55);
+  cli.exec('w', 'ap ap1 channel=11');
+  assert.equal(rfStatus(net, w)[0].noise, -95);
+  cli.exec('w', 'ap ap1 channel=36 power=14');
+  assert.deepEqual([rfStatus(net, w)[0].band, rfStatus(net, w)[0].rssi], [5, -59]);
+  assert.match(cli.exec('w', 'ap ap1 channel=99').out.join(' '), /channel=/);
+  assert.equal(apConfig(w, 'ap1').channel, 36);
+});
+
+test('tcpdump thấy DHCP do dhclient tạo; lệnh Linux thường dùng có kết quả, không bị báo lệnh lạ', () => {
+  const net = N.makeNet([N.router('r', 'R', 0, 0, ['g0/0']), Object.assign(linuxDevice('l', 'L', 0, 0), { ip: null })], [['r', 'g0/0', 'l', 'fa0']]);
+  const cli = createCli(net), run = (c) => cli.exec('l', c).out.join('\n');
+  runScript(cli, 'r', cfg('interface g0/0', 'ip address 10.0.0.1 255.255.255.0', 'no shutdown', 'exit', 'ip dhcp pool P', 'network 10.0.0.0 255.255.255.0', 'default-router 10.0.0.1'));
+  run('dhclient');
+  assert.ok(net.devices.l.ip, 'có IP');
+  assert.match(run('tcpdump -i eth0 port 67'), /BOOTP\/DHCP/);
+  assert.match(run('apt install docker.io'), /Setting up docker\.io/);
+  assert.match(run('docker ps'), /CONTAINER ID/);
+  assert.match(run('vi /etc/hosts'), /chưa mô phỏng trình soạn thảo/);
+  run('echo "a" > x.txt');
+  assert.equal(run('ls'), 'x.txt');
 });

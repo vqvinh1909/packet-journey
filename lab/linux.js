@@ -2,7 +2,7 @@
 // (ip, ss, curl, nc, dig, systemctl, ufw...). Mọi kết nối đều đi qua N.sendPacket nên ACL, NAT, firewall trên đường vẫn có tác dụng.
 
 import * as N from './net.js';
-import { compileBpf, sniffQuery, tcpdumpLine } from './sniff.js';
+import { compileBpf, sniffQuery, sniffRecord, tcpdumpLine } from './sniff.js';
 
 const UNITS = { ssh: { ports: [22], proc: 'sshd' }, nginx: { ports: [80, 443], proc: 'nginx' }, mysql: { ports: [3306], proc: 'mysqld' }, postgresql: { ports: [5432], proc: 'postgres' } };
 const PORT_NAMES = { ssh: 22, http: 80, https: 443, dns: 53, domain: 53, mysql: 3306, postgresql: 5432 };
@@ -18,6 +18,8 @@ export function linuxDevice(id, name, x, y) {
   return d;
 }
 /** Load Balancer: máy Linux có thêm d.lb = { <cổng nghe>: { algo, next, backends: [{ ip, port }] } }. */
+/** Máy Mac: dùng chung phần mạng với Linux, lệnh quản trị là networksetup, ifconfig, scutil. */
+export function macDevice(id, name, x, y) { return Object.assign(linuxDevice(id, name, x, y), { badge: 'MAC', macos: true }); }
 export function lbDevice(id, name, x, y) { return Object.assign(linuxDevice(id, name, x, y), { badge: 'LB', lb: {} }); }
 const syncServices = (d) => { d.services = [...new Set([...Object.entries(d.units).flatMap(([u, s]) => (s.active ? UNITS[u].ports : [])), ...Object.keys(d.lb || {}).map(Number)])]; };
 
@@ -42,6 +44,14 @@ const HELP = [
   'nmap [-p 22,80] <đích>       journalctl [-u <dịch vụ>] [-n số dòng]',
   'iptables -L                  ps aux · df -h · free -m',
   'ssh <user>@<IP> · hostname · uname -a · whoami',
+  'ls · cat <tệp> · echo "nội dung" >> <tệp> · apt install <gói> · docker ps',
+  'ansible <nhóm> -m ping · ansible <nhóm> -m cisco.ios.ios_config -a "lines=\'vlan 30\'" · ansible-playbook <tệp>',
+];
+const MAC_HELP = [
+  'Lệnh được mô phỏng trên macOS:',
+  'ifconfig en0 · networksetup -getinfo Wi-Fi · netstat -rn · scutil --dns · arp -a',
+  'networksetup -setmanual Wi-Fi <IP> <mask> <gateway> · -setdhcp Wi-Fi · -setdnsservers Wi-Fi <IP>',
+  'ping <đích> · traceroute <đích> · nslookup <tên> · dig <tên> · curl <url>',
 ];
 const NMAP_PORTS = { 22: 'ssh', 23: 'telnet', 25: 'smtp', 49: 'tacacs', 53: 'domain', 80: 'http', 123: 'ntp', 161: 'snmp', 443: 'https', 514: 'syslog', 3000: 'ppp', 3306: 'mysql', 5432: 'postgresql' };
 const SAMPLE = '(Lab: số liệu mẫu, không đo từ mô phỏng)';
@@ -54,7 +64,7 @@ const LB_HELP = [
 export const DNS_TYPES = ['A', 'AAAA', 'CNAME', 'MX', 'NS', 'PTR'];
 const NSLOOKUP_FMT = { CNAME: 'canonical name = ', MX: 'mail exchanger = ', NS: 'nameserver = ', PTR: 'name = ', AAAA: 'has AAAA address ' };
 
-export function makeLinux({ net, R, sshConnect }) {
+export function makeLinux({ net, R, sshConnect, iosRun, iosConfig }) {
   /**
    * Hỏi DNS qua UDP 53, tự đi theo CNAME: { ok, ip?, answers, nx?, nodata?, server? }. Máy đích phải mở cổng 53.
    * Bản ghi A nằm trong t.zone, kiểu khác trong t.rr = [{ name, type, value }].
@@ -330,11 +340,146 @@ export function makeLinux({ net, R, sshConnect }) {
     }
     return R(['Cú pháp: ufw status | enable | disable | reset | allow|deny <cổng> | allow|deny from <IP[/len]> [to any port <cổng>] | delete <số>']);
   }
+  // ---------- macOS: lệnh riêng của máy Mac, còn lại dùng chung với Linux ----------
+  function macos(d, w) {
+    const cmd = w[0].toLowerCase();
+    if (cmd === 'ifconfig') return R(['en0: flags=8863<UP,BROADCAST,RUNNING,SIMPLEX,MULTICAST> mtu 1500', `\tether ${N.epMac(net, { dev: d.id, ifn: 'fa0' })}`, ...(d.ip ? [`\tinet ${d.ip} netmask ${N.prefixToMask(d.prefix)}`] : []), '\tstatus: active']);
+    if (cmd === 'networksetup') {
+      const a = (w[1] || '').toLowerCase();
+      if (a === '-getinfo') return R([d.dhcp ? 'DHCP Configuration' : 'Manual Configuration', `IP address: ${d.ip || 'none'}`, `Subnet mask: ${d.ip ? N.prefixToMask(d.prefix) : 'none'}`, `Router: ${d.gateway || 'none'}`]);
+      if (a === '-setmanual' && N.isIp(w[3]) && N.isIp(w[4]) && N.isIp(w[5])) { d.ip = w[3]; d.prefix = N.maskToPrefix(w[4]); d.gateway = w[5]; d.dhcp = false; return R([]); }
+      if (a === '-setdnsservers' && N.isIp(w[3])) { d.dns = w[3]; return R([]); }
+      if (a === '-setdhcp') { const r = N.dhcpRequest(net, d.id, { record: true }); d.dhcp = true; if (r.ok) { d.ip = r.ip; d.prefix = r.prefix; d.gateway = r.gw; d.dns = r.dns; } return R([], { ok: r.ok, why: r.why }); }
+      return R(['Cú pháp: networksetup -getinfo Wi-Fi | -setmanual Wi-Fi <IP> <mask> <gateway> | -setdhcp Wi-Fi | -setdnsservers Wi-Fi <IP>']);
+    }
+    if (cmd === 'netstat') return R(['Routing tables', '', 'Internet:', 'Destination        Gateway            Flags        Netif', ...(d.gateway ? [`default            ${d.gateway.padEnd(19)}UGScg        en0`] : []), ...(d.ip ? [`${N.netOf(d.ip, d.prefix)}/${d.prefix}`.padEnd(19) + 'link#6             UCS          en0'] : [])]);
+    if (cmd === 'scutil') return R(['DNS configuration', ...(d.dns ? ['resolver #1', `  nameserver[0] : ${d.dns}`] : ['No DNS configuration available'])]);
+    if (cmd === 'arp') return R(Object.entries(d.arp).map(([ip, a]) => `? (${ip}) at ${a.mac} on en0 ifscope [ethernet]`));
+    return null;
+  }
+  // ---------- tệp, gói phần mềm ----------
+  function echo(d, line) {
+    const m = line.match(/^echo\s+(['"]?)(.*?)\1\s*(?:(>>?)\s*(\S+))?$/);
+    if (!m) return R(['Cú pháp: echo "nội dung" >> <tệp>']);
+    if (!m[3]) return R([m[2]]);
+    d.fs ||= {};
+    d.fs[m[4]] = [...(m[3] === '>>' ? d.fs[m[4]] || [] : []), m[2]];
+    return R([]);
+  }
+  function apt(d, w) {
+    const a = (w[1] || '').toLowerCase(), pkg = (w[2] || '').toLowerCase();
+    if (a === 'update') return R(['Reading package lists... Done', '(Lab: không tải gói thật)']);
+    if (a !== 'install' || !pkg) return R(['Cú pháp: apt update | apt install <gói>']);
+    if (pkg === 'ansible') d.ansible = true;
+    if (pkg === 'docker.io' || pkg === 'docker') d.docker = true;
+    return R([`Setting up ${pkg} ...`, '(Lab: chỉ ghi nhận đã cài, chỉ ansible và docker.io có lệnh mô phỏng)']);
+  }
+  // ---------- Ansible: chạy module IOS qua SSH thật (TCP 22, đúng tài khoản) ----------
+  function inventory(d) {
+    const groups = {}, hosts = {};
+    let g = 'ungrouped';
+    for (const raw of d.fs?.['/etc/ansible/hosts'] || []) {
+      const l = raw.trim(), sec = l.match(/^\[(\S+)\]$/);
+      if (sec) { g = sec[1]; continue; }
+      if (!l || l.startsWith('#')) continue;
+      const [h, ...v] = l.split(/\s+/), vars = Object.fromEntries(v.map((x) => x.split('=')));
+      hosts[h] = { ip: vars.ansible_host || h, user: vars.ansible_user, pw: vars.ansible_password };
+      (groups[g] ||= []).push(h);
+    }
+    return { groups, hosts };
+  }
+  const invMatch = (inv, p) => (p === 'all' ? Object.keys(inv.hosts) : inv.groups[p] || (inv.hosts[p] ? [p] : []));
+  /** Chạy một module trên một host: { st: 'ok'|'changed'|'unreachable'|'failed', msg, out }. */
+  function ansibleModule(d, h, mod, lines, parents) {
+    const r = N.sendPacket(net, { src: d.id, dst: h.ip, proto: 'tcp', dport: 22 });
+    if (!r.ok) return { st: 'unreachable', msg: `Failed to connect to the host via ssh: ${r.kind === 'refused' ? 'Connection refused' : 'Connection timed out'}` };
+    const t = net.devices[r.at.dev], u = t.users?.[h.user];
+    if (!u || u.pw !== h.pw) return { st: 'unreachable', msg: 'Invalid/incorrect username/password' };
+    const name = mod.split('.').pop();
+    if (name === 'ping') return { st: 'ok', msg: '"ping": "pong"' };
+    if (t.type !== 'router' && t.type !== 'switch') return { st: 'failed', msg: 'Module IOS chỉ chạy được trên thiết bị Cisco IOS' };
+    if (+u.priv < 15) return { st: 'failed', msg: 'privilege level không đủ (cần 15)' };
+    if (name === 'ios_command') return { st: 'ok', msg: '"changed": false', out: iosRun(t.id, lines).flat() };
+    if (name !== 'ios_config') return { st: 'failed', msg: `Module chưa mô phỏng: ${mod}` };
+    if (!lines.length) return { st: 'failed', msg: 'missing required arguments: lines' };
+    const before = iosConfig(t.id);
+    const out = iosRun(t.id, ['configure terminal', ...parents, ...lines, 'end']).flat();
+    const bad = out.find((l) => /^% (Invalid|Incomplete|Ambiguous)/.test(l));
+    if (bad) return { st: 'failed', msg: bad };
+    return { st: before === iosConfig(t.id) ? 'ok' : 'changed', msg: `"changed": ${before !== iosConfig(t.id)}` };
+  }
+  const quoted = (v) => (v == null ? [] : v.startsWith('[') || v.startsWith("'") ? [...v.matchAll(/'([^']*)'/g)].map((m) => m[1]) : [v]);
+  function ansible(d, w, line) {
+    if (!d.ansible) return R([`-bash: ${w[0]}: command not found`, '(Lab: cài trước bằng apt install ansible)']);
+    const inv = inventory(d), pat = w[1];
+    if (!pat) return R(['Cú pháp: ansible <nhóm|all> --list-hosts | -m ping | -m cisco.ios.ios_command -a "commands=\'show version\'" | -m cisco.ios.ios_config -a "lines=\'vlan 30\'"']);
+    const names = invMatch(inv, pat);
+    if (w.includes('--list-hosts')) return R([`  hosts (${names.length}):`, ...names.map((h) => `    ${h}`)]);
+    if (!names.length) return R([`[WARNING]: Could not match supplied host pattern, ignoring: ${pat}`]);
+    const mi = w.indexOf('-m'), mod = mi > 0 ? w[mi + 1] : 'ping';
+    const args = line.match(/-a\s+"([^"]*)"/)?.[1] || '';
+    const kv = Object.fromEntries([...args.matchAll(/(\w+)=(\[[^\]]*\]|'[^']*'|\S+)/g)].map((m) => [m[1], m[2]]));
+    const lines = quoted(kv.lines || kv.commands), parents = quoted(kv.parents);
+    const L = [];
+    for (const n of names) {
+      const r = ansibleModule(d, inv.hosts[n], mod, lines, parents);
+      L.push(`${n} | ${r.st.toUpperCase() === 'OK' ? 'SUCCESS' : r.st.toUpperCase()} => { ${r.msg} }`, ...(r.out || []));
+    }
+    return R(L);
+  }
+  /** Playbook kiểu YAML đơn giản: hosts, các task với module ios_config (lines, parents) hoặc ios_command (commands). */
+  function parsePlaybook(lines) {
+    const pb = { hosts: null, tasks: [] };
+    let task = null, key = null;
+    for (const raw of lines) {
+      const l = raw.trim();
+      let m;
+      if ((m = l.match(/^-?\s*hosts:\s*(\S+)/))) pb.hosts = m[1];
+      else if ((m = l.match(/^-\s*name:\s*(.+)/)) && pb.hosts) { if (task || /^\s{4}/.test(raw)) pb.tasks.push((task = { name: m[1], mod: null, lines: [], parents: [] })); }
+      else if ((m = l.match(/^((?:cisco\.ios\.)?ios_(?:config|command)):/)) && task) task.mod = m[1];
+      else if ((m = l.match(/^(lines|commands):/))) key = 'lines';
+      else if ((m = l.match(/^parents:\s*(.+)/)) && task) task.parents = [m[1]];
+      else if ((m = l.match(/^-\s+(.+)/)) && task && key) task.lines.push(m[1]);
+    }
+    return pb;
+  }
+  function playbook(d, w) {
+    if (!d.ansible) return R([`-bash: ${w[0]}: command not found`, '(Lab: cài trước bằng apt install ansible)']);
+    const file = w[1], src = d.fs?.[file];
+    if (!src) return R([`ERROR! the playbook: ${file ?? ''} could not be found`]);
+    const pb = parsePlaybook(src), inv = inventory(d), names = invMatch(inv, pb.hosts);
+    if (!names.length) return R([`[WARNING]: Could not match supplied host pattern, ignoring: ${pb.hosts}`]);
+    const total = Object.fromEntries(names.map((n) => [n, { ok: 0, changed: 0, unreachable: 0, failed: 0 }]));
+    const L = [`PLAY [${pb.hosts}] ***`];
+    for (const t of pb.tasks) {
+      L.push('', `TASK [${t.name}] ***`);
+      for (const n of names) {
+        const r = ansibleModule(d, inv.hosts[n], t.mod || 'ios_config', t.lines, t.parents);
+        L.push(`${r.st === 'failed' || r.st === 'unreachable' ? 'fatal' : r.st}: [${n}]${r.st === 'failed' || r.st === 'unreachable' ? `: ${r.msg}` : ''}`);
+        total[n][r.st]++;
+        if (r.st === 'changed') total[n].ok++;
+      }
+    }
+    d.lastRecap = Object.values(total).reduce((a, x) => ({ changed: a.changed + x.changed, failed: a.failed + x.failed + x.unreachable }), { changed: 0, failed: 0 });
+    return R([...L, '', 'PLAY RECAP ***', ...names.map((n) => `${n.padEnd(16)}: ok=${total[n].ok} changed=${total[n].changed} unreachable=${total[n].unreachable} failed=${total[n].failed}`)]);
+  }
   function exec(d, s, line) {
     const w = line.replace(/^sudo\s+/, '').split(/\s+/).filter(Boolean);
     const cmd = (w[0] || '').toLowerCase();
     if (!cmd) return R([]);
-    if (cmd === '?' || cmd === 'help') return R(d.lb ? [...HELP, ...LB_HELP] : HELP);
+    if (cmd === '?' || cmd === 'help') return R(d.macos ? MAC_HELP : d.lb ? [...HELP, ...LB_HELP] : HELP);
+    if (d.macos) {
+      const r = macos(d, w);
+      if (r) return r;
+      if (['ip', 'ss', 'systemctl', 'ufw', 'resolvectl', 'dhclient', 'iptables', 'journalctl', 'apt', 'ansible', 'ansible-playbook'].includes(cmd)) return R([`zsh: command not found: ${cmd}`]);
+    }
+    if (cmd === 'echo') return echo(d, line.replace(/^sudo\s+/, ''));
+    if (cmd === 'ls') { const dir = w[1]?.replace(/\/$/, ''); return R(Object.keys(d.fs || {}).filter((f) => (dir ? f.startsWith(`${dir}/`) : !f.startsWith('/'))).map((f) => f.split('/').pop())); }
+    if (cmd === 'apt' || cmd === 'apt-get') return apt(d, w);
+    if (cmd === 'docker') return d.docker ? R(['CONTAINER ID   IMAGE     COMMAND   CREATED   STATUS    PORTS     NAMES', '(Lab: chưa có container nào)']) : R(["-bash: docker: command not found", '(Lab: cài trước bằng apt install docker.io)']);
+    if (cmd === 'vi' || cmd === 'vim' || cmd === 'nano') return R(['(Lab: chưa mô phỏng trình soạn thảo toàn màn hình. Ghi tệp bằng: echo "nội dung" >> <tệp>, xem lại bằng: cat <tệp>)']);
+    if (cmd === 'ansible') return ansible(d, w, line);
+    if (cmd === 'ansible-playbook') return playbook(d, w);
     if (cmd === 'lb' && d.lb) return lbCmd(d, w);
     if (cmd === 'ip') return ipCmd(d, w);
     if (cmd === 'ping') return ping(d, w);
@@ -357,6 +502,7 @@ export function makeLinux({ net, R, sshConnect }) {
     if (cmd === 'uname') return R([`Linux ${d.name} (mô phỏng)`]);
     if (cmd === 'dhclient') {
       const r = N.dhcpRequest(net, d.id, { record: true, anim: true });
+      if (r.sim) sniffRecord(net, r.sim.events);
       d.dhcp = true;
       if (!r.ok) return R(['No DHCPOFFERS received.'], { sim: r.sim, simLabel: `${d.name} DHCP (thất bại)`, why: r.why, ok: false });
       d.ip = r.ip; d.prefix = r.prefix; d.gateway = r.gw; d.dns = r.dns;
@@ -367,6 +513,7 @@ export function makeLinux({ net, R, sshConnect }) {
       if (w[1] === 'status' || !w[1]) return R([`Link 2 (eth0)`, `  Current DNS Server: ${d.dns || '(chưa có)'}`]);
       return R(['Cú pháp: resolvectl dns eth0 <IP> | resolvectl status']);
     }
+    if (cmd === 'cat' && d.fs?.[w[1]]) return R(d.fs[w[1]]);
     if (cmd === 'cat') return R(w[1] === '/etc/resolv.conf' ? (d.dns ? [`nameserver ${d.dns}`] : ['# chưa có DNS']) : [`cat: ${w[1] || ''}: lab chỉ mô phỏng /etc/resolv.conf`]);
     if (cmd === 'ssh') {
       const m = String(w[1] || '').match(/^([^@\s]+)@(\S+)$/);
@@ -375,5 +522,5 @@ export function makeLinux({ net, R, sshConnect }) {
     }
     return R([`${w[0]}: command not found`], { why: 'Đây là Linux mô phỏng, gõ ? để xem các lệnh có sẵn.' });
   }
-  return { exec, curl, prompt: (d) => `root@${d.name}:~# ` };
+  return { exec, curl, prompt: (d) => (d.macos ? `${d.name}:~ admin$ ` : `root@${d.name}:~# `) };
 }

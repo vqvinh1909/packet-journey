@@ -37,7 +37,7 @@ export function build() {
     links: [
       { id: 'o', a: 'r1', b: 'r2', labelMid: 'OSPF Area 0' },
       { id: 'e', a: 'r2', b: 'r3', labelMid: 'EIGRP AS 100' },
-      { id: 'n', a: 'r3', b: 'net' },
+      { id: 'n', a: 'r3', b: 'net', bp: '' },
     ],
   };
 

@@ -1,6 +1,6 @@
 // ui/wlc.js — trang quản trị web của WLC (lab/wlc.js). Mỗi nút sinh 1 lệnh thao tác gửi qua api.run(cmd).
 import { esc } from './topo.js';
-import { WLC_QOS, WLC_SEC, apConfig, apJoined } from '../lab/wlc.js';
+import { WLC_QOS, WLC_SEC, apConfig, rfStatus, WLC_CHANNELS, apJoined } from '../lab/wlc.js';
 
 const TABS = ['Monitor', 'WLANs', 'Controller', 'Wireless', 'Security'];
 const q = (x) => `"${String(x).trim().replace(/"/g, '')}"`; // lệnh dùng " để bọc giá trị nên giá trị không được chứa "
@@ -31,12 +31,13 @@ export function renderWlc(el, d, api) {
     body += `<h4>Dynamic interfaces</h4><table class="gf-t"><tr><th>Tên</th><th>VLAN</th><th>IP</th><th>Gateway</th><th></th></tr>${Object.values(C.ifs).map((f) => `<tr><td>${esc(f.name)}</td><td>${f.vlan}</td><td>${esc(f.ip)}/${f.prefix}</td><td>${esc(f.gw)}</td><td><button data-idel="${esc(f.name)}" title="Xoá">🗑</button></td></tr>`).join('') || '<tr><td colspan="5" class="gf-muted">(chưa có)</td></tr>'}</table>`;
     body += `<div class="gf-row"><input id="wi-n" placeholder="Tên (vd vlan20)"><input id="wi-v" size="5" placeholder="VLAN"><input id="wi-ip" placeholder="IP/nn"><input id="wi-gw" placeholder="Gateway"><button id="wi-add">＋ Thêm</button></div>`;
   } else if (tab === 'Wireless') {
-    body += `<h4>Access Points</h4><table class="gf-t"><tr><th>AP</th><th>Trạng thái</th><th>Chế độ</th><th>Kênh 2.4 GHz</th></tr>`;
+    body += `<h4>Access Points</h4><table class="gf-t"><tr><th>AP</th><th>Trạng thái</th><th>Chế độ</th><th>Kênh</th><th>Phát (dBm)</th><th>RSSI / nhiễu / SNR</th></tr>`;
+    const rf = rfStatus(net, d);
     for (const a of aps) {
       const c = apConfig(d, a.id);
-      body += `<tr><td>${esc(a.name)}</td><td><span class="gf-act ${apJoined(net, d, a.id) ? 'accept' : 'drop'}">${apJoined(net, d, a.id) ? 'Joined' : 'Chưa join'}</span></td><td><select data-apm="${esc(a.id)}">${opt({ local: 'Local', flexconnect: 'FlexConnect' }, c.mode)}</select></td><td><select data-apc="${esc(a.id)}"><option value="">Chưa chọn</option>${Array.from({ length: 13 }, (_, i) => `<option${c.channel === i + 1 ? ' selected' : ''}>${i + 1}</option>`).join('')}</select></td></tr>`;
+      body += `<tr><td>${esc(a.name)}</td><td><span class="gf-act ${apJoined(net, d, a.id) ? 'accept' : 'drop'}">${apJoined(net, d, a.id) ? 'Joined' : 'Chưa join'}</span></td><td><select data-apm="${esc(a.id)}">${opt({ local: 'Local', flexconnect: 'FlexConnect' }, c.mode)}</select></td><td><select data-apc="${esc(a.id)}"><option value="">Chưa chọn</option>${WLC_CHANNELS.map((ch) => `<option${c.channel === ch ? ' selected' : ''}>${ch}</option>`).join('')}</select></td><td><select data-app="${esc(a.id)}">${[20, 17, 14, 11, 8, 5].map((p) => `<option${(c.power ?? 20) === p ? ' selected' : ''}>${p}</option>`).join('')}</select></td><td>${(() => { const x = rf.find((z) => z.ap === a.id); return x?.channel == null ? '-' : `${x.rssi} / ${x.noise} (${esc(x.by)}) / <b>${x.snr} dB</b>`; })()}</td></tr>`;
     }
-    body += `</table><div class="gf-muted">Băng 2.4 GHz chỉ có 3 kênh không chồng lấn: 1, 6, 11.</div>`;
+    body += `</table><div class="gf-muted">Băng 2.4 GHz chỉ có 3 kênh không chồng lấn: 1, 6, 11. Kênh từ 36 trở lên là băng 5 GHz: nhiều kênh hơn, ít nhiễu hơn nhưng đi gần hơn. SNR nên từ 25 dB trở lên.</div>`;
   } else {
     body += `<h4>RADIUS Authentication Servers</h4><table class="gf-t"><tr><th>IP</th><th>Shared secret</th><th></th></tr>${Object.values(C.radius).map((r) => `<tr><td>${esc(r.ip)}</td><td>••••••</td><td><button data-rdel="${esc(r.ip)}" title="Xoá">🗑</button></td></tr>`).join('') || '<tr><td colspan="3" class="gf-muted">(chưa có)</td></tr>'}</table>`;
     body += `<div class="gf-row"><input id="wr-ip" placeholder="IP máy chủ"><input id="wr-s" placeholder="Shared secret"><button id="wr-add">＋ Thêm</button></div>`;
@@ -72,6 +73,7 @@ export function renderWlc(el, d, api) {
   each('[data-idel]', 'onclick', (b) => api.run(`if del ${q(b.dataset.idel)}`));
   each('[data-apm]', 'onchange', (x) => api.run(`ap ${x.dataset.apm} mode=${x.value}`));
   each('[data-apc]', 'onchange', (x) => { if (x.value) api.run(`ap ${x.dataset.apc} channel=${x.value}`); });
+  each('[data-app]', 'onchange', (x) => api.run(`ap ${x.dataset.app} power=${x.value}`));
   on('#wr-add', () => api.run(`radius add ${val('#wr-ip')} secret=${q(val('#wr-s'))}`));
   each('[data-rdel]', 'onclick', (b) => api.run(`radius del ${b.dataset.rdel}`));
 }

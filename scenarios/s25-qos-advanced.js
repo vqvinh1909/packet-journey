@@ -33,7 +33,7 @@ export function build() {
       { id: 'r1', type: 'router', name: 'R1', x: 680, y: 160, lines: ['queue ra WAN'] },
       { id: 'wan', type: 'host', name: 'WAN', x: 900, y: 160, color: '#a0433a', lines: ['link hẹp'] },
     ],
-    links: [{ id: 'lp', a: 'phone', b: 'sw' }, { id: 'lc', a: 'cam', b: 'sw' }, { id: 'ld', a: 'pc', b: 'sw' }, { id: 'lr', a: 'sw', b: 'r1' }, { id: 'lw', a: 'r1', b: 'wan', labelMid: 'WAN' }],
+    links: [{ id: 'lp', a: 'phone', b: 'sw' }, { id: 'lc', a: 'cam', b: 'sw' }, { id: 'ld', a: 'pc', b: 'sw' }, { id: 'lr', a: 'sw', b: 'r1' }, { id: 'lw', a: 'r1', b: 'wan', bp: '', labelMid: 'WAN' }],
   };
   const sim = new Sim(topology);
 

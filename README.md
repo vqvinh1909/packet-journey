@@ -5,10 +5,10 @@ sâu** một gói tin đi qua từng tầng OSI/TCP-IP và từng thiết bị �
 mô phỏng + giáo trình". Gói tin được dựng thành **byte thật**, checksum **tính thật**,
 và **xuất được `.pcap`** để mở bằng Wireshark đối chiếu.
 
-> Trạng thái: **đã phủ CCNA + CCNP** — 30 kịch bản byte-thật (23 giao thức, quiz đủ 30 bài),
+> Trạng thái: **đã phủ CCNA + CCNP** — 32 kịch bản byte-thật (23 giao thức, quiz đủ 32 bài),
 > chế độ học chủ động (đoán bước, thử thách sửa lỗi, từ điển, lưu tiến độ, PWA offline),
-> Builder + ✏️ trình vẽ sơ đồ mạng kiểu draw.io, và **🧪 Lab CLI Cisco IOS với 113 lab** (27 lab giáo trình, 41 lab
-> CCNA trực quan, 5 lab chuyên đề, 17 lab bảo mật & firewall 7 hãng, 6 lab bảo mật L2 & thiết bị, 8 lab bổ sung theo CCNA 200-301, 4 lab Wi-Fi & WLC, 5 lab tổng hợp doanh nghiệp) + chế độ thi thử + chế độ tự dựng mạng. Chi tiết xem [Lộ trình](#lộ-trình).
+> Builder + ✏️ trình vẽ sơ đồ mạng kiểu draw.io, và **🧪 Lab CLI Cisco IOS với 128 lab** (27 lab giáo trình, 41 lab
+> CCNA trực quan, 5 lab chuyên đề, 17 lab bảo mật & firewall 7 hãng, 6 lab bảo mật L2 & thiết bị, 22 lab bổ sung theo CCNA 200-301, 5 lab Wi-Fi & WLC, 5 lab tổng hợp doanh nghiệp) + chế độ thi thử + chế độ tự dựng mạng. Chi tiết xem [Lộ trình](#lộ-trình).
 
 ## Chạy app
 
@@ -51,7 +51,7 @@ Test kiểm: checksum so với ví dụ đã biết, độ dài & offset header,
 gói ARP/ICMP mẫu, cấu trúc file `.pcap`, longest-prefix match, và tính bất biến của
 kịch bản (TTL giảm qua router, IP src/dst giữ nguyên).
 
-Với Lab CLI (`tests/lab.test.js`), MỖI lab trong 113 lab phải: trước khi giải có ít nhất 1 nhiệm vụ
+Với Lab CLI (`tests/lab.test.js`), MỖI lab trong 128 lab phải: trước khi giải có ít nhất 1 nhiệm vụ
 cấu hình chưa đạt; chạy lời giải (`applySolution` — `solution` hoặc `guide`, bước `'@link'` = cắm dây)
 không sinh lỗi CLI `% Invalid/Incomplete/Ambiguous/Unknown`; sau đó `checkLab(lab, net, quizAnswers(lab))`
 đạt toàn bộ. `tests/sandbox.test.js` kiểm chế độ tự dựng mạng (thêm/xoá/nối dây, đổi tên, nhân bản, hoàn tác,
@@ -84,7 +84,7 @@ node tools/ui-smoke.cjs   # tự bật server tĩnh, in PASS/FAIL từng mục
   - **Cây trường** kiểu Wireshark (trường vừa đổi được tô màu cam).
   - **Hex/Binary**: rê chuột vào trường → sáng đúng byte; rê vào byte → biết nó thuộc trường nào.
   - **Giải thích**: "chuyện gì đang xảy ra và vì sao", kèm link 📖 Đọc thêm sang bài học.
-- **🎯 Quiz** (nút trên thanh tiêu đề): câu hỏi cuối bài, chấm điểm + lưu kỷ lục. **Cả 30 kịch bản đều có quiz** (100 câu, ở `scenarios/quizzes.js`).
+- **🎯 Quiz** (nút trên thanh tiêu đề): câu hỏi cuối bài, chấm điểm + lưu kỷ lục. **Cả 32 kịch bản đều có quiz** (108 câu, ở `scenarios/quizzes.js`).
 - **🤔 Đoán bước** (bật/tắt): dừng trước quyết định quan trọng, bạn chọn đáp án rồi app mới lộ giải thích.
 - **🔧 Thử thách sửa lỗi**: s22/s23 cố tình cấu hình sai, bạn đoán triệu chứng/nguyên nhân rồi xem gói chứng minh.
 - **📘 Từ điển**: ~25 thuật ngữ (có tìm kiếm) + bảng tra nhanh cổng phổ biến & OSI↔TCP/IP.
@@ -96,7 +96,7 @@ node tools/ui-smoke.cjs   # tự bật server tĩnh, in PASS/FAIL từng mục
 - **🎓 Thi thử CCNA** (`lab/ccna-exam.js`, `ui/exam.js`): ngân hàng **100 câu tự soạn** (không chép đề thật/dump) chia đúng tỉ trọng 5 mảng đề CCNA 200-301 v2.0 (Network Infrastructure and Connectivity 25%, Switching and Network Access 25%, IP Routing 20%, Network Services and Security 20%, AI and Network Operations 10%) — trắc nghiệm 1 đáp án, nhiều đáp án, ghép cặp — cộng **câu lab mô phỏng** (console thu nhỏ, chấm bằng `checkLab`). **Ba chế độ ngôn ngữ VI / EN / VI + EN** (song ngữ: dòng tiếng Anh ngay dưới tiếng Việt; bản dịch ở `lab/ccna-exam-en.js`, cùng thứ tự với ngân hàng). Mỗi đề có thêm **câu sinh tự động với số liệu mới** (`lab/ccna-gen.js`: broadcast, số host, host hợp lệ, wildcard, route tóm tắt, longest prefix match, so AD, ACL standard, DHCP excluded) — đáp án được TÍNH bằng số học nhị phân, test chạy mỗi dạng 400 bộ số và tính lại bằng cách độc lập. Đề đầy đủ 116 câu (100 + 12 câu sinh + 4 lab) / 120 phút hoặc rút gọn 35 câu / 40 phút; câu và phương án được xáo theo seed; đồng hồ đếm ngược, lưới câu hỏi, ⚑ đánh dấu, tải lại trang vẫn làm tiếp (`pj_ccna-exam-cur`). Nộp bài → điểm **300–1000 (đạt ≥ 825)**, thanh điểm từng mảng, xem lại câu sai kèm đáp án + giải thích, lịch sử các lần thi (`pj_ccna-exam-hist`).
 - **📋 Cheat sheet** (`lab/cheat.js`, `ui/cheat.js`): tự gom các lệnh bạn đã gõ **thành công** trong Lab CLI theo chủ đề → chế độ CLI (kèm dấu nhắc), mô tả ngắn tiếng Việt, ví dụ đã gõ, số lần dùng; lọc chủ đề, tìm kiếm, **🖨 In** (chỉ in bảng lệnh).
 - **📊 Điểm yếu của tôi** (`lab/weak.js`, `ui/weak.js`): app tự ghi khi bạn học — lệnh gõ sai trong Lab CLI (`% Invalid / Incomplete / Ambiguous`), nhiệm vụ còn trượt khi mở lời giải hoặc nộp bài thi thử, số gợi ý / lời giải đã mở, câu trắc nghiệm sai (trong lab và 🎯 Quiz kịch bản), thời gian làm từng lab, cộng kết quả 🎲 Phá mạng và 🧮 Luyện subnet. Mỗi lab/nhiệm vụ/lệnh được gắn chủ đề (VLAN/Trunk, STP, EtherChannel, Static, OSPF, EIGRP, BGP, ACL, NAT, DHCP, FHRP, Bảo mật L2, Firewall, IPv6, Subnet, Quản trị thiết bị, WAN/Serial, Interface & L1, Nền tảng — suy từ tên/bài học/nhóm hoặc trường `topics` của lab). Trang hiện **biểu đồ SVG điểm 0–100 theo chủ đề** (rê chuột xem chi tiết, có dạng bảng), **lệnh gõ sai nhiều nhất kèm cú pháp đúng** (CLI tự tìm mẫu lệnh gần nhất, báo cả khi gõ sai chế độ, vd lệnh cổng gõ ở `(config)#`), **3–5 lab nên làm** và nút **🎲 Phá mạng chủ đề yếu nhất**. Dữ liệu ở `pj_weak` (có trong xuất/nhập tiến độ).
-- **🧪 Lab CLI (Cisco IOS)** — **113 lab** + chế độ thi thử + chế độ tự dựng mạng: gõ lệnh như trên router/switch thật (viết tắt `sh ip int br`, `conf t`, Tab hoàn thành, `?` trợ giúp, lỗi `% Invalid input ... '^' marker`, mật khẩu enable, `| include/section`...). Mạng được **tính thật** từ cấu hình bạn gõ: VLAN/trunk/native/DTP/VTP/EtherChannel/PVLAN, **STP 802.1D/PVST thật** (root/root port/designated, cổng BLOCKING bị chặn khi chuyển frame), bảng định tuyến connected + static (floating) + **OSPF đa vùng/EIGRP/BGP (iBGP qua loopback, eBGP) tự hội tụ** + redistribution, **IPv6 dual-stack** (địa chỉ/EUI-64/link-local, static, OSPFv3, SLAAC, ping IPv6), GRE, IPsec, PPP CHAP, ACL (thứ tự dòng, deny ngầm định), NAT/PAT/NAT tĩnh/NAT pool, HSRP (tracking)/VRRP, DHCP + relay, **DHCP snooping (chặn DHCP giả, bảng binding) + DAI + IP Source Guard**, port-security, SSH (hỏi mật khẩu)/Telnet, **AAA local, login block-for/quiet mode**, NTP. Nhiệm vụ **tự chấm** sau mỗi lệnh bằng ping/telnet/`show` thật; ping/traceroute/DHCP có nút **▶ Xem gói tin** mở timeline byte-thật ở màn hình chính.
+- **🧪 Lab CLI (Cisco IOS)** — **128 lab** + chế độ thi thử + chế độ tự dựng mạng: gõ lệnh như trên router/switch thật (viết tắt `sh ip int br`, `conf t`, Tab hoàn thành, `?` trợ giúp, lỗi `% Invalid input ... '^' marker`, mật khẩu enable, `| include/section`...). Mạng được **tính thật** từ cấu hình bạn gõ: VLAN/trunk/native/DTP/VTP/EtherChannel/PVLAN, **STP 802.1D/PVST thật** (root/root port/designated, cổng BLOCKING bị chặn khi chuyển frame), bảng định tuyến connected + static (floating) + **OSPF đa vùng/EIGRP/BGP (iBGP qua loopback, eBGP) tự hội tụ** + redistribution, **IPv6 dual-stack** (địa chỉ/EUI-64/link-local, static, OSPFv3, SLAAC, ping IPv6), GRE, IPsec, PPP CHAP, ACL (thứ tự dòng, deny ngầm định), NAT/PAT/NAT tĩnh/NAT pool, HSRP (tracking)/VRRP, DHCP + relay, **DHCP snooping (chặn DHCP giả, bảng binding) + DAI + IP Source Guard**, port-security, SSH (hỏi mật khẩu)/Telnet, **AAA local, login block-for/quiet mode**, NTP. Nhiệm vụ **tự chấm** sau mỗi lệnh bằng ping/telnet/`show` thật; ping/traceroute/DHCP có nút **▶ Xem gói tin** mở timeline byte-thật ở màn hình chính.
   - Trong mỗi lab: **📝 Ghi chú của tôi** (markdown gọn `**đậm**`, `` `lệnh` ``, gạch đầu dòng — lưu `pj_labnote:<id>`) + cờ **⭐ Cần làm lại** (lọc bằng nút ⭐ ở danh sách lab); **🩺 Vì sao không ping được?** (`lab/diagnose.js`: chọn nguồn + IP đích, app dò theo lớp L1 cáp/cổng → cấu hình IP máy → L2 VLAN/trunk (ARP) → L3/ACL/NAT/VPN bằng chính engine, liệt kê các lớp đã ổn rồi mở **gợi ý 3 mức**: lớp nào → thiết bị + lệnh show nào → chi tiết lỗi); **🔍 So sánh với lời giải** (`lab/cfgdiff.js`: running-config của bạn so với cấu hình sau lời giải theo từng thiết bị — dòng chỉ có ở bạn / chỉ có ở lời giải, kèm ghi chú khi hai cách đều đúng: `network` ↔ `ip ospf … area`, ACL số ↔ ACL tên, static next-hop ↔ cổng ra…).
   - **27 lab theo giáo trình** *Infrastructure Administrator* (L01–L20 theo bài, 🎫 6 ticket T01–T06, 🏢 dự án GreenMart P01).
   - **41 lab "CCNA trực quan"** (`lab/labs-ccna.js`): Ch.1 khái niệm cốt lõi A01–A26, Ch.2 các bước cấu hình B01–B10, Ch.3 xử lý sự cố C01–C05.
@@ -197,6 +197,7 @@ styles/     theme (biến màu, sáng/tối), app (bố cục)
 - **s26** IPv6 + NDP (thay ARP) · **s27** OSPFv3 (OSPF cho IPv6)
 - **s28** SLAAC & DHCPv6 (tự cấu hình địa chỉ IPv6: RS/RA, DAD, Solicit/Advertise/Request/Reply)
 - **s29** MPLS (push/swap/pop nhãn) · **s30** VXLAN overlay (L2 trên L3, VNI)
+- **s31** BGP EVPN (route type 2, ARP suppression) · **s32** SR-MPLS (chồng node SID, PHP)
 
 ## Đơn giản hóa (so với thực tế)
 

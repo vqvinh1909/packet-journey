@@ -33,7 +33,7 @@ export function build() {
     ],
     links: [
       { id: 'l', a: 'r1', b: 'r2', labelMid: 'eBGP (TCP 179)' },
-      { id: 'ln', a: 'r2', b: 'net' },
+      { id: 'ln', a: 'r2', b: 'net', bp: '' },
     ],
   };
 

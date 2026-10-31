@@ -1,17 +1,20 @@
 // lab/labs-n200.js — nhóm "🆕 Bổ sung CCNA 200-301": các chủ đề của đề hiện hành mà bộ lab trước chưa có —
 // LLDP, OSPF point-to-point, static route có tên + dự phòng, SNMPv2c/v3, ACL IPv6, VLAN mở rộng, khôi phục mật khẩu,
-// bản ghi DNS, lỗi duplex và tốc độ, Voice VLAN và PoE, máy ảo và vSwitch, kiểm chứng đề xuất của AI agent.
+// bản ghi DNS, lỗi duplex và tốc độ, cáp quang, Voice VLAN và PoE, máy ảo và vSwitch, kiểm chứng đề xuất của AI agent,
+// Root Guard, Loop Guard, Storm Control, RA Guard, AAA client, SCP/SFTP, máy khách đa hệ điều hành, Ansible, IaC.
 // Topology, địa chỉ và tình huống tự thiết kế.
 
 import * as N from './net.js';
 import * as V6 from './net6.js';
 import { snmpTool } from './snmp.js';
-import { linuxDevice } from './linux.js';
+import { linuxDevice, macDevice } from './linux.js';
+import { radiusServer } from './wlc.js';
 import { cfg, quiz, fa, allowedOk } from './kit.js';
 
 const { pc, server, router, sw, makeNet } = N;
 // chạy công cụ SNMP trên bản sao để việc chấm không làm đổi bộ đếm / giá trị của mạng người học
 const snmpOk = (a, src, cmd) => snmpTool(N.cloneNet(a.net), src, cmd).some((l) => /= STRING:/.test(l));
+const SSH_SW = (name, ip) => cfg(`hostname ${name}`, 'interface vlan 1', `ip address ${ip} 255.255.255.0`, 'no shutdown', 'exit', 'ip domain-name congty.vn', 'crypto key generate rsa modulus 2048', 'username admin privilege 15 secret Cisco@123', 'line vty 0 4', 'login local', 'transport input ssh');
 const digShort = (a, q) => a.show('cli', `dig ${q} +short`);
 const ospfR = (rid, nets) => ['router ospf 1', `router-id ${rid}`, ...nets.map((n) => `network ${n} area 0`), 'exit'];
 
@@ -264,26 +267,26 @@ export const N200_LABS = [
   {
     id: 'N11', group: 'n2', lesson: 'CCNA 200-301 · 2.2 — Voice VLAN và PoE', level: 1, kind: 'ticket',
     title: 'Điện thoại IP không sáng màn hình: PoE và Voice VLAN',
-    story: '🎫 PHONE1 cắm vào Fa0/1 của SW1 nhưng không có nguồn, nên không gọi được. Thiết kế: dữ liệu ở VLAN 10, thoại ở VLAN 20, tổng đài CUCM ở VLAN 20. Cổng điện thoại cần cấp PoE, đặt access VLAN 10 cho PC cắm phía sau và voice VLAN 20 cho điện thoại. PC1 ở Fa0/2 cũng chưa vào VLAN dữ liệu. Lab vẽ PC1 cắm riêng vì chưa mô phỏng PC nối qua cổng PC của điện thoại.',
+    story: '🎫 PHONE1 cắm vào Fa0/1 của SW1 nhưng không có nguồn, nên không gọi được, PC1 cắm sau điện thoại cũng mất mạng. Thiết kế: dữ liệu ở VLAN 10, thoại ở VLAN 20, tổng đài CUCM ở VLAN 20. Cổng Fa0/1 cần cấp PoE, access VLAN 10 cho PC1 và voice VLAN 20 cho điện thoại.',
     build: () => makeNet([
       sw('sw', 'SW1', 420, 110, fa(4)),
-      Object.assign(server('ph', 'PHONE1', 120, 300, { ip: '10.20.0.11', services: [], cloud: false }), { badge: 'TEL', phone: true }),
-      pc('p1', 'PC1', 320, 300, { ip: '10.10.0.11' }),
-      Object.assign(server('cucm', 'CUCM', 520, 300, { ip: '10.20.0.5', services: [5060] }), { badge: 'VOIP' }),
+      Object.assign(server('ph', 'PHONE1', 180, 260, { ip: '10.20.0.11', services: [], cloud: false }), { badge: 'TEL', phone: true }),
+      pc('p1', 'PC1', 180, 450, { ip: '10.10.0.11' }),
+      Object.assign(server('cucm', 'CUCM', 480, 300, { ip: '10.20.0.5', services: [5060] }), { badge: 'VOIP' }),
       server('data', 'SRV-DATA', 720, 300, { ip: '10.10.0.5' }),
-    ], [['ph', 'fa0', 'sw', 'fa0/1'], ['p1', 'fa0', 'sw', 'fa0/2'], ['cucm', 'fa0', 'sw', 'fa0/3'], ['data', 'fa0', 'sw', 'fa0/4']]),
+    ], [['ph', 'fa0', 'sw', 'fa0/1'], ['p1', 'fa0', 'ph', 'pc0'], ['cucm', 'fa0', 'sw', 'fa0/3'], ['data', 'fa0', 'sw', 'fa0/4']]),
     init: [['sw', cfg('hostname SW1', 'vlan 10', 'name DATA', 'vlan 20', 'name VOICE', 'exit', 'interface fa0/1', 'switchport mode access', 'switchport access vlan 10', 'power inline never', 'interface fa0/3', 'switchport mode access', 'switchport access vlan 20', 'interface fa0/4', 'switchport mode access', 'switchport access vlan 10')]],
     tasks: [
       { text: 'Fa0/1 cấp nguồn cho điện thoại (Admin auto, Oper on)', verify: 'show power inline', check: (a) => a.show('sw', 'show power inline').some((l) => /^Fa0\/1\s+auto\s+on\b/.test(l)) },
       { text: 'Fa0/1 là cổng access: access VLAN 10, voice VLAN 20', verify: 'show interfaces fa0/1 switchport', check: (a) => { const p = a.d('sw').ports['fa0/1']; return p.mode === 'access' && p.modeSet && p.vlan === 10 && p.voiceVlan === 20; } },
       { text: 'PHONE1 ping được CUCM', verify: 'ping 10.20.0.5', check: (a) => a.ping('ph', '10.20.0.5') },
-      { text: 'PC1 thuộc VLAN 10 và ping được SRV-DATA', verify: 'ping 10.10.0.5', check: (a) => a.d('sw').ports['fa0/2'].vlan === 10 && a.ping('p1', '10.10.0.5') },
+      { text: 'PC1 cắm sau điện thoại ping được SRV-DATA', verify: 'ping 10.10.0.5', check: (a) => a.ping('p1', '10.10.0.5') },
       quiz('Trên cùng một cổng có điện thoại và PC phía sau, frame đi thế nào?', ['Thoại gắn thẻ 802.1Q VLAN thoại, dữ liệu của PC không gắn thẻ', 'Cả hai đều không gắn thẻ', 'Cả hai đều gắn thẻ VLAN dữ liệu', 'Cổng phải đặt trunk và tắt CDP'], 0),
       quiz('Điện thoại Cisco biết voice VLAN bằng cách nào?', ['Switch báo qua CDP hoặc LLDP-MED', 'Hỏi DNS', 'Đọc từ bảng MAC', 'Người dùng phải nhập tay trên mọi máy'], 0),
       quiz('PoE+ theo chuẩn 802.3at cấp tối đa bao nhiêu tại cổng switch?', ['30 W', '15,4 W', '60 W', '5 W'], 0, '802.3af cấp 15,4 W, 802.3at cấp 30 W, 802.3bt cấp cao hơn.'),
     ],
-    hints: ['show power inline: cột Admin never nghĩa là cổng bị tắt PoE.', 'interface fa0/1 → power inline auto → switchport voice vlan 20', 'interface fa0/2 → switchport mode access → switchport access vlan 10'],
-    solution: [['sw', cfg('interface fa0/1', 'power inline auto', 'switchport voice vlan 20', 'interface fa0/2', 'switchport mode access', 'switchport access vlan 10')]],
+    hints: ['show power inline: cột Admin never nghĩa là cổng bị tắt PoE.', 'interface fa0/1 → power inline auto', 'interface fa0/1 → switchport voice vlan 20. Access VLAN 10 đã có sẵn cho PC.'],
+    solution: [['sw', cfg('interface fa0/1', 'power inline auto', 'switchport voice vlan 20')]],
   },
   {
     id: 'N12', group: 'n2', lesson: 'CCNA 200-301 · 1.2 — Máy ảo và vSwitch', level: 1, kind: 'config',
@@ -327,10 +330,221 @@ export const N200_LABS = [
       { text: 'PC-KT ping được SRV', verify: 'ping 10.10.0.5', check: (a) => a.ping('kt', '10.10.0.5') },
       { text: 'Có tài khoản ai-agent với privilege 1', verify: 'show running-config | include username', check: (a) => +a.d('sw').users['ai-agent']?.priv === 1 },
       quiz('Điểm khác nhau chính giữa AI agent và chatbot chỉ trả lời?', ['Agent tự lập kế hoạch và gọi công cụ để hành động qua nhiều bước', 'Agent không dùng mô hình ngôn ngữ', 'Chatbot luôn đúng hơn', 'Agent không cần quyền truy cập'], 0),
-      quiz('Prompt nào tốt nhất để nhờ AI phân tích sự cố?', ['Nêu vai trò, bối cảnh, dữ liệu show đã che thông tin nhạy cảm, yêu cầu và định dạng kết quả', 'Mạng lỗi, sửa đi', 'Dán toàn bộ running-config kèm mật khẩu', 'Yêu cầu AI tự đổi cấu hình trên production'], 0),
+      quiz('Prompt nào tốt nhất để nhờ AI phân tích sự cố?', ['"Bạn là kỹ sư mạng. Dữ liệu nội bộ đã che IP và mật khẩu: <output show>. Liệt kê nguyên nhân khả dĩ và lệnh kiểm chứng, trả lời dạng bảng."', '"Mạng lỗi, sửa đi"', '"Đây là running-config kèm mật khẩu, xem giúp"', '"Tự đăng nhập production và đổi cấu hình cho hết lỗi"'], 0, 'Prompt tốt có đủ persona, phân loại dữ liệu, chỉ dẫn và định dạng kết quả.'),
       quiz('Biện pháp nào giảm rủi ro khi cho agent chạm vào thiết bị thật?', ['Quyền tối thiểu, người duyệt trước khi đổi cấu hình, ghi log, có cách hoàn tác', 'Cấp privilege 15 cho nhanh', 'Tắt log để bớt nhiễu', 'Tin mọi kết quả nếu AI trả lời tự tin'], 0),
     ],
     hints: ['Kiểm chứng trước: show vlan brief và show interfaces fa0/2 switchport.', 'PC-KT và SRV cùng dải IP nhưng khác VLAN. Đây là cổng nối PC nên trunk không phải cách sửa.', 'interface fa0/2 → switchport access vlan 10; rồi username ai-agent privilege 1 secret Agent@123'],
     solution: [['sw', cfg('interface fa0/2', 'switchport access vlan 10', 'exit', 'username ai-agent privilege 1 secret Agent@123')]],
+  },
+  {
+    id: 'N14', group: 'n2', lesson: 'CCNA 200-301 · 2.5.d — Root Guard và Loop Guard', level: 3, kind: 'config',
+    title: 'Giữ cây STP ổn định: Root Guard chặn switch lạ, Loop Guard chặn đứt một chiều',
+    story: 'Có người cắm SW-LA với priority 0 vào SW-DIST, làm nó thành root của VLAN 1 và kéo lệch cả cây. Thiết kế yêu cầu SW-ROOT luôn là root. Ngoài ra sợi quang từ SW-ACC Gi0/2 tới SW-DIST bị đứt một chiều: SW-ACC không nhận được BPDU nên cổng Alternate tự mở, nguy cơ vòng lặp. Hãy bật Root Guard ở cổng hướng SW-LA và Loop Guard ở cổng bị mất BPDU.',
+    build: () => {
+      const net = makeNet([
+        sw('root', 'SW-ROOT', 420, 90, ['fa0/1', 'g0/1', 'g0/2']),
+        sw('dist', 'SW-DIST', 200, 270, ['g0/1', 'g0/2', 'g0/3']),
+        sw('acc', 'SW-ACC', 640, 270, ['fa0/1', 'g0/1', 'g0/2']),
+        sw('la', 'SW-LA', 60, 450, ['g0/1']),
+        pc('p1', 'PC1', 640, 450, { ip: '10.0.0.10' }),
+        server('s1', 'SRV1', 420, 450, { ip: '10.0.0.20' }),
+      ], [['root', 'g0/1', 'dist', 'g0/1'], ['root', 'g0/2', 'acc', 'g0/1'], ['dist', 'g0/3', 'acc', 'g0/2'], ['dist', 'g0/2', 'la', 'g0/1'], ['p1', 'fa0', 'acc', 'fa0/1'], ['s1', 'fa0', 'root', 'fa0/1']]);
+      net.devices.acc.ports['g0/2'].noBpduRx = true; // sợi quang đứt một chiều
+      return net;
+    },
+    init: [
+      ['root', cfg('hostname SW-ROOT', 'spanning-tree mode rapid-pvst', 'spanning-tree vlan 1 priority 4096')],
+      ['dist', cfg('hostname SW-DIST', 'spanning-tree mode rapid-pvst', 'spanning-tree vlan 1 priority 8192')],
+      ['acc', cfg('hostname SW-ACC', 'spanning-tree mode rapid-pvst')],
+      ['la', cfg('hostname SW-LA', 'spanning-tree vlan 1 priority 0')],
+    ],
+    tasks: [
+      { text: 'SW-DIST Gi0/2 bật Root Guard và vào trạng thái Root Inconsistent', verify: 'show spanning-tree inconsistentports', check: (a) => a.show('dist', 'show spanning-tree inconsistentports').some((l) => /GigabitEthernet0\/2\s+Root Inconsistent/.test(l)) },
+      { text: 'SW-ROOT lại là root của VLAN 1 trên SW-DIST và SW-ACC', verify: 'show spanning-tree vlan 1', check: (a) => { const r = N.stpState(a.net, 1).root; return r.dist === 'root' && r.acc === 'root'; } },
+      { text: 'SW-ACC Gi0/2 bật Loop Guard và bị chặn ở trạng thái Loop Inconsistent', verify: 'show spanning-tree inconsistentports', check: (a) => a.show('acc', 'show spanning-tree inconsistentports').some((l) => /GigabitEthernet0\/2\s+Loop Inconsistent/.test(l)) },
+      { text: 'PC1 ping được SRV1', verify: 'ping 10.0.0.20', check: (a) => a.ping('p1', '10.0.0.20') },
+      quiz('Root Guard đặt ở đâu?', ['Cổng designated hướng về switch không được phép làm root', 'Root port của mọi switch', 'Cổng nối PC', 'Trunk giữa hai root'], 0),
+      quiz('Loop Guard bảo vệ khỏi tình huống nào?', ['Cổng root hoặc alternate ngừng nhận BPDU rồi tự mở', 'Máy lạ gửi DHCP Offer', 'Switch lạ gửi BPDU tốt hơn', 'Cổng access nhận BPDU'], 0, 'Switch lạ gửi BPDU tốt hơn là việc của Root Guard. Cổng access nhận BPDU là việc của BPDU Guard.'),
+      quiz('Khác nhau giữa Root Guard và BPDU Guard?', ['Root Guard chỉ chặn tạm khi nhận BPDU tốt hơn; BPDU Guard err-disable cổng khi nhận bất kỳ BPDU nào', 'Hai lệnh giống hệt nhau', 'BPDU Guard dùng cho trunk, Root Guard cho PC', 'Root Guard luôn err-disable cổng'], 0),
+    ],
+    hints: ['show spanning-tree vlan 1 trên SW-DIST: root đang là SW-LA, đi qua Gi0/2.', 'SW-DIST: interface g0/2 → spanning-tree guard root', 'SW-ACC: interface g0/2 → spanning-tree guard loop'],
+    solution: [['dist', cfg('interface g0/2', 'spanning-tree guard root')], ['acc', cfg('interface g0/2', 'spanning-tree guard loop')]],
+  },
+  {
+    id: 'N15', group: 'n2', lesson: 'CCNA 200-301 · 4.7.c — Storm Control', level: 2, kind: 'ticket', topics: ['Bảo mật L2'],
+    title: 'Bão broadcast từ một máy: Storm Control cắt cổng vi phạm',
+    story: '🎫 PC-LOI (Fa0/1) bị lỗi card mạng, phát broadcast chiếm 40% băng thông, cả VLAN chậm. Chính sách: mọi cổng người dùng giới hạn broadcast 10%, cổng vi phạm phải err-disabled. Mức bão của PC-LOI ở đây là số đặt sẵn của lab.',
+    build: () => {
+      const net = makeNet([sw('sw', 'SW1', 420, 120, fa(3)), pc('bad', 'PC-LOI', 180, 310, { ip: '10.0.0.66' }), pc('p1', 'PC1', 420, 310, { ip: '10.0.0.10' }), server('s1', 'SRV1', 660, 310, { ip: '10.0.0.20' })], [['bad', 'fa0', 'sw', 'fa0/1'], ['p1', 'fa0', 'sw', 'fa0/2'], ['s1', 'fa0', 'sw', 'fa0/3']]);
+      net.devices.bad.stormPct = 40;
+      return net;
+    },
+    init: [['sw', cfg('hostname SW1')]],
+    tasks: [
+      { text: 'Fa0/1 và Fa0/2 giới hạn broadcast 10%, hành động shutdown', verify: 'show storm-control', check: (a) => ['fa0/1', 'fa0/2'].every((p) => { const s = a.d('sw').ports[p].storm; return s?.level === 10 && s.action === 'shutdown'; }) },
+      { text: 'Fa0/1 chuyển err-disabled, Fa0/2 vẫn connected', verify: 'show interfaces status', check: (a) => N.errDisabled(a.net, a.d('sw'), 'fa0/1') && N.statusUp(a.net, 'sw', 'fa0/2') },
+      { text: 'PC1 vẫn ping được SRV1', verify: 'ping 10.0.0.20', check: (a) => a.ping('p1', '10.0.0.20') },
+      quiz('Không đặt action, Storm Control làm gì khi vượt ngưỡng?', ['Bỏ lưu lượng loại đó tới khi xuống dưới ngưỡng, cổng vẫn up', 'Err-disable cổng', 'Khởi động lại switch', 'Không làm gì'], 0),
+      quiz('Storm Control giúp hạn chế loại lưu lượng nào?', ['Broadcast, multicast, unicast không rõ đích', 'Chỉ HTTPS', 'Chỉ DHCP', 'Chỉ lưu lượng đã mã hoá'], 0),
+    ],
+    hints: ['interface range fa0/1 - 2 → storm-control broadcast level 10', 'storm-control action shutdown', 'show storm-control, rồi show interfaces status err-disabled'],
+    solution: [['sw', cfg('interface range fa0/1 - 2', 'storm-control broadcast level 10', 'storm-control action shutdown')]],
+  },
+  {
+    id: 'N16', group: 'n2', lesson: 'CCNA 200-301 · 4.7.d — RA Guard', level: 2, kind: 'ticket', topics: ['IPv6', 'Bảo mật L2'],
+    title: 'Router lạ phát RA làm máy IPv6 sai gateway: RA Guard',
+    story: '🎫 PC1 lấy IPv6 bằng SLAAC nhưng lại nhận prefix và gateway của R-LA cắm ở Fa0/1. Gateway đúng là R-GW ở Fa0/2. Hãy tạo policy HOST-PORT với device-role host và gắn vào Fa0/1, để switch bỏ RA đi vào từ cổng đó.',
+    build: () => makeNet([
+      sw('sw', 'SW1', 420, 120, fa(3)),
+      router('la', 'R-LA', 160, 310, ['g0/0']),
+      router('gw', 'R-GW', 420, 310, ['g0/0']),
+      pc('p1', 'PC1', 680, 310, { ip: '10.0.0.10' }),
+    ], [['la', 'g0/0', 'sw', 'fa0/1'], ['gw', 'g0/0', 'sw', 'fa0/2'], ['p1', 'fa0', 'sw', 'fa0/3']]),
+    init: [
+      ['sw', cfg('hostname SW1')],
+      ['la', cfg('hostname R-LA', 'ipv6 unicast-routing', 'interface g0/0', 'ipv6 address 2001:db8:bad::1/64', 'no shutdown')],
+      ['gw', cfg('hostname R-GW', 'ipv6 unicast-routing', 'interface g0/0', 'ipv6 address 2001:db8:10::1/64', 'no shutdown')],
+    ],
+    tasks: [
+      { text: 'Policy HOST-PORT có device-role host, đã gắn vào Fa0/1', verify: 'show ipv6 nd raguard policy', check: (a) => a.d('sw').raPolicies?.['HOST-PORT']?.role === 'host' && a.d('sw').ports['fa0/1'].raGuard === 'HOST-PORT' },
+      { text: 'Fa0/2 hướng R-GW không bị chặn RA', verify: 'show ipv6 nd raguard policy', check: (a) => !a.d('sw').ports['fa0/2'].raGuard },
+      { text: 'SLAAC của PC1 nhận prefix từ R-GW', verify: 'PC1: ipv6 autoconfig', check: (a) => { const r = V6.slaac(a.net, 'p1'); return r.ok && r.router === 'R-GW'; } },
+      quiz('RA Guard chặn gói gì?', ['ICMPv6 Router Advertisement đi vào từ cổng không được phép', 'Mọi gói IPv6', 'DHCPv4 Offer', 'ARP Reply'], 0),
+      quiz('Tính năng cùng ý tưởng cho DHCPv4 là gì?', ['DHCP snooping', 'Port security', 'Storm Control', 'CDP'], 0),
+    ],
+    hints: ['ipv6 nd raguard policy HOST-PORT → device-role host → exit', 'interface fa0/1 → ipv6 nd raguard attach-policy HOST-PORT', 'Không gắn policy host vào cổng hướng router thật.'],
+    solution: [['sw', cfg('ipv6 nd raguard policy HOST-PORT', 'device-role host', 'exit', 'interface fa0/1', 'ipv6 nd raguard attach-policy HOST-PORT')]],
+  },
+  {
+    id: 'N17', group: 'n2', lesson: 'CCNA 200-301 · 4.1 — AAA client', level: 3, kind: 'config',
+    title: 'Đăng nhập quản trị qua TACACS+, dự phòng RADIUS và tài khoản local',
+    story: 'Công ty bỏ tài khoản dùng chung trên từng thiết bị. R1 phải hỏi TACACS 10.0.0.100 (khoá Tacacs@26), không có câu trả lời thì hỏi RADIUS 10.0.0.101 (khoá Radius@26), sau cùng mới dùng tài khoản local. Tài khoản thử trên máy chủ: netadmin / Net@2026. Máy chủ từ chối thì không được thử phương thức sau.',
+    build: () => makeNet([
+      router('r', 'R1', 420, 110, ['g0/0']),
+      sw('sw', 'SW1', 420, 240, fa(3, ['g0/1'])),
+      Object.assign(server('tac', 'TACACS', 160, 400, { ip: '10.0.0.100', services: [49] }), { badge: 'AAA', tacacs: { secret: 'Tacacs@26', users: { netadmin: 'Net@2026' } } }),
+      radiusServer('rad', 'RADIUS', 420, 400, { ip: '10.0.0.101', secret: 'Radius@26', users: { netadmin: 'Net@2026' } }),
+      pc('adm', 'PC-ADMIN', 680, 400, { ip: '10.0.0.50' }),
+    ], [['r', 'g0/0', 'sw', 'g0/1'], ['tac', 'fa0', 'sw', 'fa0/1'], ['rad', 'fa0', 'sw', 'fa0/2'], ['adm', 'fa0', 'sw', 'fa0/3']]),
+    init: [
+      ['sw', cfg('hostname SW1')],
+      ['r', cfg('hostname R1', 'interface g0/0', 'ip address 10.0.0.1 255.255.255.0', 'no shutdown', 'exit', 'ip domain-name congty.vn', 'crypto key generate rsa modulus 2048', 'username admin privilege 15 secret Local@2026', 'line vty 0 4', 'login local', 'transport input ssh')],
+    ],
+    tasks: [
+      { text: 'Khai báo máy chủ TACACS+ và RADIUS đúng địa chỉ, đúng khoá', verify: 'show aaa servers', check: (a) => { const s = Object.values(a.d('r').aaa?.servers || {}); return s.some((x) => x.proto === 'tacacs+' && x.ip === '10.0.0.100' && x.key === 'Tacacs@26') && s.some((x) => x.proto === 'radius' && x.ip === '10.0.0.101' && x.key === 'Radius@26'); } },
+      { text: 'Danh sách default: group tacacs+, group radius, local (đúng thứ tự)', verify: 'show running-config | include aaa', check: (a) => a.d('r').aaa?.newModel && a.d('r').aaa.lists.default?.join(' ') === 'group tacacs+ group radius local' },
+      { text: 'test aaa qua TACACS+ thành công với netadmin', verify: 'test aaa group tacacs+ netadmin Net@2026 new-code', check: (a) => a.show('r', 'test aaa group tacacs+ netadmin Net@2026 new-code')[0] === 'User successfully authenticated' },
+      { text: 'test aaa qua RADIUS thành công với netadmin', verify: 'test aaa group radius netadmin Net@2026 new-code', check: (a) => a.show('r', 'test aaa group radius netadmin Net@2026 new-code')[0] === 'User successfully authenticated' },
+      quiz('Khác nhau chính giữa TACACS+ và RADIUS?', ['TACACS+ dùng TCP 49, mã hoá toàn bộ phần thân, tách authentication và authorization; RADIUS dùng UDP 1812/1813, chỉ mã hoá mật khẩu', 'RADIUS là của Cisco, TACACS+ là chuẩn mở', 'Hai giao thức dùng chung cổng', 'TACACS+ chỉ dùng cho Wi-Fi'], 0),
+      quiz('Máy chủ TACACS+ trả lời sai mật khẩu. R1 có thử phương thức tiếp theo không?', ['Không, chỉ chuyển phương thức khi máy chủ không trả lời', 'Có, luôn thử hết danh sách', 'Có, nếu tài khoản local có cùng tên', 'R1 khởi động lại'], 0),
+    ],
+    hints: ['tacacs server TAC1 → address ipv4 10.0.0.100 → key Tacacs@26 → exit. Với RADIUS là radius server RAD1.', 'aaa new-model → aaa authentication login default group tacacs+ group radius local', 'Kiểm tra ở chế độ #: test aaa group tacacs+ netadmin Net@2026 new-code'],
+    solution: [['r', cfg('aaa new-model', 'tacacs server TAC1', 'address ipv4 10.0.0.100', 'key Tacacs@26', 'exit', 'radius server RAD1', 'address ipv4 10.0.0.101', 'key Radius@26', 'exit', 'aaa authentication login default group tacacs+ group radius local')]],
+  },
+  {
+    id: 'N18', group: 'n2', lesson: 'CCNA 200-301 · 4.2 — SCP và SFTP', level: 2, kind: 'config', topics: ['Quản trị thiết bị'],
+    title: 'Sao lưu cấu hình bằng SFTP, lấy IOS mới bằng SCP thay cho TFTP',
+    story: 'Kiểm toán yêu cầu bỏ TFTP vì không xác thực, không mã hoá. Máy FILE-SRV 10.0.0.50 mở SSH, tài khoản backup / Sftp@2026. Hãy đẩy running-config của R1 lên bằng SFTP với tên r1-confg, rồi lấy file c2900-new.bin về flash bằng SCP.',
+    build: () => makeNet([
+      router('r', 'R1', 420, 120, ['g0/0']),
+      Object.assign(server('f', 'FILE-SRV', 420, 340, { ip: '10.0.0.50', services: [22], files: [{ name: 'c2900-new.bin', size: 98566144, md5: '6f1b2c9e0a7d4e13b5c8a2f4d09e7c31' }] }), { badge: 'SSH', users: { backup: { pw: 'Sftp@2026' } } }),
+    ], [['r', 'g0/0', 'f', 'fa0']]),
+    init: [['r', cfg('hostname R1', 'interface g0/0', 'ip address 10.0.0.1 255.255.255.0', 'no shutdown')]],
+    tasks: [
+      { text: 'FILE-SRV có r1-confg, đẩy lên bằng SFTP', verify: 'copy running-config sftp:', check: (a) => a.d('f').files.some((x) => x.name === 'r1-confg' && x.via === 'sftp') },
+      { text: 'flash của R1 có c2900-new.bin', verify: 'show flash:', check: (a) => a.d('r').flash?.some((x) => x.name === 'c2900-new.bin') },
+      quiz('SCP và SFTP chạy trên giao thức nào?', ['SSH, TCP 22', 'UDP 69', 'TCP 21', 'UDP 514'], 0, 'TFTP dùng UDP 69, không có đăng nhập và không mã hoá.'),
+      quiz('Sau khi chép IOS về flash, bước nên làm trước khi reload?', ['verify /md5 so với mã của hãng, rồi đặt boot system', 'Xoá startup-config', 'Tắt SSH', 'Đổi hostname'], 0),
+    ],
+    hints: ['Ở chế độ #: copy running-config sftp: rồi trả lời địa chỉ, tài khoản, tên file, mật khẩu.', 'copy scp: flash: rồi trả lời địa chỉ, tài khoản, file nguồn, tên đích, mật khẩu.', 'Sai mật khẩu sẽ báo Permission denied.'],
+    solution: [['r', ['enable', 'copy running-config sftp:', '10.0.0.50', 'backup', 'r1-confg', 'Sftp@2026', 'copy scp: flash:', '10.0.0.50', 'backup', 'c2900-new.bin', '', 'Sftp@2026']]],
+  },
+  {
+    id: 'N19', group: 'n2', lesson: 'CCNA 200-301 · 1.1 — Cáp quang và tín hiệu', level: 2, kind: 'ticket', topics: ['Interface & L1'],
+    title: 'Link quang 2 km không lên: sai module SFP và tín hiệu yếu',
+    story: '🎫 Tuyến quang giữa hai toà nhà dài 2 km, đi trên sợi singlemode, nhưng đội thi công lắp module 1000BASE-SX. Link không lên. Đọc show interfaces transceiver để xem module, loại sợi, cự ly và mức Rx, rồi thay đúng module. Trong lab, thay module bằng lệnh sfp-swap tại cổng, thiết bị thật thì phải cắm module khác.',
+    build: () => {
+      const net = makeNet([sw('a', 'SW-A', 240, 120, ['fa0/1', 'g0/1']), sw('b', 'SW-B', 640, 120, ['fa0/1', 'g0/1']), pc('p1', 'PC1', 240, 310, { ip: '10.0.0.10' }), server('s1', 'SRV1', 640, 310, { ip: '10.0.0.20' })], [['a', 'g0/1', 'b', 'g0/1'], ['p1', 'fa0', 'a', 'fa0/1'], ['s1', 'fa0', 'b', 'fa0/1']]);
+      for (const id of ['a', 'b']) Object.assign(net.devices[id].ports['g0/1'], { sfp: 'SX', fiber: 'SMF', fiberM: 2000 });
+      return net;
+    },
+    init: [['a', cfg('hostname SW-A')], ['b', cfg('hostname SW-B')]],
+    tasks: [
+      { text: 'Gi0/1 của hai switch dùng module 1000BASE-LX', verify: 'show interfaces transceiver', check: (a) => a.d('a').ports['g0/1'].sfp === 'LX' && a.d('b').ports['g0/1'].sfp === 'LX' },
+      { text: 'Link lên và mức Rx bình thường', verify: 'show interfaces transceiver', check: (a) => N.statusUp(a.net, 'a', 'g0/1') && a.show('a', 'show interfaces transceiver').some((l) => /Gi0\/1.*-4\.2$/.test(l)) },
+      { text: 'PC1 ping được SRV1', verify: 'ping 10.0.0.20', check: (a) => a.ping('p1', '10.0.0.20') },
+      quiz('Hai đầu cắm module khác bước sóng (SX và LX) thì sao?', ['Không nhận được tín hiệu, link không lên', 'Vẫn chạy bình thường', 'Chỉ chậm đi', 'Switch tự đổi bước sóng'], 0),
+      quiz('Cáp đồng UTP Cat 5e chạy Gigabit tối đa bao xa?', ['100 m', '10 m', '550 m', '2 km'], 0),
+      quiz('Hai switch cũ không có Auto-MDIX cần loại cáp đồng nào?', ['Crossover, vì TX của đầu này phải nối RX của đầu kia', 'Straight-through', 'Rollover', 'Cáp console'], 0, 'Sai sơ đồ chân là một lỗi cáp thường gặp. Rollover dùng cho cổng console.'),
+    ],
+    hints: ['show interfaces transceiver: sợi SMF, 2000 m, nhưng module SX chỉ dành cho multimode, tối đa khoảng 550 m.', 'Hai đầu phải cùng loại module.', 'interface g0/1 → sfp-swap lx trên cả SW-A và SW-B.'],
+    solution: [['a', cfg('interface g0/1', 'sfp-swap lx')], ['b', cfg('interface g0/1', 'sfp-swap lx')]],
+  },
+  {
+    id: 'N20', group: 'n2', lesson: 'CCNA 200-301 · 1.6 — Máy khách Windows, macOS, Linux', level: 2, kind: 'ticket', topics: ['Nền tảng'],
+    title: 'Ba máy khách không vào được máy chủ: Windows, macOS, Linux',
+    story: '🎫 Ba máy trong VLAN văn phòng đều không vào được SRV 10.0.0.5. Mỗi máy lỗi một kiểu. Đọc cấu hình bằng lệnh đúng của từng hệ điều hành rồi sửa. Gateway đúng là 192.168.10.1, mạng /24. PC-WIN dùng 192.168.10.10, MAC-SALES dùng 192.168.10.20, LNX-DEV giữ IP đang có.',
+    build: () => makeNet([
+      router('r', 'R1', 420, 90, ['g0/0', 'g0/1']),
+      sw('sw', 'SW1', 280, 230, fa(3, ['g0/1'])),
+      server('s', 'SRV', 640, 230, { ip: '10.0.0.5', gw: '10.0.0.1' }),
+      pc('win', 'PC-WIN', 80, 400, { ip: '192.168.10.10', gw: '192.168.10.254' }),
+      Object.assign(macDevice('mac', 'MAC-SALES', 280, 400), { ip: '169.254.20.7', prefix: 16 }),
+      Object.assign(linuxDevice('lnx', 'LNX-DEV', 480, 400), { ip: '192.168.10.30' }),
+    ], [['r', 'g0/0', 'sw', 'g0/1'], ['r', 'g0/1', 's', 'fa0'], ['win', 'fa0', 'sw', 'fa0/1'], ['mac', 'fa0', 'sw', 'fa0/2'], ['lnx', 'fa0', 'sw', 'fa0/3']]),
+    init: [['sw', cfg('hostname SW1')], ['r', cfg('hostname R1', 'interface g0/0', 'ip address 192.168.10.1 255.255.255.0', 'no shutdown', 'interface g0/1', 'ip address 10.0.0.1 255.255.255.0', 'no shutdown')]],
+    tasks: [
+      { text: 'PC-WIN (sai gateway) ping được SRV', verify: 'ipconfig /all ; ping 10.0.0.5', check: (a) => a.ping('win', '10.0.0.5') },
+      { text: 'MAC-SALES (đang có IP 169.254) ping được SRV', verify: 'networksetup -getinfo Wi-Fi ; ping 10.0.0.5', check: (a) => a.d('mac').ip === '192.168.10.20' && a.ping('mac', '10.0.0.5') },
+      { text: 'LNX-DEV (thiếu default route) ping được SRV', verify: 'ip route ; ping 10.0.0.5', check: (a) => a.ping('lnx', '10.0.0.5') },
+      quiz('Máy có IP 169.254.x.x nghĩa là gì?', ['Không xin được DHCP nên tự gán APIPA', 'Là gateway', 'IP công cộng', 'Đang dùng IPv6'], 0),
+      quiz('Lệnh xem IP trên từng hệ điều hành?', ['Windows ipconfig, macOS ifconfig, Linux ip addr', 'Cả ba đều dùng ipconfig', 'Windows ifconfig, macOS ip addr, Linux ipconfig', 'Cả ba đều dùng show ip interface brief'], 0),
+      quiz('Máy Wi-Fi thấy SSID nhưng báo sai mật khẩu. Cần kiểm tra gì trước?', ['Kiểu bảo mật và mật khẩu của WLAN (WPA2, WPA3, PSK)', 'Default route', 'DNS', 'MTU'], 0),
+    ],
+    hints: ['PC-WIN: ipconfig 192.168.10.10 255.255.255.0 192.168.10.1', 'MAC-SALES: networksetup -setmanual Wi-Fi 192.168.10.20 255.255.255.0 192.168.10.1', 'LNX-DEV: ip route add default via 192.168.10.1'],
+    solution: [['win', ['ipconfig 192.168.10.10 255.255.255.0 192.168.10.1']], ['mac', ['networksetup -setmanual Wi-Fi 192.168.10.20 255.255.255.0 192.168.10.1']], ['lnx', ['ip route add default via 192.168.10.1']]],
+  },
+  {
+    id: 'N21', group: 'n2', lesson: 'CCNA 200-301 · 5.5 — Ansible', level: 2, kind: 'config', topics: ['Quản trị thiết bị'],
+    title: 'Ansible: khai báo inventory, chạy lệnh đồng loạt trên hai switch',
+    story: 'Máy ANSIBLE đã cài Ansible. Hai switch 10.0.0.2 và 10.0.0.3 mở SSH với tài khoản admin / Cisco@123 (privilege 15). Hãy tạo nhóm switches trong /etc/ansible/hosts, kiểm tra bằng -m ping rồi tạo VLAN 30 trên cả hai bằng một lệnh. Lab chưa có trình soạn thảo nên ghi tệp bằng echo. Lab đặt mật khẩu trong inventory cho gọn, thực tế nên dùng Ansible Vault.',
+    build: () => makeNet([
+      Object.assign(linuxDevice('ctl', 'ANSIBLE', 420, 400), { ip: '10.0.0.10', ansible: true }),
+      sw('s1', 'SW1', 200, 150, fa(2)),
+      sw('s2', 'SW2', 640, 150, fa(2)),
+    ], [['ctl', 'fa0', 's1', 'fa0/1'], ['s1', 'fa0/2', 's2', 'fa0/1']]),
+    init: [['s1', SSH_SW('SW1', '10.0.0.2')], ['s2', SSH_SW('SW2', '10.0.0.3')]],
+    tasks: [
+      { text: 'Nhóm switches có đủ 10.0.0.2 và 10.0.0.3', verify: 'ansible switches --list-hosts', check: (a) => { const o = a.show('ctl', 'ansible switches --list-hosts').join(' '); return o.includes('10.0.0.2') && o.includes('10.0.0.3'); } },
+      { text: 'Ansible đăng nhập được cả hai switch', verify: 'ansible switches -m ping', check: (a) => a.show('ctl', 'ansible switches -m ping').filter((l) => l.includes('SUCCESS')).length === 2 },
+      { text: 'VLAN 30 có trên cả SW1 và SW2', verify: 'ansible switches -m cisco.ios.ios_command -a "commands=\'show vlan brief\'"', check: (a) => a.d('s1').vlans[30] && a.d('s2').vlans[30] },
+      quiz('Ansible kết nối thiết bị mạng thế nào?', ['Không cần agent, thường đi qua SSH', 'Phải cài agent lên switch', 'Chỉ qua SNMP', 'Chỉ qua cổng console'], 0),
+      quiz('Module nào dùng để đổi cấu hình IOS?', ['ios_config', 'ios_command', 'ping', 'ios_facts'], 0, 'ios_command chạy lệnh show, ios_config đẩy cấu hình.'),
+    ],
+    hints: ['echo "[switches]" >> /etc/ansible/hosts', 'echo "10.0.0.2 ansible_user=admin ansible_password=Cisco@123" >> /etc/ansible/hosts, thêm một dòng tương tự cho 10.0.0.3', 'ansible switches -m cisco.ios.ios_config -a "lines=\'vlan 30\'"'],
+    solution: [['ctl', ['echo "[switches]" >> /etc/ansible/hosts', 'echo "10.0.0.2 ansible_user=admin ansible_password=Cisco@123" >> /etc/ansible/hosts', 'echo "10.0.0.3 ansible_user=admin ansible_password=Cisco@123" >> /etc/ansible/hosts', 'ansible switches -m ping', 'ansible switches -m cisco.ios.ios_config -a "lines=\'vlan 30\'"']]],
+  },
+  {
+    id: 'N22', group: 'n2', lesson: 'CCNA 200-301 · 5.3 — Cách quản lý mạng và IaC', level: 2, kind: 'config', topics: ['Quản trị thiết bị'],
+    title: 'Hạ tầng dưới dạng mã: chạy playbook hai lần, lần sau không đổi gì',
+    story: 'Thay vì gõ tay trên từng switch, nhóm mạng lưu cấu hình mong muốn trong tệp site.yml. Tệp này được quản lý như mã nguồn. Hãy đọc nó bằng cat, chạy bằng ansible-playbook hai lần. Lần đầu có changed, lần hai changed=0 vì thiết bị đã đúng trạng thái mong muốn: đó là tính idempotent.',
+    build: () => makeNet([
+      Object.assign(linuxDevice('ctl', 'ANSIBLE', 420, 400), { ip: '10.0.0.10', ansible: true, fs: {
+        '/etc/ansible/hosts': ['[switches]', '10.0.0.2 ansible_user=admin ansible_password=Cisco@123', '10.0.0.3 ansible_user=admin ansible_password=Cisco@123'],
+        'site.yml': ['- hosts: switches', '  tasks:', '    - name: VLAN camera', '      cisco.ios.ios_config:', '        lines:', '          - vlan 40', '    - name: Banner', '      cisco.ios.ios_config:', '        lines:', '          - banner motd #Chi danh cho quan tri vien#'],
+      } }),
+      sw('s1', 'SW1', 200, 150, fa(2)),
+      sw('s2', 'SW2', 640, 150, fa(2)),
+    ], [['ctl', 'fa0', 's1', 'fa0/1'], ['s1', 'fa0/2', 's2', 'fa0/1']]),
+    init: [['s1', SSH_SW('SW1', '10.0.0.2')], ['s2', SSH_SW('SW2', '10.0.0.3')]],
+    tasks: [
+      { text: 'VLAN 40 có trên cả SW1 và SW2', verify: 'show vlan brief', check: (a) => a.d('s1').vlans[40] && a.d('s2').vlans[40] },
+      { text: 'Lần chạy gần nhất có changed=0 và failed=0', verify: 'ansible-playbook site.yml', check: (a) => a.d('ctl').lastRecap?.changed === 0 && a.d('ctl').lastRecap.failed === 0 },
+      quiz('Controller-based khác device-based ở điểm nào?', ['Controller giữ chính sách tập trung và đẩy xuống nhiều thiết bị; device-based cấu hình từng máy', 'Device-based luôn dùng cloud', 'Controller-based không cần mạng', 'Hai cách giống nhau'], 0),
+      quiz('Cloud-based management như Meraki có đặc điểm gì?', ['Giao diện quản lý do nhà cung cấp chạy trên cloud, thiết bị kết nối về đó', 'Không cần Internet', 'Phải tự dựng controller tại chỗ', 'Chỉ quản lý được máy chủ'], 0),
+      quiz('Lợi ích chính của Infrastructure as Code?', ['Cấu hình nằm trong tệp có lịch sử thay đổi, duyệt và áp lại được, kết quả nhất quán', 'Không cần kiểm thử', 'Không cần biết mạng', 'Thiết bị tự thay phần cứng'], 0),
+    ],
+    hints: ['cat site.yml để xem cấu hình mong muốn.', 'ansible-playbook site.yml', 'Chạy lại lệnh đó: PLAY RECAP phải có changed=0.'],
+    solution: [['ctl', ['ansible-playbook site.yml', 'ansible-playbook site.yml']]],
   },
 ];

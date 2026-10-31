@@ -438,7 +438,7 @@ lấy bài từ giáo trình Infrastructure Administrator. Nút header **🧪 La
 ## Các nhánh còn lại (rất tùy chọn)
 1. Lab CLI: VPN nâng cao, WLC/Wireless, ASA, AAA/TACACS, Ansible chưa mô phỏng (GreenMart task 2, 12–20 phần lớn).
    (Port-security vi phạm khi cắm máy lạ ĐÃ CÓ — lab B07; IPv6/OSPFv3 và STP blocking ĐÃ CÓ từ đợt 3.)
-2. DHCPv6 Prefix Delegation, QoS hierarchical (HQoS), EVPN control-plane cho VXLAN, SR-MPLS.
+2. DHCPv6 Prefix Delegation, QoS hierarchical (HQoS). (EVPN và SR-MPLS ĐÃ CÓ: s31, s32.)
    → Nhưng về cơ bản app đã HOÀN TẤT: phủ trọn CCNA + CCNP + SP(MPLS) + DC(VXLAN) + IPv6.
 3. **Giao diện giống site tham khảo** (hainguyenit.site) — trang đó có phí, chỉ xem được trang bán khoá.
 

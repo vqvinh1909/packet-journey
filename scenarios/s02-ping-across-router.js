@@ -51,9 +51,9 @@ export function build() {
       { id: 'pc2', type: 'host', name: 'PC2', x: 910, y: 170, lines: ['192.168.2.10/24', 'GW 192.168.2.1'] },
     ],
     links: [
-      { id: 'l1', a: 'pc1', b: 'r1', labelMid: '192.168.1.0/24' },
-      { id: 'l2', a: 'r1', b: 'r2', labelMid: '10.0.0.0/30' },
-      { id: 'l3', a: 'r2', b: 'pc2', labelMid: '192.168.2.0/24' },
+      { id: 'l1', a: 'pc1', b: 'r1', bp: 'Gi0/0', labelMid: '192.168.1.0/24' },
+      { id: 'l2', a: 'r1', b: 'r2', ap: 'Gi0/1', bp: 'Gi0/1', labelMid: '10.0.0.0/30' },
+      { id: 'l3', a: 'r2', b: 'pc2', ap: 'Gi0/0', labelMid: '192.168.2.0/24' },
     ],
   };
 

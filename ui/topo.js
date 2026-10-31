@@ -56,7 +56,7 @@ export function linkEnd(d, tx, ty) {
 /** Chữ trên nhãn cổng: tên cổng + trạng thái STP nếu đang chặn. blk = kết quả stpBlocked. */
 export function portText(blk, D, port) {
   const bv = blk.get(D.id + '|' + port);
-  return (isHost(D) ? 'Fa0' : N.shortIf(port)) + (bv ? (bv.sts !== 'BLK' ? ' ' + bv.sts : ' ✕') : '');
+  return (isHost(D) ? (port === 'pc0' ? 'PC' : 'Fa0') : N.shortIf(port)) + (bv ? (bv.sts !== 'BLK' ? ' ' + bv.sts : ' ✕') : '');
 }
 /** Chỗ icon và chữ của thiết bị chiếm trên sơ đồ, để nhãn cổng tránh ra. withSub: có dòng phụ dưới tên. */
 export function nodeBoxes(d, withSub = isHost(d)) {
@@ -74,7 +74,7 @@ export const labelRect = (p, w) => ({ l: p.x - w / 2, r: p.x + w / 2, t: p.y - 8
  * Trả { linkId: [nhãn phía a, nhãn phía b] }, mỗi nhãn { x, y, w }.
  */
 export function layoutPortLabels(net, textOf, withSub = isHost) {
-  const solid = Object.values(net.devices).flatMap((d) => nodeBoxes(d, withSub(d)));
+  const solid = Object.values(net.devices).flatMap((d) => d.boxes || nodeBoxes(d, withSub(d)));
   const placed = [], out = {}, pairN = {}, pairI = {};
   const free = (r) => !solid.some((b) => rectsHit(r, b)) && !placed.some((b) => rectsHit(r, b));
   for (const l of net.links) { const k = [l.a, l.b].sort().join('|'); pairN[k] = (pairN[k] || 0) + 1; }
@@ -100,6 +100,23 @@ export function layoutPortLabels(net, textOf, withSub = isHost) {
     out[l.id] = [place(textOf(A, l.ap), false), place(textOf(B, l.bp), true)];
   }
   return out;
+}
+/**
+ * Tên cổng cho sơ đồ kịch bản: { linkId: [cổng phía a, cổng phía b] }, chuỗi rỗng là không vẽ.
+ * Ưu tiên link.ap, link.bp để khớp lời giải thích; còn lại đánh số theo thứ tự dây:
+ * máy trạm Fa0, cổng switch xuống máy trạm Fa0/n, cổng uplink Gi0/n, cổng router Gi0/n.
+ */
+export function scenarioPorts(topology) {
+  if (topology.ports === false) return Object.fromEntries(topology.links.map((l) => [l.id, ['', '']]));
+  const dev = Object.fromEntries(topology.devices.map((d) => [d.id, d])), used = new Set();
+  for (const l of topology.links) { if (l.ap) used.add(`${l.a}|${l.ap}`); if (l.bp) used.add(`${l.b}|${l.bp}`); }
+  const auto = (d, peer) => {
+    if (d.type === 'host') return 'Fa0';
+    if (d.type !== 'switch' && d.type !== 'router') return '';
+    const pre = d.type === 'switch' && peer.type === 'host' ? 'Fa0/' : 'Gi0/';
+    for (let n = d.type === 'router' ? 0 : 1; ; n++) if (!used.has(`${d.id}|${pre}${n}`)) { used.add(`${d.id}|${pre}${n}`); return pre + n; }
+  };
+  return Object.fromEntries(topology.links.map((l) => [l.id, [l.ap ?? auto(dev[l.a], dev[l.b]), l.bp ?? auto(dev[l.b], dev[l.a])]]));
 }
 /** Cổng đang bật về mặt quản trị (không shutdown) — để tô dây "admin down". */
 export function adminUp(net, dev, port) {
