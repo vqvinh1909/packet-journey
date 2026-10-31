@@ -916,9 +916,21 @@ html, body {
 /* ---------- ✏️ Vẽ mạng — trình vẽ sơ đồ kiểu draw.io (ui/diagram.js) ---------- */
 .dg { position: fixed; inset: 0; z-index: 120; display: flex; flex-direction: column; background: var(--bg); color: var(--text); font-size: 13px; }
 .dg-top { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; padding: 6px 10px; background: var(--panel); border-bottom: 1px solid var(--border); }
+.dg-pages { display:flex; align-items:center; gap:4px; min-height:32px; padding:2px 10px; background:var(--panel); border-bottom:1px solid var(--border); }
+.dg-page, .dg-page-add { border:1px solid var(--border); border-radius:5px 5px 0 0; padding:4px 10px; background:var(--panel-2,var(--panel)); color:var(--text); cursor:pointer; }
+.dg-page.active { background:var(--bg); border-bottom-color:var(--bg); font-weight:700; }
 .dg-top button, .dg-top select { padding: 4px 8px; border: 1px solid var(--border); background: var(--panel-2, var(--panel)); color: var(--text); border-radius: 6px; cursor: pointer; font-size: 13px; }
 .dg-top button:disabled { opacity: 0.4; cursor: default; }
 .dg-title { font-weight: 700; margin-right: 6px; }
+.dg-menubar { display: inline-flex; align-items: center; gap: 2px; }
+.dg-menubar details { position: relative; }
+.dg-menubar summary { list-style: none; cursor: pointer; padding: 5px 8px; border-radius: 5px; }
+.dg-menubar summary::-webkit-details-marker { display: none; }
+.dg-menubar details[open] summary, .dg-menubar summary:hover { background: var(--panel-2, rgba(0,0,0,.06)); }
+.dg-menubar details > div { position: absolute; z-index: 15; top: 100%; left: 0; min-width: 170px; display: grid; padding: 5px; background: var(--panel); border: 1px solid var(--border); border-radius: 7px; box-shadow: 0 4px 18px #0002; }
+.dg-menubar details > div button { text-align: left; border: 0; background: transparent; }
+.dg-menubar details > div button:hover { background: var(--panel-2, rgba(0,0,0,.06)); }
+.dg-menubar .dg-help { min-width: 230px; padding: 10px; line-height: 1.7; font-size: 12px; }
 .dg-sep { width: 1px; align-self: stretch; background: var(--border); margin: 0 4px; }
 .dg-grow { flex: 1; }
 .dg-zl { min-width: 44px; text-align: center; font-variant-numeric: tabular-nums; }
@@ -926,16 +938,51 @@ html, body {
 .dg-body { flex: 1; display: grid; grid-template-columns: 210px 1fr 260px; min-height: 0; }
 .dg-lib { border-right: 1px solid var(--border); background: var(--panel); overflow: auto; padding: 8px; }
 .dg-lib input { width: 100%; box-sizing: border-box; margin-bottom: 6px; }
+.dg-packs { margin: 2px 0 8px; font-size: 12px; }
+.dg-packs summary { cursor: pointer; color: var(--accent, #2f6fde); font-weight: 600; }
+.dg-packs > div { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 8px; padding: 6px 2px; }
+.dg-packs label { display: flex; align-items: center; white-space: nowrap; }
+.dg-packs input { width: auto; margin: 0 4px 0 0; }
 .dg-lh { font-weight: 700; font-size: 12px; color: var(--muted); margin: 8px 0 4px; text-transform: uppercase; letter-spacing: 0.03em; }
 .dg-items { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; }
+.dg-lirow { position: relative; min-width: 0; display: flex; }
 .dg-li { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 4px 2px; border: 1px solid transparent; border-radius: 6px; background: none; cursor: grab; color: var(--text); }
+.dg-lirow .dg-li { width: 100%; padding-right: 12px; }
+.dg-fav { position: absolute; right: 1px; top: 1px; border: 0; background: transparent; color: var(--muted); cursor: pointer; padding: 0 2px; }
+.dg-fav.active { color: #e6a700; }
 .dg-li:hover { border-color: var(--border); background: var(--panel-2, rgba(0,0,0,0.03)); }
 .dg-li svg { width: 46px; height: 40px; font-family: Segoe UI, Arial, sans-serif; }
 .dg-li span { font-size: 10.5px; line-height: 1.15; text-align: center; }
 .dg-none { color: var(--muted); font-size: 12px; padding: 8px; }
-.dg-stage { position: relative; overflow: hidden; background: #fbfcfe; outline: none; cursor: default; }
+.dg-stage { position: relative; overflow: hidden; background: #fbfcfe; outline: none; cursor: default; touch-action: none; }
+.dg-dark .dg-stage { background: #171d28; }
+.dg-dark .dg-g1 { stroke: #242d3b; }
+.dg-dark .dg-g2 { stroke: #303b4c; }
+.dg-dark .dg-status { color: #d2d9e4; text-shadow: 0 0 3px #171d28; }
+.dg-fullscreen .dg-body { grid-template-columns: 1fr; }
+.dg-fullscreen .dg-lib, .dg-fullscreen .dg-fmt { display: none; }
+.dg-print-title { display: none; }
+@media print {
+  @page { size: A4 auto; margin: 10mm; }
+  body.dg-printing > *:not(.dg) { display: none !important; }
+  body.dg-printing .dg { position: static; inset: auto; width: 100%; height: 100%; overflow: visible; background: #fff !important; color: #111 !important; }
+  body.dg-printing .dg-top, body.dg-printing .dg-pages, body.dg-printing .dg-lib, body.dg-printing .dg-fmt, body.dg-printing .dg-ruler-x, body.dg-printing .dg-ruler-y, body.dg-printing .dg-mini, body.dg-printing .dg-status { display: none !important; }
+  body.dg-printing .dg-body, body.dg-printing .dg-stage { display: block; position: static; width: 100%; height: auto; overflow: visible; }
+  body.dg-printing .dg-print-title { display: block; color: #111; font: 12px sans-serif; padding: 0 0 8px; }
+  body.dg-printing .dg-svg { position: static; width: 100%; height: 85vh; overflow: visible; }
+  body.dg-printing .dg[data-print-orientation="landscape"] { width: 100%; }
+}
 .dg-stage.panning, .dg-stage.space { cursor: grab; }
 .dg-svg { width: 100%; height: 100%; display: block; font-family: Segoe UI, Arial, sans-serif; user-select: none; }
+.dg-ruler-x, .dg-ruler-y { position: absolute; z-index: 2; pointer-events: none; background: #f1f4f8e8; color: #66748a; font: 9px/1 Segoe UI, Arial, sans-serif; }
+.dg-ruler-x { top: 0; left: 18px; right: 0; height: 16px; border-bottom: 1px solid #cbd3df; }
+.dg-ruler-y { top: 16px; left: 0; bottom: 0; width: 18px; border-right: 1px solid #cbd3df; }
+.dg-ruler-x span, .dg-ruler-y span { position: absolute; padding: 2px; border-left: 1px solid #aeb8c6; }
+.dg-ruler-y span { writing-mode: vertical-rl; }
+.dg-mini { position: absolute; z-index: 3; right: 12px; bottom: 30px; width: 176px; height: 112px; padding: 4px; border: 1px solid #aeb8c6; border-radius: 6px; background: #ffffffde; box-shadow: 0 2px 8px #0002; cursor: crosshair; }
+.dg-mini svg { width: 100%; height: 100%; }
+.dg-mini .dg-mini-view { fill: #2f6fde22; stroke: #2f6fde; stroke-width: 3; vector-effect: non-scaling-stroke; }
+.dg-dark .dg-ruler-x, .dg-dark .dg-ruler-y { background: #252e3bdc; color: #c5cedc; border-color: #4a596d; }
 .dg-g1 { fill: none; stroke: #e7ecf3; stroke-width: 0.6; }
 .dg-g2 { fill: none; stroke: #d6dde8; stroke-width: 1; }
 .dg-shape { cursor: move; }
@@ -944,19 +991,41 @@ html, body {
 .dg-sel { fill: none; stroke: #2f6fde; stroke-width: 1.4; stroke-dasharray: 5 3; pointer-events: none; }
 .dg-sel.locked { stroke: #d64545; }
 .dg-esel { fill: none; stroke: #2f6fde; stroke-width: 6; stroke-opacity: 0.25; pointer-events: none; }
-.dg-eend { fill: #2f6fde; pointer-events: none; }
+.dg-eend { fill: #2f6fde; stroke: #fff; stroke-width: 1.5; cursor: crosshair; }
+.dg-wp { fill: #fff; stroke: #2f6fde; stroke-width: 2; cursor: move; }
 .dg-h { fill: #fff; stroke: #2f6fde; stroke-width: 1.4; }
 .dg-h[data-h=nw], .dg-h[data-h=se] { cursor: nwse-resize; } .dg-h[data-h=ne], .dg-h[data-h=sw] { cursor: nesw-resize; }
 .dg-h[data-h=n], .dg-h[data-h=s] { cursor: ns-resize; } .dg-h[data-h=e], .dg-h[data-h=w] { cursor: ew-resize; }
 .dg-port { fill: #2f6fde; fill-opacity: 0.85; stroke: #fff; stroke-width: 1.5; cursor: crosshair; }
 .dg-port:hover { r: 7; }
 .dg-rubber { fill: #2f6fde; fill-opacity: 0.08; stroke: #2f6fde; stroke-dasharray: 4 3; pointer-events: none; }
+.dg-guide { stroke: #e64a75; stroke-width: 1; stroke-dasharray: 5 3; pointer-events: none; }
 .dg-wire { stroke: #2f6fde; stroke-width: 2; stroke-dasharray: 6 4; pointer-events: none; }
 .dg-wire.ok { stroke: #2e9e57; stroke-dasharray: none; }
 .dg-status { position: absolute; left: 8px; bottom: 6px; right: 8px; font-size: 11.5px; color: #66748a; pointer-events: none; text-shadow: 0 0 3px #fff; }
 .dg-edit { position: absolute; z-index: 5; resize: none; text-align: center; font-family: Segoe UI, Arial, sans-serif; font-weight: 600; border: 1.5px solid #2f6fde; border-radius: 4px; padding: 4px; background: #fff; color: #1f2933; box-shadow: 0 2px 8px rgba(0,0,0,0.15); }
 .dg-fmt { border-left: 1px solid var(--border); background: var(--panel); overflow: auto; padding: 10px; display: flex; flex-direction: column; gap: 7px; }
+.dg-ftabs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px; position: sticky; top: -10px; z-index: 2; padding: 4px 0 7px; background: var(--panel); }
+.dg-ftabs button { border: 1px solid var(--border); border-radius: 5px; background: transparent; color: var(--text); padding: 5px; cursor: pointer; }
+.dg-ftabs button.active { color: #fff; background: var(--accent, #2f6fde); border-color: var(--accent, #2f6fde); }
+.dg-fpanel { display: flex; flex-direction: column; gap: 7px; }
+.dg-palette { display: flex; flex-wrap: wrap; gap: 4px; }
+.dg-palette .dg-fh { flex-basis: 100%; }
+.dg-palette button { width: 22px; height: 22px; border: 1px solid var(--border); border-radius: 4px; cursor: pointer; }
+.dg-device-info { border: 1px solid var(--border); border-radius: 6px; padding: 6px; }
+.dg-device-info summary { cursor: pointer; font-weight: 600; margin-bottom: 6px; }
+.dg-port-row { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); align-items: center; gap: 3px; margin: 6px 0; padding: 4px; border-bottom: 1px solid var(--line); }
+.dg-port-row input, .dg-port-row select { min-width: 0; width: 100%; box-sizing: border-box; font-size: 10px; padding: 3px; }
+.dg-port-row span { grid-column: span 2; font-size: 9px; color: var(--muted); }
+.dg-port-row button { justify-self: end; padding: 1px 4px; }
+.dg-ins-row { display: grid; grid-template-columns: 1fr; text-align: left; gap: 3px; width: 100%; padding: 7px; border: 1px solid var(--border); border-radius: 5px; color: var(--text); background: transparent; cursor: pointer; margin: 2px 0; }
+.dg-ins-row:hover { border-color: var(--accent, #2f6fde); background: var(--panel-2, rgba(0,0,0,.04)); }
+.dg-ins-row span, .dg-ins-row small { color: var(--muted); font-size: 11px; }
+.dg-warning { width: 100%; text-align: left; margin: 2px 0; padding: 6px; color: #a85c00; border: 1px solid #e6b15e; border-radius: 5px; background: #fff8e8; cursor: pointer; }
 .dg-fh { font-weight: 700; font-size: 12.5px; text-transform: uppercase; letter-spacing: 0.03em; color: var(--muted); margin-top: 6px; }
+.dg-rack-meter { display: grid; grid-template-columns: 1fr auto; gap: 3px 8px; align-items: center; padding: 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel-2, rgba(0,0,0,.035)); font-size: 12px; }
+.dg-rack-meter span { color: var(--muted); }
+.dg-rack-meter progress { grid-column: 1 / -1; width: 100%; height: 8px; accent-color: #38bdf8; }
 .dg-fmt label { display: flex; flex-direction: column; gap: 2px; font-size: 12px; }
 .dg-fmt label.dg-chk { flex-direction: row; align-items: center; }
 .dg-fmt textarea, .dg-fmt input:not([type=checkbox]):not([type=color]):not([type=range]), .dg-fmt select { width: 100%; box-sizing: border-box; font-size: 12.5px; }

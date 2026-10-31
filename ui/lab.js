@@ -9,6 +9,8 @@ import { createCli } from '../lab/ios.js';
 import * as N from '../lab/net.js';
 import { SANDBOX_LAB, freePorts, connect, disconnect } from '../lab/sandbox.js';
 import { openWorkspace } from './workspace.js';
+import { diagramFromSandbox, sandboxFromDiagram } from '../lab/diagram-bridge.js';
+import { openDiagram } from './diagram.js';
 import { GUI_VENDORS } from '../lab/guifw.js';
 import { renderGuiFw } from './guifw.js';
 import { load, save, remove } from './store.js';
@@ -43,7 +45,7 @@ export function openLab(onRun, o = {}) {
   modal.className = 'modal lab-modal';
   back.appendChild(modal);
   modal.innerHTML =
-    `<div class="modal-h"><span>🧪 Lab thực hành CLI — Cisco IOS <span class="lab-count" id="lab-count"></span></span><span class="lab-hbtns"><button class="lab-sbx-btn" id="lab-brk-open" title="Lab xử lý sự cố vô hạn: gài lỗi ngẫu nhiên vào mạng đang chạy tốt">🎲 Phá mạng ngẫu nhiên</button><button class="lab-sbx-btn" id="lab-sbx-open" title="Tự thêm thiết bị, nối dây, cấu hình tự do">🧱 Tự dựng mạng riêng</button><button class="modal-x" title="Đóng (lab vẫn được giữ nguyên)">✕</button></span></div>` +
+    `<div class="modal-h"><span>🧪 Lab thực hành CLI — Cisco IOS <span class="lab-count" id="lab-count"></span></span><span class="lab-hbtns"><button class="lab-sbx-btn" id="lab-draw-open" title="Chỉnh topology hiện tại trong trình vẽ sơ đồ">✏️ Mở trong trình vẽ</button><button class="lab-sbx-btn" id="lab-brk-open" title="Lab xử lý sự cố vô hạn: gài lỗi ngẫu nhiên vào mạng đang chạy tốt">🎲 Phá mạng ngẫu nhiên</button><button class="lab-sbx-btn" id="lab-sbx-open" title="Tự thêm thiết bị, nối dây, cấu hình tự do">🧱 Tự dựng mạng riêng</button><button class="modal-x" title="Đóng (lab vẫn được giữ nguyên)">✕</button></span></div>` +
     `<div class="lab-body">` +
     `<aside class="lab-list" id="lab-list"><div class="lab-find"><input type="search" id="lab-q" placeholder="🔎 Tìm lab: ospf, nat, vlan, X0…" aria-label="Tìm lab">` +
     `<div class="lab-filt" id="lab-filt"><button data-f="all">Tất cả</button><button data-f="todo">Chưa xong</button><button data-f="done">Đã xong</button><button data-f="star" title="Lab đã đánh dấu ⭐ cần làm lại">⭐</button></div></div><div id="lab-items"></div></aside>` +
@@ -73,6 +75,7 @@ export function openLab(onRun, o = {}) {
   // Tự dựng mạng: workspace toàn màn hình đè lên modal lab; "▶ Xem gói tin" trong đó đóng cả hai
   const openWs = () => openWorkspace({ onRun: (sim, label) => { flushTime(); back.remove(); onRun(sim, label); } });
   $('lab-sbx-open').onclick = openWs;
+  $('lab-draw-open').onclick = () => openDiagram(diagramFromSandbox(s.net), (json) => openWorkspace({ onRun: (sim, label) => { flushTime(); back.remove(); onRun(sim, label); }, initialNet: sandboxFromDiagram(json) }));
   const openBreak = (o = {}) => openBreakDialog(modal, { labId: lab.breakInfo?.src ?? (load('labs-done', {})[lab.id] ? lab.id : ''), n: lab.breakInfo?.n, ...o, onStart: startBreak });
   $('lab-brk-open').onclick = () => openBreak();
   /** Bắt đầu một đề phá mạng: dọn nhật ký đề cũ, bấm giờ lại từ đầu. */

@@ -1,5 +1,48 @@
 # Ghi chú làm tiếp — Packet Journey
 
+## ✅ Tiếp tục kế hoạch vẽ mạng (2026-10-29)
+- Hoàn tất **B1 — Điểm nối cố định**: dây lưu `portA`/`portB` (n/e/s/w), kéo hình không làm đổi cạnh nối; áp dụng cho dây thẳng, cong, gấp khúc. Tạo dây bằng cách kéo từ chấm xanh; đích chọn cạnh theo chấm xanh hoặc theo cạnh gần vị trí thả.
+- Hoàn tất **B2–B6**: waypoint kéo/sửa/xoá, tự đi vòng hình chắn, kéo đầu dây để nối lại, nhiều dây song song, kiểu cáp (Ethernet/quang/Serial/Wi-Fi/VPN/console), tự gợi ý nhãn cổng không trùng.
+- Hoàn tất **A1–A6, E1–E5, F1–F5, G1–G3, I1–I2, J1–J7, D1, C1**: thư viện hình/mẫu; pipeline CI/CD chỉnh bước; menu, định dạng 3 tab, minimap/thước, nền tối/toàn màn hình; khung chứa; smart guides/auto-layout; thuộc tính thiết bị/cổng/dây, VLAN overlay, Inspector/cảnh báo; chuyển topology hai chiều với workspace và từ Lab CLI sang sơ đồ.
+- JSON, sao chép/nhân bản giữ điểm nối; sơ đồ cũ không có cổng vẫn dùng chế độ tự chọn cạnh.
+- Hoàn tất các mục còn lại: **C2–C6, I3–I7, H1–H3, D2–D3**. Hỗ trợ trang/lớp, phiên bản, tìm-thay, chú giải, định dạng, in PDF, lưu đồ/sequence/UML; nhập draw.io nén và không nén.
+- Kiểm chứng sau khi hoàn tất: `node --test` — 312/312 pass; kiểm thử sơ đồ 22/22 pass; `node --check` cho `ui/diagram.js` và `lab/diagram.js` đều hợp lệ.
+
+## ✅ Kế hoạch vẽ mạng đã duyệt và triển khai (đề xuất ban đầu 2026-10-28)
+Nhóm A (giao diện — thấy ngay): A1 icon thiết bị đẹp hơn, có bóng, kiểu Cisco-like tự vẽ, nhiều kích cỡ; A2 thanh menu
+Tệp/Sửa/Xem/Sắp xếp kiểu draw.io + thanh công cụ gọn có icon; A3 bảng Định dạng chia tab Kiểu / Chữ / Sắp xếp, ô màu nhanh
+(bảng màu sẵn), xem trước kiểu dây; A4 minimap góc dưới + thước kẻ; A5 chế độ tối cho khung vẽ.
+Nhóm B (vẽ dây — quan trọng nhất cho topology): B1 dây bám điểm nối cố định (trên/dưới/trái/phải, nhiều cổng), không tự
+nhảy; B2 điểm uốn kéo tay (waypoint) + gấp khúc thông minh tránh hình; B3 kéo đầu dây để đổi hình nối; B4 nhiều dây song song
+giữa 2 thiết bị (EtherChannel) tự tách; B5 kiểu dây theo loại cáp: Ethernet, quang, Serial (zigzag), Wi-Fi (gạch), VPN.
+Nhóm C (năng suất): C1 đường gióng + bắt dính theo hình khác khi kéo (smart guides); C2 nhiều trang (tab Page-1, Page-2);
+C3 lớp (layers) ẩn/hiện/khoá; C4 tìm & thay chữ; C5 chèn bảng IP / chú giải (legend) tự sinh; C6 sao chép định dạng.
+Nhóm D (kết nối với app): D1 "Vẽ từ lab" — xuất sơ đồ của bất kỳ lab / workspace sang trình vẽ để chỉnh đẹp rồi xuất PNG;
+D2 nhập/xuất file draw.io (.drawio XML) để mở bằng draw.io thật; D3 xuất PDF.
+Nhóm E (thêm hình — user hỏi có cần không: CÓ, nên thêm, tự vẽ, không dùng logo hãng): E1 hạ tầng: modem, router
+Wi-Fi gia đình, hub, load balancer, IDS/IPS, VPN gateway, tổng đài IP (call manager), tủ rack, NAS/SAN; E2 server theo vai
+trò: web, mail, DNS, DHCP, database (hình trụ), máy ảo/hypervisor, cụm server; E3 đầu cuối: người dùng, điện thoại di
+động, máy tính bảng, camera IP, thiết bị IoT, màn hình/TV; E4 WAN & vùng: toà nhà (HQ/chi nhánh), trạm 4G/5G, vệ tinh,
+đám mây công cộng chung, đám mây MPLS, ISP; E5 hình cơ bản: mũi tên khối, tam giác, lục giác, hình trụ, ngôi sao, khung
+chú thích (callout), bảng (table), ổ khoá (bảo mật). Thư viện chia nhóm thu gọn được + "Hình hay dùng".
+Nhóm F (DevOps / Cloud-native — user làm cả DevOps; icon CHUNG tự vẽ + chữ, KHÔNG chép logo Docker/K8s/AWS…):
+F1 container, image, registry, pod, node, cluster, namespace, deployment, service, ingress, configmap/secret, volume;
+F2 CI/CD: git repo, nhánh/merge/PR, pipeline (các ô build → test → scan → deploy), runner/agent, artifact, môi trường
+dev/staging/prod; F3 cloud chung: VM, autoscaling group, serverless function, API gateway, load balancer L4/L7, CDN, DNS,
+object storage, block storage, hàng đợi tin nhắn, cache, CSDL SQL / NoSQL / time-series, kho bí mật (vault), IAM/khoá;
+F4 vận hành: monitoring/metrics, logging, tracing, alert, dashboard, IaC (file cấu hình), config management, on-call;
+F5 ứng dụng: trình duyệt/client, app di động, microservice, frontend/backend, người dùng/dev/ops.
+Nhóm G (khung chứa — kéo hình vào là nằm trong): region, availability zone, VPC/VNet, subnet public/private, cluster,
+namespace, security group, on-premise / data center, swimlane (làn) cho quy trình.
+Nhóm H (lưu đồ & kiến trúc): bắt đầu/kết thúc, xử lý, quyết định (thoi), dữ liệu, tài liệu, đầu nối trang; sequence
+(đường đời + mũi tên gọi), UML class đơn giản, bảng/ma trận.
+Nhóm I (tiện dụng): I1 tự sắp xếp (auto-layout dạng cây / phân lớp core-dist-access, dạng lưới); I2 thư viện MẪU lớn
+(campus, data center spine-leaf, SD-WAN, CI/CD pipeline, cụm K8s, kiến trúc 3 tầng web-app-db, DR site); I3 lịch sử phiên
+bản tự lưu (khôi phục bản 5/30 phút trước); I4 kiểm tra sơ đồ (thiết bị chưa nối, trùng tên, dây chồng nhau); I5 cảm ứng
+(điện thoại/máy tính bảng: chạm, kéo 2 ngón phóng to); I6 in / xuất PDF khổ A4–A3 có khung tên; I7 tối ưu khi > 500 hình.
+Thư viện kiểu draw.io: chọn bộ hình hiện (Mạng / DevOps / Cloud / Lưu đồ / Cơ bản) — "＋ Thêm bộ hình".
+Đề xuất thứ tự: B1–B5 → A1–A3 + E → C1 → D1 → D2 → còn lại. Chờ user chọn rồi mới làm.
+
 ## ✅ Thi thử song ngữ + câu sinh tự động + trình vẽ sơ đồ kiểu draw.io (2026-10-28)
 - Thi thử: `lab/ccna-exam-en.js` (BANK_EN cùng thứ tự BANK), `makeExam` gắn textEn/optionsEn/leftEn/rightEn/explainEn;
   `ui/exam.js` có nút VI / EN / VI + EN (`pj_exam-lang`). `lab/ccna-gen.js`: 9 dạng câu sinh theo seed (GEN_PLAN full 12, quick 4),

@@ -5,6 +5,6 @@
   "type": "module",
   "description": "App hoc mang: hanh trinh goi tin qua tung tang - Packet Journey (M1)",
   "scripts": {
-    "test": "node --test tests/"
+    "test": "node --test"
   }
 }
