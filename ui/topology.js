@@ -1,6 +1,6 @@
 // ui/topology.js — vẽ sơ đồ mạng bằng SVG + animation gói tin chạy trên dây.
 
-import { cloudPath } from './topo.js';
+import { cloudPath, esc } from './topo.js';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 let svg = null;
@@ -222,9 +222,6 @@ export function renderTables(container, tables, t) {
   container.style.display = any ? 'flex' : 'none';
 }
 
-function esc(s) {
-  return String(s ?? '').replace(/[&<>]/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[m]));
-}
 
 export function animateDot(fromId, toId, durationMs, arp) {
   return new Promise((resolve) => {

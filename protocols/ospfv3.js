@@ -5,7 +5,6 @@
 import { BitWriter } from '../packet/bytes.js';
 import { parseIp } from '../packet/addr.js';
 
-export const OSPF6_TYPE = { HELLO: 1, DBD: 2, LSR: 3, LSU: 4, LSACK: 5 };
 
 export default {
   id: 'ospfv3',

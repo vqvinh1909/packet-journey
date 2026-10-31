@@ -567,6 +567,9 @@ function hsrpPri(net, d, s) {
   for (const t of s.track || []) if (!ifUp(net, d.id, t.ifn)) p -= t.dec ?? 10;
   return p;
 }
+/** Thiết bị cấu hình theo mô hình riêng của hãng hoặc trang web, không theo lệnh IOS (ASA vẫn tính là kiểu IOS). */
+export const isVendorOs = (d) => !!d.os && d.os !== 'asa';
+
 /**
  * Bầu Active/Master cho các nhóm FHRP trong 1 miền L2.
  * "Incumbent" = router thắng theo priority cấu hình lúc khởi động; router khác chỉ giành quyền
@@ -609,7 +612,6 @@ export function fhrpActives(net, members) {
 const fhrpKey = (m, proto, g) => `fhrp|${m.dev}|${m.ifn}|${proto}|${g}`;
 /** Pha hội tụ của 1 nhóm FHRP trên cổng (Listen/Speak/Backup) hoặc null — cho show standby / vrrp. */
 export const fhrpPhase = (net, dev, ifn, proto, g) => peekPhase(net, fhrpKey({ dev, ifn }, proto, g), proto);
-export const hsrpActives = fhrpActives;
 /** Thành viên FHRP cùng miền L2 với 1 interface (để show standby / vrrp / bầu chọn). */
 export function hsrpView(net, devId, ifn) {
   const reach = flood(net, { dev: devId, ifn });
@@ -1980,7 +1982,7 @@ export function vtpSync(net) {
     if (doms.length === 1) for (const d of comp) if (!d.vtpDomain && d.vtpMode !== 'transparent') d.vtpDomain = doms[0];
     for (const dom of doms) {
       const parts = comp.filter((d) => d.vtpMode !== 'transparent' && d.vtpDomain === dom);
-      const groups = {};
+      const groups = Object.create(null); // khoá là mật khẩu người dùng gõ, có thể là "__proto__"
       for (const d of parts) (groups[d.vtpPw || ''] ||= []).push(d);
       for (const grp of Object.values(groups)) {
         const win = [...grp].sort((a, b) => b.vtpRev - a.vtpRev || (a.vtpMode === 'server' ? -1 : 1))[0];
@@ -2053,7 +2055,6 @@ export function attachClock(net) {
   }
   return net.clock;
 }
-export function detachClock(net) { delete net.clock; }
 /** Chạy fn như mạng đã hội tụ hết (chấm điểm), không đụng trạng thái đồng hồ. */
 export function withoutClock(net, fn) {
   const c = net.clock;

@@ -2,11 +2,9 @@
 // trường vừa đổi. Hỗ trợ "Đoán bước tiếp theo": nếu bước có `decision` và đang bật
 // chế độ đoán mà CHƯA trả lời → hiện câu hỏi + nút chọn, giấu phần giải thích tới khi đoán.
 
+import { esc } from './topo.js';
 import { lessonHref } from './i18n.js';
 
-function esc(s) {
-  return String(s ?? '').replace(/[&<>]/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[m]));
-}
 
 // Phần "lộ đáp án": đoạn giải thích + trường đổi + link bài học.
 function appendReveal(wrap, step, t) {

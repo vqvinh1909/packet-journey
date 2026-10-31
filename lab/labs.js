@@ -17,6 +17,7 @@ import { ADV_LABS } from './labs-adv.js';
 import { SEC_LABS } from './labs-sec.js';
 import { L2SEC_LABS } from './labs-l2sec.js';
 import { N200_LABS } from './labs-n200.js';
+import { WIFI_LABS } from './labs-wifi.js';
 
 const B = '../Quản trị Hạ tầng mạng (Infrastructure Administrator)/';
 const P = {
@@ -67,6 +68,7 @@ export const LAB_GROUPS = [
   { id: 'c3', title: '📗 CCNA trực quan — Ch.3 Xử lý sự cố' },
   { id: 'adv', title: '🔬 Chuyên đề nâng cao — VTP · PVLAN · IPsec · BGP · STP' },
   { id: 'n2', title: '🆕 Bổ sung CCNA 200-301 — LLDP · OSPF P2P · static route · SNMP · ACL IPv6 · VLAN mở rộng · khôi phục mật khẩu' },
+  { id: 'wifi', title: '📶 Wi-Fi & WLC — nối AP, tạo WLAN, QoS, 802.1X, kênh' },
   { id: 'sec', title: '🛡️ Bảo mật & Firewall — ASA · ZBF · FortiGate · Palo Alto · Sophos · Check Point · pfSense' },
   { id: 'l2s', title: '🔐 Bảo mật L2 & thiết bị — DHCP snooping · DAI · IP Source Guard · AAA · hardening' },
 ];
@@ -775,7 +777,7 @@ const INFRA_LABS = [
   },
 ];
 
-export const LABS = [...INFRA_LABS, ...CAP_LABS, ...CCNA_LABS, ...ADV_LABS, ...SEC_LABS, ...L2SEC_LABS, ...N200_LABS];
+export const LABS = [...INFRA_LABS, ...CAP_LABS, ...CCNA_LABS, ...ADV_LABS, ...SEC_LABS, ...L2SEC_LABS, ...N200_LABS, ...WIFI_LABS];
 export function getLab(id) { return LABS.find((l) => l.id === id) || null; }
 
 /** Chế độ thi thử: thời gian làm bài (phút) theo độ khó / loại lab. */

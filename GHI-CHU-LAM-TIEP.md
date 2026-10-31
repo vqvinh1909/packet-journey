@@ -1,5 +1,14 @@
 # Ghi chú làm tiếp — Packet Journey
 
+## ✅ Lộ trình theo CCNA v2.0 (2026-10-31)
+- `lab/roadmap.js` (dữ liệu + tính tiến độ), `ui/roadmap.js`, nút 🧭 Lộ trình. Lab hoặc kịch bản mới PHẢI thêm vào `ROADMAP`, test sẽ báo nếu sót.
+- Đề cương gốc: `Mạng máy tính/Quản trị Hạ tầng mạng (Infrastructure Administrator)/200-301_CCNA_v2.0_Exam_Topics_PDF.pdf` (5 mảng 25/25/20/20/10).
+- Đề thi thử đã theo 5 mảng v2.0 (72 câu giữ lại, 28 câu mới). Ngân hàng vẫn 100 câu nên đề đầy đủ lặp lại, nên mở rộng. Thiếu thực hành ghi ở trường `gap`: duplex/cáp, ảo hoá, Voice VLAN/PoE, Root/Loop Guard, AAA client, SCP/SFTP, bản ghi DNS, Storm Control/RA Guard, AI, Ansible.
+
+## ✅ Lab Wi-Fi & WLC (2026-10-31)
+- `lab/wlc.js` (mô hình + lệnh thao tác), `ui/wlc.js` (trang web), `lab/labs-wifi.js` (W01–W04). AP là PC có cờ `isAp`, join khi ping tới IP quản trị của WLC.
+- Giới hạn: `clientTest` chỉ hiểu gateway là SVI của switch nối trực tiếp với WLC; không mô phỏng DHCP của máy khách, kênh 5 GHz; `configio` chưa xuất cấu hình WLC.
+
 ## ✅ Hoàn thiện trình vẽ (2026-10-31)
 - Điểm nối phụ ở 1/4 và 3/4 cạnh dài từ 120px (`portsOf`, `nearestPort`). `.drawio` xuất/nhập đủ mọi trang (`exportDrawioPages`, `importDrawioPages`).
 - Nhập file nhiều trang phải xác nhận; file 1 trang chỉ thay trang đang mở, hoàn tác được.
@@ -56,7 +65,7 @@ Thư viện kiểu draw.io: chọn bộ hình hiện (Mạng / DevOps / Cloud / 
   đáp án tính bằng số học; test tính lại độc lập 400 seed/dạng.
 - ✏️ Vẽ mạng: `ui/canvas.js` (ping trên topology vẽ tay) đã xoá — người dùng chọn bỏ cấu hình/chạy ping ở đây vì đã có Lab CLI.
   Mới: `lab/diagram.js` (hình, dây, nhóm, khoá, căn, dàn đều, copy/paste, history, SVG, JSON, mẫu) + `ui/diagram.js` + test `tests/diagram.test.js`.
-  `scenarios/graphsim.js` vẫn giữ (có test riêng, có thể dùng lại sau).
+  `scenarios/graphsim.js` đã xoá ngày 2026-10-31 vì không còn màn hình nào dùng.
 - Cổng app mặc định giờ là 8008 (`Mở-Packet-Journey.bat`).
 
 ## ✅ Bổ sung theo CCNA 200-301 (2026-10-28)
@@ -291,7 +300,7 @@ with socketserver.TCPServer(('127.0.0.1', PORT), H) as httpd:
     print(f'Serving E:/SAP on http://127.0.0.1:{PORT}'); httpd.serve_forever()
 ```
 **CÁCH TỐT NHẤT (user chốt): trỏ "Đọc thêm" sang file HTML giáo trình đã build, KHÔNG dùng .md thô.**
-File có sẵn:
+File có sẵn (từ 2026-10-31 `lessonHref()` tự thêm `Mạng máy tính/` vì app đã chuyển sang `E:\SAP\Packet-Journey`; giáo trình nằm ngoài repo):
 - Infra: `../Quản trị Hạ tầng mạng (Infrastructure Administrator)/Infrastructure-Administrator-Giao-trinh.html`
   (có cả bản nhẹ `..._nhe.html`)
 - Network security: `../Network security/Network-Security-Giao-trinh.html`
@@ -374,9 +383,7 @@ sw.js hợp lệ (200, đúng MIME, secure context). Trên Chrome/Edge thật s�
   sai/thiếu GW (ARP gateway không hồi đáp → ping HỎNG). Đã verify cả 3 mẫu trong trình duyệt.
 
 ## ✅ ĐÃ XONG Canvas kéo-thả (session #6) — HOÀN TẤT M5
-- `scenarios/graphsim.js` `simulateGraph(devices, links, srcId, dstId)`: BFS tìm đường + mô phỏng ping
-  trên topology bất kỳ (host quyết định cùng/khác mạng, switch pass-through, router TTL−1 + viết lại MAC),
-  trả {topology,events,pcap} hoặc {error}. Có test `tests/graphsim.test.js` (5 ca).
+- `scenarios/graphsim.js` (BFS tìm đường + mô phỏng ping trên topology tự vẽ): đã xoá cùng `ui/canvas.js`.
 - `ui/canvas.js`: modal kéo-thả — thêm PC/Switch/Router, 4 chế độ (Di chuyển/Nối dây/Cấu hình/Xoá),
   cấu hình IP/prefix/gateway (router: IP từng cổng theo neighbor), chọn 2 PC → Chạy ping → `loadSimResult` trong app.js.
 - Nút header `btn-canvas` "✏️ Vẽ mạng". Đã verify: seed 2PC+switch, cấu hình IP, chạy → 7 bước ping cùng mạng OK.

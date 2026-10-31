@@ -2,13 +2,15 @@
 // Mỗi thao tác trên form sinh ra 1 "lệnh thao tác" (vd: rule add ... ) và gửi qua api.run(cmd) →
 // chạy như gõ lệnh: được ghi nhật ký, khôi phục khi mở lại, và lời giải lab dùng đúng các lệnh này.
 
+import { esc } from './topo.js';
 import { GUI_VENDORS, GUI_SVC, gfwOf, pending } from '../lab/guifw.js';
+import { renderWlc } from './wlc.js';
 
-const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[m]));
 const TABS = { sophos: ['Interfaces', 'Hosts & services', 'Rules and policies', 'NAT', 'Monitor'], checkpoint: ['Gateway', 'Objects', 'Access Control', 'NAT', 'Logs'], pfsense: ['Interfaces', 'Aliases', 'Firewall Rules', 'NAT', 'Status'] };
 
 /** Vẽ trang quản trị của thiết bị d vào el. api = { run(cmd) → kết quả, lastErr, tab, setTab(t), ruleIf, setRuleIf(z) }. */
 export function renderGuiFw(el, d, api) {
+  if (d.os === 'wlc') return renderWlc(el, d, api);
   const v = d.os;
   const V = GUI_VENDORS[v];
   const G = gfwOf(d), C = G.cand;

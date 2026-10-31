@@ -1,3 +1,4 @@
+import { esc } from './topo.js';
 // ui/fieldtree.js — cây trường kiểu Wireshark. Mỗi trường mang data-start/len để
 // highlight hai chiều với hex view. Trường vừa đổi (changedFields) được tô màu.
 
@@ -51,6 +52,3 @@ export function clearFieldHighlight(container) {
   container.querySelectorAll('.frow.hl').forEach((r) => r.classList.remove('hl'));
 }
 
-function esc(s) {
-  return String(s ?? '').replace(/[&<>]/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[m]));
-}

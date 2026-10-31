@@ -15,17 +15,7 @@ export function parseMac(str) {
   });
 }
 
-/** [0xaa, 0xbb, ...] -> "aa:bb:cc:dd:ee:ff". */
-export function macToString(bytes) {
-  return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join(':');
-}
-
 export const BROADCAST_MAC = 'ff:ff:ff:ff:ff:ff';
-
-/** MAC broadcast? */
-export function isBroadcastMac(str) {
-  return str.toLowerCase() === BROADCAST_MAC;
-}
 
 // ----- IPv4 (32 bit = 4 byte) -----
 
@@ -38,11 +28,6 @@ export function parseIp(str) {
     if (Number.isNaN(v) || v < 0 || v > 255) throw new Error(`IPv4 không hợp lệ: ${str}`);
     return v;
   });
-}
-
-/** [192,168,1,10] -> "192.168.1.10". */
-export function ipToString(bytes) {
-  return Array.from(bytes, (b) => b & 0xff).join('.');
 }
 
 /** "192.168.1.10" -> số nguyên 32-bit không dấu. */
@@ -61,11 +46,6 @@ export function prefixToMaskInt(prefix) {
   if (prefix < 0 || prefix > 32) throw new Error(`Prefix không hợp lệ: /${prefix}`);
   if (prefix === 0) return 0;
   return (0xffffffff << (32 - prefix)) >>> 0;
-}
-
-/** prefix -> "255.255.255.0". */
-export function prefixToMaskString(prefix) {
-  return intToIp(prefixToMaskInt(prefix));
 }
 
 /** Địa chỉ mạng (network address) của ip với prefix cho trước, trả về số nguyên. */

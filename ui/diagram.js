@@ -4,11 +4,11 @@
 //   • Nối dây: rê chuột lên hình → kéo từ chấm xanh sang hình khác. Dây thẳng / gấp khúc / cong, nét, mũi tên, nhãn.
 //   • Bảng Định dạng bên phải, menu chuột phải, phím tắt như draw.io, hoàn tác, nhóm, khoá, căn lề, dàn đều, thứ tự lớp.
 //   • Tự lưu (localStorage "diagram"), mẫu sơ đồ, xuất PNG / SVG / JSON, mở lại JSON.
+import { esc } from './topo.js';
 import * as D from '../lab/diagram.js';
 import { load, save } from './store.js';
 
 const SVGNS = 'http://www.w3.org/2000/svg';
-const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[m]));
 const HANDLES = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'];
 const ALL_DIAGRAM_PACKS = ['net', 'physical', 'security', 'devops', 'cloud', 'ops', 'app', 'basic'];
 let clipboard = null; // giữ qua các lần đóng/mở trong phiên
@@ -84,7 +84,7 @@ export function openDiagram(initial = null, onToWorkspace = null) {
   const $ = (id) => root.querySelector('#' + id);
   const stage = $('dg-stage'), svg = $('dg-svg'), world = $('dg-world'), draw = $('dg-draw'), over = $('dg-over');
   const alive = () => document.body.contains(root);
-  const snapshotTimer = setInterval(() => { if (!alive()) return clearInterval(snapshotTimer); const versions=load('diagram-versions',[]); const json=D.exportJson(dg); if(versions[0]?.json===json)return; versions.unshift({at:new Date().toISOString(),json}); save('diagram-versions',versions.slice(0,30)); },5*60*1000);
+  const snapshotTimer = setInterval(() => { if (!alive()) return clearInterval(snapshotTimer); const versions=load('diagram-versions',[]); const json=D.exportJson(dg); if(versions[0]?.json===json)return; versions.unshift({at:new Date().toISOString(),json}); save('diagram-versions',versions.slice(0,10)); },5*60*1000);
 
   // ---------------------------------------------------------------- lưu / hoàn tác
   const persist = () => { clearTimeout(persist.t); persist.t = setTimeout(() => { const json=D.exportJson(dg); save('diagram',JSON.parse(json)); pages[pageIndex].json=json; save('diagram-pages',pages); }, 200); };
@@ -542,7 +542,7 @@ export function openDiagram(initial = null, onToWorkspace = null) {
     'layer-assign': () => { const ss=selShapes(); if(!ss.length)return; const layers=[...new Set([...load('diagram-layers',[]),...dg.shapes.map(s=>s.layer||'Mặc định')])]; const name=prompt('Chuyển hình chọn vào lớp:\n'+layers.join(', '),layers[0]); if(!name)return; save('diagram-layers',[...new Set([...layers,name])]); mut(()=>ss.forEach(s=>D.update(dg,s.id,{layer:name}))); render(); },
     'layer-visible': () => { const layers=[...new Set(dg.shapes.map(s=>s.layer||'Mặc định'))]; const name=prompt('Ẩn / hiện lớp nào?\n'+layers.join(', '),layers[0]); if(!name)return; const hide=dg.shapes.filter(s=>(s.layer||'Mặc định')===name).some(s=>!s.hidden); mut(()=>dg.shapes.filter(s=>(s.layer||'Mặc định')===name).forEach(s=>D.update(dg,s.id,{hidden:hide}))); render(); },
     'layer-lock': () => { const layers=[...new Set(dg.shapes.map(s=>s.layer||'Mặc định'))]; const name=prompt('Khoá / mở khoá lớp nào?\n'+layers.join(', '),layers[0]); if(!name)return; const ss=dg.shapes.filter(s=>(s.layer||'Mặc định')===name), lock=!ss.every(s=>s.locked); mut(()=>ss.forEach(s=>D.update(dg,s.id,{locked:lock}))); render(); },
-    versions: () => { const versions=load('diagram-versions',[]); if(!versions.length){alert('Chưa có bản sao tự động. Sơ đồ được chụp mỗi 5 phút khi đang mở.');return;} const menu=versions.map((v,i)=>`${i+1}. ${new Date(v.at).toLocaleString('vi-VN')}`).join('\n'); const choice=prompt('Chọn số phiên bản cần khôi phục:\n'+menu,'1'); if(choice==null)return; const v=versions[+choice-1]; if(!v)return alert('Số phiên bản không hợp lệ.'); if(!confirm('Khôi phục bản này? Trạng thái hiện tại sẽ được lưu vào lịch sử trước.'))return; const current=D.exportJson(dg); versions.unshift({at:new Date().toISOString(),json:current}); save('diagram-versions',versions.slice(0,30)); mut(()=>Object.assign(dg,D.importJson(v.json))); st.sel=[]; render(); fit(); },
+    versions: () => { const versions=load('diagram-versions',[]); if(!versions.length){alert('Chưa có bản sao tự động. Sơ đồ được chụp mỗi 5 phút khi đang mở.');return;} const menu=versions.map((v,i)=>`${i+1}. ${new Date(v.at).toLocaleString('vi-VN')}`).join('\n'); const choice=prompt('Chọn số phiên bản cần khôi phục:\n'+menu,'1'); if(choice==null)return; const v=versions[+choice-1]; if(!v)return alert('Số phiên bản không hợp lệ.'); if(!confirm('Khôi phục bản này? Trạng thái hiện tại sẽ được lưu vào lịch sử trước.'))return; const current=D.exportJson(dg); versions.unshift({at:new Date().toISOString(),json:current}); save('diagram-versions',versions.slice(0,10)); mut(()=>Object.assign(dg,D.importJson(v.json))); st.sel=[]; render(); fit(); },
     'find-replace': () => { const q = prompt('Tìm chữ trong tên hình:'); if (q == null || !q) return; const matches = dg.shapes.filter((s) => `${s.label}\n${s.sub}`.toLocaleLowerCase().includes(q.toLocaleLowerCase())); if (!matches.length) { alert('Không tìm thấy.'); return; } st.sel = [matches[0].id]; focusShape(matches[0]); render(); const replacement = prompt(`Tìm thấy ${matches.length} hình. Thay “${q}” bằng:`, q); if (replacement == null) return; mut(() => matches.forEach((s) => D.update(dg,s.id,{ label: s.label.split(q).join(replacement), sub: s.sub.split(q).join(replacement) }))); render(); },
     legend: () => { const types = [...new Set(dg.shapes.map((s) => s.t))], cables = [...new Set(dg.edges.map((e) => e.cable || 'ethernet'))]; const lines = ['CHÚ GIẢI', ...types.map((t) => `■ ${D.SHAPES[t]?.vi || t}`), ...cables.map((c) => `━ Cáp ${c}`)]; const b = D.bounds(dg,30); const id = mut(() => { const s=D.addShape(dg,'note',b.x,b.y+b.h+20,{label:lines.join('\n'),w:200,h:Math.max(100,lines.length*22)}); return s.id; }); st.sel=[id]; render(); },
     print: () => { const project=prompt('Tên dự án / sơ đồ:','Sơ đồ mạng'); if(project==null)return; const author=prompt('Người vẽ:',''); if(author==null)return; const paper=prompt('Khổ giấy: nhập A4 hoặc A3','A4'); if(paper==null)return; const size=paper.trim().toUpperCase()==='A3'?'A3':'A4',orientation=confirm('OK: in ngang · Cancel: in dọc')?'landscape':'portrait'; let title=$('dg-print-title'); if(!title){title=document.createElement('div');title.id='dg-print-title';title.className='dg-print-title';stage.prepend(title);} title.textContent=`${project} · ${author||'—'} · ${new Date().toLocaleDateString('vi-VN')} · v1`; const page=document.createElement('style'); page.textContent=`@media print{@page{size:${size} ${orientation}}}`; document.head.appendChild(page); document.body.classList.add('dg-printing'); window.addEventListener('afterprint',()=>{document.body.classList.remove('dg-printing'); title.remove(); page.remove();},{once:true}); window.print(); },
@@ -671,7 +671,7 @@ export function openDiagram(initial = null, onToWorkspace = null) {
     const a = map[k];
     if (!a) return;
     e.preventDefault();
-    if (a === 'save') { save('diagram', JSON.parse(D.exportJson(dg))); $('dg-status').textContent = '💾 Đã lưu sơ đồ trong trình duyệt (tự lưu sau mỗi thay đổi; ⬇ Xuất để lưu ra file).'; return; }
+    if (a === 'save') { $('dg-status').textContent = save('diagram', JSON.parse(D.exportJson(dg))) ? '💾 Đã lưu sơ đồ trong trình duyệt (tự lưu sau mỗi thay đổi; ⬇ Xuất để lưu ra file).' : '⚠ Không lưu được vào trình duyệt, hãy ⬇ Xuất sơ đồ ra file.'; return; }
     ACT[a]();
   };
   const onKeyUp = (e) => { if (e.key === ' ') { st.space = false; stage.classList.remove('space'); } };

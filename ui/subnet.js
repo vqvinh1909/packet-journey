@@ -1,9 +1,9 @@
 // ui/subnet.js — modal "🧮 Luyện subnet": đề ngẫu nhiên vô hạn (lab/subnet.js), chọn dạng & độ khó, đồng hồ bấm giờ,
 // chế độ "10 câu tính giờ", sai thì hiện lời giải từng bước, thống kê theo dạng (localStorage "subnet-stats").
+import { esc } from './topo.js';
 import * as S from '../lab/subnet.js';
 import { load, save } from './store.js';
 
-const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[m]));
 const LEVELS = { 1: 'Dễ', 2: 'Vừa', 3: 'Khó' };
 const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 

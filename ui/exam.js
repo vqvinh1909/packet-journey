@@ -1,14 +1,14 @@
 // ui/exam.js — "🎓 Thi thử CCNA": màn hình bắt đầu (lịch sử các lần thi), phòng thi (đồng hồ đếm ngược, lưới câu
 // hỏi, đánh dấu ⚑, câu lab có console thu nhỏ), nộp bài → điểm thang 1000, điểm từng mảng, xem lại câu sai.
 // Ngôn ngữ đề: VI / EN / VI+EN (song ngữ) — chọn ở góc trên, lưu "exam-lang"; mặc định theo ngôn ngữ của app.
-// Bài đang làm lưu trong localStorage ("ccna-exam-cur") nên tải lại trang vẫn làm tiếp được.
+// Bài đang làm lưu trong localStorage ("ccna-exam-cur-v2") nên tải lại trang vẫn làm tiếp được.
+import { esc } from './topo.js';
 import * as E from '../lab/ccna-exam.js';
 import { getLab, buildLab, checkLab } from '../lab/labs.js';
 import { createCli } from '../lab/ios.js';
-import { load, save } from './store.js';
+import { load, save, remove } from './store.js';
 import { getLang } from './i18n.js';
 
-const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[m]));
 const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 const isHost = (d) => d.type === 'pc' || d.type === 'server';
 const LANGS = [['vi', 'VI'], ['en', 'EN'], ['both', 'VI + EN']];
@@ -34,7 +34,7 @@ export function openExam() {
   const tx = (vi, en) => (lang === 'en' ? esc(en ?? vi) : lang === 'both' && en && en !== vi ? `${esc(vi)}<span class="ex-en">${esc(en)}</span>` : esc(vi));
   /** Chữ thường (trong <option>): VI / EN trên cùng một dòng. */
   const tp = (vi, en) => (lang === 'en' ? en ?? vi : lang === 'both' && en && en !== vi ? `${vi} / ${en}` : vi);
-  const dom = (id) => { const d = E.DOMAINS.find((x) => x.id === id); return lang === 'en' ? d.name : lang === 'both' ? `${d.vi} (${d.name})` : d.vi; };
+  const dom = (id) => { const d = E.DOMAINS.find((x) => x.id === id); if (!d) return ''; return lang === 'en' ? d.name : lang === 'both' ? `${d.vi} (${d.name})` : d.vi; };
   const langBar = () => `<span class="ex-lang" role="group" aria-label="Ngôn ngữ đề / Language">${LANGS.map(([l, t]) => `<button data-lang="${l}" class="${l === lang ? 'on' : ''}">${t}</button>`).join('')}</span>`;
   function bindLang() {
     modal.querySelectorAll('.ex-lang button').forEach((b) => (b.onclick = () => { lang = b.dataset.lang; save('exam-lang', lang); screen(); }));
@@ -44,11 +44,12 @@ export function openExam() {
   function home() {
     screen = home;
     clearInterval(timer);
-    cur = load('ccna-exam-cur', null);
+    remove('ccna-exam-cur'); // bài dở của đề 6 mảng cũ không còn mở lại được
+    cur = load('ccna-exam-cur-v2', null);
     const hist = load('ccna-exam-hist', []);
     const full = E.makeExam(1, 'full'), quick = E.makeExam(1, 'quick');
     modal.innerHTML = `<div class="modal-h"><span>🎓 ${ui('Thi thử CCNA 200-301', 'CCNA 200-301 mock exam')}</span>${langBar()}<button class="modal-x" aria-label="đóng">✕</button></div>` +
-      `<div class="modal-b ex-home"><p>${ui(`Đề tự soạn theo 6 mảng kiến thức của CCNA 200-301 (không phải đề thật): trắc nghiệm một / nhiều đáp án, ghép cặp và câu <b>lab mô phỏng</b> gõ lệnh như Lab CLI. Mỗi đề có thêm các câu <b>sinh tự động với số liệu mới</b> (subnet, wildcard, bảng định tuyến, ACL…). Chấm thang <b>300–1000</b>, đạt từ <b>${E.PASS}</b>. Không xem được đáp án cho tới khi nộp bài.`, `Self-written questions covering the 6 CCNA 200-301 domains (not real exam questions): single / multiple answer, drag-and-drop matching and <b>simulation labs</b> typed in a CLI. Every exam also gets <b>auto-generated questions with fresh numbers</b> (subnetting, wildcards, routing tables, ACLs…). Scored <b>300–1000</b>, passing <b>${E.PASS}</b>. Answers are revealed only after you submit.`)}</p>` +
+      `<div class="modal-b ex-home"><p>${ui(`Đề tự soạn theo 5 mảng kiến thức của CCNA 200-301 v2.0 (không phải đề thật): trắc nghiệm một / nhiều đáp án, ghép cặp và câu <b>lab mô phỏng</b> gõ lệnh như Lab CLI. Mỗi đề có thêm các câu <b>sinh tự động với số liệu mới</b> (subnet, wildcard, bảng định tuyến, ACL…). Chấm thang <b>300–1000</b>, đạt từ <b>${E.PASS}</b>. Không xem được đáp án cho tới khi nộp bài.`, `Self-written questions covering the 5 CCNA 200-301 v2.0 domains (not real exam questions): single / multiple answer, drag-and-drop matching and <b>simulation labs</b> typed in a CLI. Every exam also gets <b>auto-generated questions with fresh numbers</b> (subnetting, wildcards, routing tables, ACLs…). Scored <b>300–1000</b>, passing <b>${E.PASS}</b>. Answers are revealed only after you submit.`)}</p>` +
       `<table class="ex-dom"><tr><th>${ui('Mảng kiến thức', 'Domain')}</th><th>${ui('Tỉ trọng', 'Weight')}</th></tr>${E.DOMAINS.map((d) => `<tr><td>${esc(dom(d.id))}</td><td>${d.w}%</td></tr>`).join('')}</table>` +
       (cur ? `<div class="ex-resume">${ui(`Bạn đang làm dở một đề (${cur.mode === 'quick' ? 'rút gọn' : 'đầy đủ'}).`, `You have an unfinished ${cur.mode === 'quick' ? 'short' : 'full'} exam.`)} <button id="ex-cont" class="btn-accent">▶ ${ui('Làm tiếp', 'Resume')}</button> <button id="ex-drop">${ui('Bỏ bài này', 'Discard')}</button></div>` : '') +
       `<div class="ex-start"><button id="ex-full" class="btn-accent">${ui('Đề đầy đủ', 'Full exam')} — ${full.qs.length} ${ui('câu', 'questions')} · ${full.minutes} ${ui('phút', 'min')}</button><button id="ex-quick">${ui('Đề rút gọn', 'Short exam')} — ${quick.qs.length} ${ui('câu', 'questions')} · ${quick.minutes} ${ui('phút', 'min')}</button></div>` +
@@ -61,14 +62,14 @@ export function openExam() {
     modal.querySelector('#ex-quick').onclick = () => start('quick');
     if (cur) {
       modal.querySelector('#ex-cont').onclick = () => begin(cur);
-      modal.querySelector('#ex-drop').onclick = () => { if (confirm(ui('Bỏ bài đang làm? Bài này không được tính điểm.', 'Discard this exam? It will not be scored.'))) { save('ccna-exam-cur', null); home(); } };
+      modal.querySelector('#ex-drop').onclick = () => { if (confirm(ui('Bỏ bài đang làm? Bài này không được tính điểm.', 'Discard this exam? It will not be scored.'))) { save('ccna-exam-cur-v2', null); home(); } };
     }
   }
 
   // ---------------------------------------------------------------- phòng thi
   function begin(state) {
     cur = state;
-    save('ccna-exam-cur', cur);
+    save('ccna-exam-cur-v2', cur);
     exam = E.makeExam(cur.seed, cur.mode);
     sims = {};
     k = Math.min(cur.k || 0, exam.qs.length - 1);
@@ -101,7 +102,7 @@ export function openExam() {
     renderNav();
     renderQ();
   }
-  const persist = () => { cur.k = k; save('ccna-exam-cur', cur); };
+  const persist = () => { cur.k = k; save('ccna-exam-cur-v2', cur); };
   const answered = (i) => { const q = exam.qs[i], a = cur.answers[i]; return q.kind === 'sim' ? !!(cur.simlog[i]?.length) : q.kind === 'match' ? Array.isArray(a) && a.every((x) => x != null && x !== '') : q.kind === 'multi' ? Array.isArray(a) && a.length > 0 : a != null; };
   function go(i) { if (i < 0 || i >= exam.qs.length) return; k = i; persist(); renderNav(); renderQ(); }
   function renderNav() {
@@ -189,7 +190,7 @@ export function openExam() {
     const secs = Math.min(exam.minutes * 60, Math.round((Date.now() - cur.t0) / 1000));
     const weak = g.domains.filter((d) => d.pct != null).sort((a, b) => a.pct - b.pct)[0];
     save('ccna-exam-hist', [{ at: Date.now(), mode: cur.mode, score: g.score, pass: g.pass, secs, weakId: weak && weak.pct < 1 ? weak.id : null }, ...load('ccna-exam-hist', [])].slice(0, 50));
-    save('ccna-exam-cur', null);
+    save('ccna-exam-cur-v2', null);
     last = { g, answers, st: cur, secs };
     cur = null;
     result();

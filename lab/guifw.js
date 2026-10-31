@@ -20,6 +20,7 @@ export const GUI_VENDORS = {
   sophos: { name: 'Sophos Firewall', commit: null, zones: ['LAN', 'WAN', 'DMZ'], ruleWord: 'firewall rule', implicit: 'không rule nào khớp → DROP mặc định (Sophos chặn mọi traffic chưa được cho phép)' },
   checkpoint: { name: 'Check Point', commit: 'install', zones: ['internal', 'external', 'dmz'], ruleWord: 'rule', implicit: 'Cleanup rule (Any → Any → Drop) ở cuối rulebase' },
   pfsense: { name: 'pfSense', commit: 'apply', zones: ['WAN', 'LAN', 'OPT1'], ruleWord: 'rule', implicit: 'mặc định CHẶN (Default deny rule) trên cổng nhận gói' },
+  wlc: { name: 'Wireless LAN Controller', commit: null }, // không phải firewall: dùng chung cơ chế trang web, xem lab/wlc.js
 };
 export const GUI_SVC = {
   any: 'any', HTTP: [{ proto: 'tcp', port: 80 }], HTTPS: [{ proto: 'tcp', port: 443 }], DNS: [{ proto: 'udp', port: 53 }, { proto: 'tcp', port: 53 }],

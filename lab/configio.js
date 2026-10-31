@@ -5,8 +5,7 @@
 // thiết bị), gõ từng dòng vào đúng thiết bị qua CLI thật (configure terminal … end).
 import * as N from './net.js';
 
-const VENDOR_FW = ['fortios', 'panos', 'sophos', 'checkpoint', 'pfsense'];
-const isIos = (d) => (d.type === 'router' || d.type === 'switch') && !VENDOR_FW.includes(d.os);
+const isIos = (d) => (d.type === 'router' || d.type === 'switch') && !N.isVendorOs(d);
 const isHost = (d) => d.type === 'pc' || d.type === 'server';
 const kindLabel = (d) => (d.os === 'asa' ? 'Cisco ASA' : d.type === 'router' ? 'Cisco router' : d.type === 'switch' ? 'Cisco switch' : d.shell === 'vpcs' ? 'VPCS' : d.type === 'server' ? 'server' : 'PC');
 const HEAD = (d) => `! ===== Thiết bị: ${d.name} (${kindLabel(d)}) =====`;
@@ -27,6 +26,7 @@ function asAdmin(net, cli, id, fn) {
 /** Cấu hình dạng văn bản của 1 thiết bị (mảng dòng), hoặc null nếu hãng này chưa hỗ trợ xuất văn bản. */
 export function deviceConfig(net, cli, id) {
   const d = net.devices[id];
+  if (N.isVendorOs(d)) return null;
   if (isIos(d)) {
     const out = asAdmin(net, cli, id, () => cli.exec(id, 'show running-config').out);
     return out.filter((l) => !/^(Building configuration|Current configuration)/.test(l));

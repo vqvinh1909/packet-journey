@@ -20,6 +20,7 @@ import { makeAsa } from './asa.js';
 import { makeForti } from './fortios.js';
 import { makePan } from './panos.js';
 import { makeGuiFw } from './guifw.js';
+import { makeWlc } from './wlc.js';
 
 const { longIf, shortIf, normIf, isIp, maskToPrefix, prefixToMask, netOf, ifSort } = N;
 
@@ -977,7 +978,7 @@ export function createCli(net) {
   });
   // Firewall các hãng có cú pháp riêng (không dùng bảng lệnh IOS): xử lý cả dòng lệnh
   const GUIFW = makeGuiFw({ R });
-  const VENDOR = { fortios: makeForti({ net, R }), panos: makePan({ net, R }), sophos: GUIFW, checkpoint: GUIFW, pfsense: GUIFW };
+  const VENDOR = { fortios: makeForti({ net, R }), panos: makePan({ net, R }), sophos: GUIFW, checkpoint: GUIFW, pfsense: GUIFW, wlc: makeWlc({ net, R }) };
   function tableFor(d, s) {
     if (d.os === 'asa') return ASA.tableFor(d, s);
     switch (s.mode) {
@@ -1057,7 +1058,7 @@ export function createCli(net) {
       d.bootWin = false; d.rommon = true; d.rommonUser = true; s.loggedOut = false; s.rmn = 1;
       res = R(['', 'monitor: command "boot" aborted due to user interrupt']);
     } else if (d.rommon && d.rommonUser) res = rommonExec(d, s, line.trim());
-    else if (d.type === 'pc' || d.type === 'server') res = s.pw === 'ssh' ? sshPw(d, s, line) : d.shell === 'vpcs' ? vpcsExec(d, line.trim()) : pcExec(d, line.trim());
+    else if ((d.type === 'pc' || d.type === 'server') && !VENDOR[d.os]) res = s.pw === 'ssh' ? sshPw(d, s, line) : d.shell === 'vpcs' ? vpcsExec(d, line.trim()) : pcExec(d, line.trim());
     else if (VENDOR[d.os]) res = VENDOR[d.os].exec(d, s, line.trim());
     else if (d.rommon) res = R(['(Lab: thiết bị đang ở ROMMON vì không có file IOS khởi động được — bấm "↺ Làm lại" để khôi phục lab.)']);
     else if (s.ask) {
@@ -1462,6 +1463,8 @@ export function createCli(net) {
   function ipSet(x, f, n, ip, mask) {
     const pfx = maskToPrefix(mask);
     const nw = netOf(ip, pfx);
+    const oct1 = +ip.split('.')[0];
+    if (oct1 === 127 || oct1 >= 224) return [`Not a valid host address - ${ip}`];
     if (pfx < 31 && (ip === nw || ip === N.n2ip(N.ip2n(nw) + 2 ** (32 - pfx) - 1))) return [`Bad mask /${pfx} for address ${ip}`];
     for (const [m, g] of Object.entries(IFS(x.d))) {
       if (m !== n && g.ip && (N.inNet(ip, g.ip, g.prefix) || N.inNet(g.ip, ip, pfx))) return [`% ${netOf(ip, pfx)} overlaps with ${longIf(m)}`];
