@@ -12,20 +12,17 @@ và **xuất được `.pcap`** để mở bằng Wireshark đối chiếu.
 
 ## Chạy app
 
-App dùng **đường dẫn tương đối**. Link bài học trỏ sang giáo trình ở `E:\SAP\Mạng máy tính\`, nằm NGOÀI repo,
-nên server chạy ở gốc `E:\SAP`, bằng `E:\SAP\serve.py` (file này cũng nằm ngoài repo):
+Cần Python 3, không phải cài gì khác. Trên Windows, bấm đúp **`Mở-Packet-Journey.bat`** (chạy được ở mọi thư mục).
+
+Hệ điều hành khác, chạy trong thư mục app rồi mở `http://127.0.0.1:8000/`:
 
 ```bash
-# tại thư mục E:\SAP — dùng serve.py (ép charset=utf-8 để mở bài học .md/.html không lỗi tiếng Việt)
-python serve.py 8000
+python3 -m http.server 8000 --bind 127.0.0.1
 ```
 
-Rồi mở: `http://127.0.0.1:8000/Packet-Journey/`
+Giáo trình và `serve.py` không nằm trong repo. Máy không có chúng thì app vẫn chạy đủ, các link "📖 Đọc" tự ẩn.
 
-Máy không có `serve.py` và giáo trình: chạy `python -m http.server 8000` ngay trong repo rồi mở `http://127.0.0.1:8000/`.
-App vẫn chạy đủ, chỉ các link "📖 Đọc" là không mở được.
-
-Hoặc bấm đúp **`Mở-Packet-Journey.bat`** (tự bật server và mở đúng URL).
+Máy có giáo trình (`Mạng máy tính\` và `serve.py` nằm cạnh thư mục app): file `.bat` tự dùng `serve.py` và mở `/Packet-Journey/`.
 
 > Vì sao cần `serve.py` thay cho `python -m http.server`? http.server trả file `.md`/`.html` không
 > kèm `charset=utf-8`, trình duyệt đọc nhầm bảng mã → tiếng Việt vỡ ("BÃ i 2"). `serve.py` khai báo

@@ -4,7 +4,7 @@ import { esc } from './topo.js';
 import { SCENARIOS, getScenario } from '../scenarios/index.js';
 import { downloadPcap } from '../packet/pcap.js';
 import { flattenFields } from '../packet/serialize.js';
-import { t, getLang, setLang, onLangChange } from './i18n.js';
+import { t, getLang, setLang, onLangChange, lessonHref } from './i18n.js';
 import { load, save, markDone } from './store.js';
 import { openGlossary } from './glossary.js';
 import { openProgress } from './progress.js';
@@ -79,6 +79,10 @@ function boot() {
 
 // ---------- Chrome (header + panel headers) ----------
 function buildChrome() {
+  // Giáo trình nằm ngoài repo: máy không có thì ẩn link thay vì để người dùng bấm vào 404. Chỉ 404 mới tính, mất mạng thì giữ.
+  fetch(lessonHref('../Network security/x/Bai-01_x.md'), { method: 'HEAD' }).then((r) => {
+    if (r.status === 404) document.documentElement.classList.add('no-lessons');
+  }).catch(() => {});
   const sel = $('sel-scenario');
   sel.innerHTML = SCENARIOS.map((s) => `<option value="${s.meta.id}">${esc(s.meta.titleVi)}</option>`).join('');
   sel.value = state.scenarioId;
