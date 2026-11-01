@@ -262,6 +262,9 @@ html, body {
 .boot-fail { margin: 12px 16px; padding: 12px 14px; border: 1px solid #c0392b; background: #fbe0da; color: #7a211a; border-radius: 10px; font-size: 14px; }
 .boot-fail button { margin-left: 8px; font: inherit; padding: 4px 10px; border-radius: 6px; border: 1px solid #c0392b; background: #fff; cursor: pointer; }
 
+/* Máy không có giáo trình: mọi link do lessonHref() tạo đều chứa thư mục này */
+.no-lessons a[href*="M%E1%BA%A1ng%20m%C3%A1y%20t%C3%ADnh"] { display: none; }
+
 /* ---------- Lab CLI ---------- */
 .btn-lab { background: var(--ok) !important; color: #fff !important; border-color: var(--ok) !important; font-weight: 600; }
 .lab-back { padding: 0; }

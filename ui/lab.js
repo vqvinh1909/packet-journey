@@ -187,7 +187,7 @@ export function openLab(onRun, o = {}) {
   function renderHead() {
     const kind = { ticket: '🎫 Ticket sự cố', project: '🏢 Dự án tổng hợp', config: '🛠️ Lab cấu hình' }[lab.kind] || '🛠️ Lab cấu hình';
     const best = load('labexam-best', {})[lab.id];
-    const meta = [kind, lab.lesson ? esc(lab.lesson) : '', `Độ khó ${'●'.repeat(lab.level)}${'○'.repeat(3 - lab.level)}`, lab.lessonPath ? `<a href="${lessonHref(lab.lessonPath)}" target="_blank" rel="noopener">📖 Đọc bài trong giáo trình</a>` : '', best ? `<span class="lab-best${best.score >= 800 ? ' pass' : ''}">🏅 Thi thử tốt nhất: ${best.score}/1000 (${fmtTime(best.secs)})</span>` : ''].filter(Boolean).join(' · ');
+    const meta = [kind, (lab.lesson ? esc(lab.lesson) : '') + (lab.lessonPath ? ` <a href="${lessonHref(lab.lessonPath)}" target="_blank" rel="noopener">📖 Đọc bài trong giáo trình</a>` : ''), `Độ khó ${'●'.repeat(lab.level)}${'○'.repeat(3 - lab.level)}`, best ? `<span class="lab-best${best.score >= 800 ? ' pass' : ''}">🏅 Thi thử tốt nhất: ${best.score}/1000 (${fmtTime(best.secs)})</span>` : ''].filter(Boolean).join(' · ');
     $('lab-head').innerHTML =
       `<div class="lab-title"><span class="lab-badge">${lab.breakInfo ? '🎲' : lab.id}</span> ${esc(lab.title)}</div>` +
       `<div class="lab-meta">${meta}</div>` +
