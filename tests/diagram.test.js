@@ -572,3 +572,24 @@ test('mẫu sơ đồ: id không trùng, có nhóm, thiết bị không đè lê
     assert.ok(t.build().shapes.every((s) => s.x >= 0 && s.y >= 0), t.id);
   }
 });
+
+test('importJson: file lạ không đưa được mã vào SVG qua ID hay trường số', () => {
+  const X = '"><image href=x onerror="window.pwned=1"></image>';
+  const d = D.emptyDiagram(), a = D.addShape(d, 'router', 0, 0), b = D.addShape(d, 'rect', 300, 0);
+  D.addShape(d, 'rack', 600, 0);
+  D.addEdge(d, a.id, b.id);
+  const raw = JSON.parse(D.exportJson(d));
+  const poison = (o) => { const out = { ...o }; for (const k of Object.keys(out)) if (!['id', 't', 'a', 'b', 'x', 'y', 'w', 'h'].includes(k)) out[k] = X; return out; };
+  const nums = { sw: X, fs: X, op: X, radius: X, rackUnits: X, rackU: X, rackStartU: X, rackBase: X, width: X };
+  raw.shapes = raw.shapes.map((s) => ({ ...poison(s), ...nums })).concat({ ...raw.shapes[0], id: X }, { ...raw.shapes[0], id: 's99', t: 'constructor' });
+  raw.edges = raw.edges.map((e) => ({ ...poison(e), ...nums })).concat({ ...raw.edges[0], id: X });
+  const got = D.importJson(JSON.stringify(raw));
+  assert.equal(got.shapes.length, 3); // bỏ hình có ID lạ và loại hình lạ
+  assert.equal(got.edges.length, 1);
+  assert.ok(!D.toSvg(got).includes('<image href=x'));
+  for (const x of [...got.shapes, ...got.edges]) for (const k of Object.keys(nums)) assert.ok(!(k in x) || Number.isFinite(x[k]), k);
+  assert.equal(got.shapes[0].fs, 12);
+  assert.equal(got.edges[0].width, 2);
+  // Sơ đồ hợp lệ giữ nguyên qua xuất rồi nhập
+  assert.deepEqual(JSON.parse(D.exportJson(D.importJson(D.exportJson(d)))).edges, JSON.parse(D.exportJson(d)).edges);
+});

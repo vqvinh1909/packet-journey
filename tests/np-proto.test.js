@@ -4,6 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { serialize } from '../packet/serialize.js';
 import { internetChecksum } from '../packet/checksum.js';
+import { getScenario } from '../scenarios/index.js';
 
 const bytes = (proto, fields) => [...serialize([{ proto, fields }]).bytes];
 const u16 = (b, i) => (b[i] << 8) | b[i + 1];
@@ -60,6 +61,43 @@ test('BGP VPNv4: AFI 1, SAFI 128, nhãn và độ dài NLRI đúng RFC 4364', ()
   const nlri = at + 4 + 3 + 1 + 12 + 1;
   assert.equal(b[nlri], 24 + 64 + 24);
   assert.equal(((b[nlri + 1] << 16) | (b[nlri + 2] << 8) | b[nlri + 3]) >> 4, 100);
+});
+
+test('SIP: Content-Length đúng số byte SDP, dòng trống ngăn phần thân', () => {
+  const text = (fields) => new TextDecoder().decode(new Uint8Array(bytes('sip', fields)));
+  const msg = text({ start: 'INVITE sip:2002@10.0.0.5 SIP/2.0', headers: [['CSeq', '1 INVITE']], sdp: { user: '2001', sess: 1, ip: '10.0.0.1', port: 16384, pts: [0, 18] } });
+  const [head, body] = msg.split('\r\n\r\n');
+  assert.equal(Number(/Content-Length: (\d+)/.exec(head)[1]), body.length);
+  assert.match(body, /m=audio 16384 RTP\/AVP 0 18\r\n/);
+  assert.match(body, /a=rtpmap:18 G729\/8000/);
+  assert.match(text({ start: 'SIP/2.0 180 Ringing', headers: [] }), /^SIP\/2\.0 180 Ringing\r\nContent-Length: 0\r\n\r\n$/);
+});
+
+test('RTP và RTCP: đúng khuôn RFC 3550, độ dài khớp số byte thật', () => {
+  const r = bytes('rtp', { pt: 0, seq: 258, ts: 160, ssrc: 0x01020304, marker: true });
+  assert.equal(r.length, 12 + 160);
+  assert.equal(r[0] >> 6, 2);
+  assert.equal(r[1], 0x80);
+  assert.equal(u16(r, 2), 258);
+  assert.deepEqual(r.slice(8, 12), [1, 2, 3, 4]);
+  const c = bytes('rtcp', { ssrc: 1, ntp: [1, 2], ts: 3, packets: 4, octets: 5, peer: 6, lost8: 2, lostTotal: 8, extSeq: 9, jitter: 80, lsr: 0, dlsr: 0 });
+  assert.equal((u16(c, 2) + 1) * 4, c.length);
+  assert.equal(c[1], 200);
+  assert.equal(c[0] & 0x1f, 1);
+});
+
+test('Kịch bản VoIP: RTP đi thẳng và đúng cổng đã chốt trong SDP', () => {
+  const ev = getScenario('s40-voip-call').build().events.filter((e) => e.packet);
+  const layer = (e, p) => e.packet.layers.find((l) => l.proto === p);
+  const flow = ev.filter((e) => layer(e, 'sip')).map((e) => layer(e, 'sip').fields.start.split(' ')[0] === 'SIP/2.0' ? layer(e, 'sip').fields.start.split(' ')[1] : layer(e, 'sip').fields.start.split(' ')[0]);
+  assert.deepEqual(flow, ['REGISTER', '200', 'INVITE', '100', 'INVITE', '180', '200', 'ACK', 'BYE', '200']);
+  const answer = ev.find((e) => layer(e, 'sip')?.fields.sdp?.pts.length === 1);
+  const offer = ev.find((e) => layer(e, 'sip')?.fields.sdp?.pts.length > 1);
+  const media = ev.find((e) => layer(e, 'rtp'));
+  assert.equal(layer(media, 'ipv4').fields.dst, layer(answer, 'sip').fields.sdp.ip, 'RTP tới thẳng IP trong SDP trả lời');
+  assert.equal(layer(media, 'udp').fields.dstPort, layer(answer, 'sip').fields.sdp.port);
+  assert.equal(layer(media, 'udp').fields.srcPort, layer(offer, 'sip').fields.sdp.port);
+  assert.equal(layer(media, 'ipv4').fields.dscp, 46);
 });
 
 test('VXLAN-GPO: cờ G bật và SGT nằm trong header, thiếu sgt thì như cũ', () => {

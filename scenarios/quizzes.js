@@ -2,6 +2,13 @@
 // Bộ câu hỏi quiz theo từng kịch bản (id → mảng câu hỏi). Tách riêng để dễ bổ sung.
 // Mỗi câu: { q, options:[...], correct: index, explainVi }
 
+import { HARD } from './quizzes-hard.js';
+import { QGEN, SC_GENS } from './quiz-gen.js';
+import { getScenario } from './index.js';
+import { BANK } from '../lab/ccna-exam.js';
+import { GENS } from '../lab/ccna-gen.js';
+import { ROADMAP } from '../lab/roadmap.js';
+
 export const QUIZZES = {
   's01-ping-same-subnet': [
     { q: 'PC1 ping PC2 cùng mạng. Khung ARP Request có MAC đích là gì?', options: ['MAC của PC2', 'ff:ff:ff:ff:ff:ff (broadcast)', 'MAC của switch', '00:00:00:00:00:00'], correct: 1, explainVi: 'ARP Request gửi broadcast vì chưa biết MAC đích.' },
@@ -218,8 +225,74 @@ export const QUIZZES = {
     { q: 'Vì sao BFD có ích khi có switch giữa hai router?', options: ['Cổng của router vẫn up khi đoạn kia đứt', 'Switch chặn OSPF', 'Router không có MAC', 'Để giảm TTL'], correct: 0, explainVi: 'Không có tín hiệu lớp 1 để báo.' },
     { q: 'BFD điều khiển một chặng dùng cổng nào?', options: ['UDP 3784', 'TCP 179', 'UDP 4789', 'IP 89'], correct: 0, explainVi: 'BFD đa chặng dùng UDP 4784.' },
   ],
+  's40-voip-call': [
+    { q: 'Trong cuộc gọi có tổng đài SIP proxy, âm thanh RTP thường đi thế nào?', options: ['Thẳng giữa hai điện thoại', 'Luôn qua tổng đài', 'Qua switch STP root', 'Trong bản tin SIP'], correct: 0, explainVi: 'SDP cho mỗi bên biết IP và cổng của bên kia. Tổng đài chỉ xử lý báo hiệu, trừ khi được cấu hình để giữ media.' },
+    { q: 'Phần nào cho biết IP, cổng nhận RTP và codec?', options: ['SDP', 'Header Via', 'RTCP', 'CSeq'], correct: 0, explainVi: 'Dòng c= chứa IP, dòng m= chứa cổng và payload type.' },
+    { q: 'Thứ tự bắt tay một cuộc gọi SIP là?', options: ['INVITE, 200 OK, ACK', 'SYN, SYN-ACK, ACK', 'Discover, Offer, Ack', 'REGISTER, BYE, ACK'], correct: 0, explainVi: '100 Trying và 180 Ringing là các bản tin tạm thời xen giữa.' },
+    { q: 'Băng thông IP mỗi chiều của G.711 với gói 20 ms là?', options: ['64 kbps', '80 kbps', '8 kbps', '24 kbps'], correct: 1, explainVi: '(160 + 40 byte) × 8 × 50 gói = 80 kbps. 24 kbps là của G.729.' },
+    { q: 'Vì sao RTP chạy trên UDP?', options: ['Gói đến muộn không còn giá trị, gửi lại chỉ thêm trễ', 'UDP mã hoá âm thanh', 'TCP không có cổng', 'UDP chọn codec'], correct: 0, explainVi: 'Số thứ tự và timestamp của RTP giúp phát hiện mất gói và phát đều.' },
+  ],
 };
 
 export function quizFor(id) {
   return QUIZZES[id] || null;
+}
+
+for (const [id, qs] of Object.entries(HARD)) QUIZZES[id] = [...(QUIZZES[id] || []), ...qs];
+
+/** Số câu mỗi lần làm quiz; Lộ trình tính đạt khi đúng từ 60% số này. */
+export const QUIZ_LEN = 40;
+
+// nhóm của Lộ trình CCNA → mảng của ngân hàng Thi thử và các dạng câu sinh cùng mảng
+const CCNA_STAGES = { infra: 'infra', switching: 'sw', routing: 'rt', services: 'svc' };
+const DOMAIN_GENS = { infra: ['broadcast', 'hosts', 'validHost', 'dhcp'], rt: ['wildcard', 'summary', 'lpm', 'ad'], svc: ['acl', 'wildcard'], sw: [] };
+const DOMAIN_QGEN = { infra: ['tcpAck', 'frag', 'solicited'], sw: ['stpRoot'], rt: ['eigrpFs', 'hsrpMac'], svc: ['natPat', 'dnsTtl'] };
+const fullId = (short) => Object.keys(QUIZZES).find((k) => k.startsWith(short));
+const stageOf = (short) => ROADMAP.find((st) => st.topics.some((t) => (t.sc || []).includes(short)));
+const ccnaShorts = new Set(ROADMAP.filter((st) => CCNA_STAGES[st.id]).flatMap((st) => st.topics.flatMap((t) => t.sc || [])));
+const titleOf = (id) => getScenario(id)?.meta.titleVi || id;
+
+function shuffle(a, rnd) {
+  const b = [...a];
+  for (let i = b.length - 1; i > 0; i--) { const j = Math.floor(rnd() * (i + 1)); [b[i], b[j]] = [b[j], b[i]]; }
+  return b;
+}
+/** Sinh tối đa n biến thể khác nhau của một dạng câu (bỏ biến thể trùng chữ). */
+function variants(gen, n, rnd) {
+  const out = new Map();
+  for (let t = 0; t < n * 6 && out.size < n; t++) { const q = gen(rnd); if (q) out.set(q.q, q); }
+  return [...out.values()];
+}
+const fromGen = (g) => g && { q: g.text, options: g.opts, correct: g.ans, explainVi: g.explain };
+
+/**
+ * Một lượt quiz QUIZ_LEN câu: câu của kịch bản và câu sinh với số liệu mới, rồi câu của các kịch bản cùng nhóm Lộ trình,
+ * câu cùng mảng trong ngân hàng Thi thử. Câu chưa có trong `seen` được lấy trước nên các lượt liên tiếp ít trùng nhau.
+ * Thứ tự câu và đáp án đều được trộn. Mỗi câu có `from`: tên nguồn khi không phải câu của chính kịch bản này.
+ */
+export function buildQuiz(id, rnd = Math.random, n = QUIZ_LEN, seen = new Set()) {
+  if (!QUIZZES[id]) return null;
+  const short = id.slice(0, 3), stage = stageOf(short), dom = CCNA_STAGES[stage?.id];
+  const own = [...QUIZZES[id], ...(SC_GENS[short] || []).flatMap((g) => variants(QGEN[g], 3, rnd))];
+  // CCNA: kịch bản cùng nhóm; ngoài CCNA: mọi kịch bản CCNP với nhau
+  const peers = Object.keys(QUIZZES).filter((k) => k !== id && (dom ? stageOf(k.slice(0, 3)) === stage : !ccnaShorts.has(k.slice(0, 3))));
+  const extra = [
+    ...peers.flatMap((k) => QUIZZES[k].map((q) => ({ ...q, from: `Cùng nhóm: ${titleOf(k)}` }))),
+    ...(dom ? BANK.filter((b) => b[0] === dom && Array.isArray(b[2]) && Number.isInteger(b[3])).map(([, q, options, correct, explainVi]) => ({ q, options, correct, explainVi, from: 'Ngân hàng thi thử' })) : []),
+  ];
+  const fresh = (q) => !seen.has(q.q);
+  // câu của chính kịch bản luôn có; phần còn lại ưu tiên câu chưa gặp
+  const first = [...shuffle(own, rnd), ...shuffle(extra, rnd).filter(fresh)];
+  // chưa đủ thì bù bằng câu sinh cùng mảng (số liệu mới nên luôn là câu mới), mỗi dạng tối đa 6 câu cho khỏi lệch đề
+  const gens = dom ? [...DOMAIN_GENS[dom].map((g) => (r) => fromGen(GENS[g](r))), ...DOMAIN_QGEN[dom].map((g) => QGEN[g])] : [];
+  const made = new Set(first.map((q) => q.q)), cap = gens.length * 6;
+  for (let t = 0, k = 0; gens.length && first.length < n && k < cap && t < n * 30; t++) {
+    const q = gens[t % gens.length](rnd);
+    if (q && !made.has(q.q)) { made.add(q.q); k++; first.push({ ...q, from: 'Câu sinh tự động' }); }
+  }
+  const picked = [...first, ...shuffle(extra, rnd).filter((q) => !fresh(q))].slice(0, n);
+  return shuffle(picked, rnd).map((q) => {
+    const o = shuffle(q.options.map((t, i) => ({ t, ok: i === q.correct })), rnd);
+    return { ...q, options: o.map((x) => x.t), correct: o.findIndex((x) => x.ok) };
+  });
 }

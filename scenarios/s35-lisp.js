@@ -48,16 +48,16 @@ export function build() {
   };
   const sim = new Sim(topology);
 
-  const ctl = (from, to, srcIp, dstIp, fields) => sim.frame([
+  const ctl = (from, to, srcIp, dstIp, fields, { sport = 40342, dport = 4342, ttl = 64 } = {}) => sim.frame([
     { proto: 'ethernet', fields: { dst: to.mac, src: from.mac, etherType: 0x0800 } },
-    { proto: 'ipv4', fields: { src: srcIp, dst: dstIp, ttl: 64, id: 0x3500, protocol: 17 } },
-    { proto: 'udp', fields: { srcPort: 40342, dstPort: 4342 } },
+    { proto: 'ipv4', fields: { src: srcIp, dst: dstIp, ttl, id: 0x3500, protocol: 17 } },
+    { proto: 'udp', fields: { srcPort: sport, dstPort: dport } },
     { proto: 'lisp', fields },
   ]);
   const inner = (dst, src, ttl) => echoFrame({ ethDst: dst, ethSrc: src, srcIp: HA.ip, dstIp: HB.ip, ttl, ipId: 0x3501, identifier: 1, seq: 1, type: ICMP_TYPE.ECHO_REQUEST });
-  const encap = (to, from) => sim.frame([
+  const encap = (to, from, ttl = 64) => sim.frame([
     { proto: 'ethernet', fields: { dst: to.mac, src: from.mac, etherType: 0x0800 } },
-    { proto: 'ipv4', fields: { src: X1.ip, dst: X2.ip, ttl: 64, id: 0x3502, protocol: 17 } },
+    { proto: 'ipv4', fields: { src: X1.ip, dst: X2.ip, ttl, id: 0x3502, protocol: 17 } },
     { proto: 'udp', fields: { srcPort: 49152, dstPort: 4341 } },
     { proto: 'lisp', fields: { type: 'data', instance: 100 } },
     ...inner('00:00:00:00:00:00', '00:00:00:00:00:00', 63).slice(1),
@@ -90,18 +90,19 @@ export function build() {
     titleVi: 'xTR1 hỏi Map-Resolver: EID này ở đâu?', packet: q,
     overlay: { links: { l5: { cls: 'trunk', label: 'Map-Request' } } },
     explanationVi: 'Đây là cách làm theo yêu cầu, giống DNS: chỉ hỏi khi có lưu lượng. Trong lúc chờ, gói đầu tiên thường bị bỏ.', lesson: LESSON });
-  const q2 = ctl(MS, X2, X1.ip, MS.ip, { type: 'request', eid: HB.ip, mask: 32, itr: X1.ip });
+  // shortcut: thực tế Map-Server bọc câu hỏi trong Encapsulated Control Message; ở đây gửi thẳng cho dễ đọc
+  const q2 = ctl(MS, X2, MS.ip, X2.ip, { type: 'request', eid: HB.ip, mask: 32, itr: X1.ip });
   sim.emit({ kind: 'transit', fromDevice: 'ms', toDevice: 'x2', side: 'forward', activeLayer: 4.5,
     titleVi: 'Map-Server chuyển câu hỏi tới xTR2', packet: q2,
     overlay: { links: { l6: { cls: 'trunk', label: 'Map-Request' } } },
-    explanationVi: 'Mặc định ETR là bên có thẩm quyền trả lời. Map-Server chỉ biết phải chuyển tới đâu.', lesson: LESSON });
-  const rep = ctl(X2, CORE, X2.ip, X1.ip, { type: 'reply', ...B_REC });
+    explanationVi: 'Mặc định ETR là bên có thẩm quyền trả lời. Map-Server chỉ biết phải chuyển tới đâu. Câu hỏi vẫn giữ ITR-RLOC 20.0.0.1 nên xTR2 biết trả lời về đâu. (Đơn giản hóa: thực tế Map-Server bọc câu hỏi trong Encapsulated Control Message.)', lesson: LESSON });
+  const rep = ctl(X2, CORE, X2.ip, X1.ip, { type: 'reply', ...B_REC }, { sport: 4342, dport: 40342 }); // trả về đúng cổng nguồn của Map-Request
   sim.capture(rep, 'Map-Reply');
   sim.emit({ kind: 'transit', fromDevice: 'x2', toDevice: 'core', side: 'forward', activeLayer: 4.5,
     titleVi: 'xTR2 trả lời trực tiếp cho xTR1', packet: rep,
     overlay: { links: { l3: { cls: 'trunk', label: 'Map-Reply' } } },
     explanationVi: 'Map-Reply đi thẳng tới ITR-RLOC ghi trong câu hỏi, không quay lại Map-Server.', lesson: LESSON });
-  const rep2 = ctl(CORE, X1, X2.ip, X1.ip, { type: 'reply', ...B_REC });
+  const rep2 = ctl(CORE, X1, X2.ip, X1.ip, { type: 'reply', ...B_REC }, { sport: 4342, dport: 40342, ttl: 63 });
   sim.emit({ kind: 'transit', fromDevice: 'core', toDevice: 'x1', side: 'forward', activeLayer: 4.5,
     titleVi: 'xTR1 lưu vào map-cache', packet: rep2, tables: cache([['192.168.2.0/24', '30.0.0.2']]),
     overlay: { links: { l2: { cls: 'trunk', label: 'Map-Reply' } } },
@@ -113,7 +114,7 @@ export function build() {
     titleVi: 'xTR1 đóng gói: IP ngoài theo RLOC, IP trong theo EID', packet: e1,
     overlay: { links: { l2: { cls: 'forwarding', label: 'LISP 4341' } } },
     explanationVi: 'Xem cây trường: IP ngoài 20.0.0.1 → 30.0.0.2, UDP 4341, LISP mang Instance ID 100, rồi tới gói gốc. Khác VXLAN ở chỗ LISP thường bọc gói IP, không bọc khung Ethernet.', lesson: LESSON });
-  const e2 = encap(X2, CORE);
+  const e2 = encap(X2, CORE, 63); // router lõi giảm TTL IP ngoài
   sim.emit({ kind: 'transit', fromDevice: 'core', toDevice: 'x2', side: 'forward', activeLayer: 3,
     titleVi: 'Underlay định tuyến theo RLOC', packet: e2,
     overlay: { links: { l3: { cls: 'forwarding', label: 'LISP 4341' } } },

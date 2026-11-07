@@ -77,7 +77,7 @@ export function build() {
     titleVi: 'R2 redistribute EIGRP → OSPF (thành External E2)',
     overlay: { links: { o: { cls: 'root-path', label: 'E2 →' } }, badges: { r2: 'ASBR', net: '192.168.3.0/24' } },
     explanationVi: '`router ospf 1 / redistribute eigrp 100 subnets`: R2 tạo LSA Type 5 External cho 192.168.3.0/24, loan vào miền OSPF. ' +
-      'R1 thấy nó là tuyến "O E2": metric E2 CỐ ĐỊNH (mặc định 20), không cộng dồn chi phí nội miền OSPF. Nếu quên "subnets", route có mask không bị bỏ sót.',
+      'R1 thấy nó là tuyến "O E2": metric E2 CỐ ĐỊNH (mặc định 20), không cộng dồn chi phí nội miền OSPF. Nếu quên "subnets" thì trên IOS cũ chỉ các mạng classful được bơm, các subnet (như 10.1.1.0/24) bị bỏ sót; IOS 15 trở lên tự thêm "subnets".',
     lesson: LESSON });
 
   sim.emit({ kind: 'process', atDevice: 'r2', side: 'inspect', activeLayer: 3,

@@ -32,14 +32,17 @@ export default {
   build(fields) {
     const w = new BitWriter();
     const answers = fields.answers || [];
-    const flags = fields.response ? 0x8180 : 0x0100; // response: QR+RD+RA; query: RD
+    const flags = fields.flags ?? (fields.response ? 0x8180 : 0x0100); // mặc định — response: QR+RD+RA; query: RD
+    const bit = (m) => (flags & m ? 1 : 0);
 
     w.field({ name: 'dns.id', nameVi: 'Transaction ID', rfc: 'RFC 1035',
       descriptionVi: 'ID khớp câu hỏi với câu trả lời.', display: `0x${(fields.id >>> 0).toString(16).padStart(4, '0')}` },
       () => w.writeUint(fields.id, 2));
     w.field({ name: 'dns.flags', nameVi: 'Flags', rfc: 'RFC 1035',
-      descriptionVi: fields.response ? 'QR=1 (response), RD=1, RA=1 (server hỗ trợ đệ quy).' : 'QR=0 (query), RD=1 (Recursion Desired — nhờ resolver hỏi hộ).',
-      display: `0x${flags.toString(16).padStart(4, '0')} — ${fields.response ? 'Response' : 'Query'}` },
+      descriptionVi: fields.flags == null
+        ? (fields.response ? 'QR=1 (response), RD=1, RA=1 (server hỗ trợ đệ quy).' : 'QR=0 (query), RD=1 (Recursion Desired — nhờ resolver hỏi hộ).')
+        : `QR=${bit(0x8000)}, AA=${bit(0x400)} (Authoritative Answer), RD=${bit(0x100)} (Recursion Desired), RA=${bit(0x80)} (Recursion Available).`,
+      display: `0x${flags.toString(16).padStart(4, '0')} — ${flags & 0x8000 ? 'Response' : 'Query'}` },
       () => w.writeUint(flags, 2));
     w.field({ name: 'dns.qd', nameVi: 'Questions', rfc: 'RFC 1035', descriptionVi: 'Số câu hỏi.', display: '1' }, () => w.writeUint(1, 2));
     w.field({ name: 'dns.an', nameVi: 'Answer RRs', rfc: 'RFC 1035', descriptionVi: 'Số bản ghi trả lời.', display: String(answers.length) }, () => w.writeUint(answers.length, 2));

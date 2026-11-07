@@ -43,6 +43,14 @@ html, body {
   cursor: pointer;
 }
 .app-header button:hover { border-color: var(--accent); }
+/* màn rộng: thanh công cụ thành cột dọc cố định bên trái; điện thoại vẫn để ngang ở trên */
+@media (min-width: 681px) {
+  body { padding-left: 210px; }
+  .app-header { position: fixed; inset: 0 auto 0 0; width: 210px; flex-direction: column; align-items: stretch; flex-wrap: nowrap; gap: 6px; overflow-y: auto; border-bottom: none; border-right: 1px solid var(--border); }
+  .app-header .sub { margin: -4px 0 4px; }
+  .app-header button { text-align: left; }
+  body > .modal-backdrop { left: 210px; } /* các bảng chừa thanh bên trái để bấm chuyển bảng khác */
+}
 .btn-accent { background: var(--accent) !important; color: #fff !important; border-color: var(--accent) !important; }
 
 /* ---------- Layout ---------- */
@@ -51,7 +59,7 @@ html, body {
   grid-template-columns: 1fr;
   gap: 14px;
   padding: 14px 16px 40px;
-  max-width: 1400px;
+  max-width: 1800px;
   margin: 0 auto;
 }
 .panel {
@@ -135,7 +143,7 @@ html, body {
 .step-item .k { font-size: 10px; text-transform: uppercase; color: var(--muted); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; }
 
 /* ---------- 3 cột: layerstack | topology | timeline ---------- */
-.cols3 { display: grid; grid-template-columns: 210px minmax(0, 1fr) 350px; gap: 14px; align-items: start; }
+.cols3 { display: grid; grid-template-columns: 180px minmax(0, 1fr) 330px; gap: 14px; align-items: start; }
 .col-mid { min-width: 0; }
 
 /* Layer stack */
@@ -210,14 +218,16 @@ html, body {
 .decision-fb.no { color: var(--warn); }
 
 /* ---------- Quiz modal ---------- */
-.modal-backdrop { position: fixed; inset: 0; background: rgba(10, 18, 30, 0.55); display: flex; align-items: flex-start; justify-content: center; z-index: 100; padding: 32px 16px; overflow-y: auto; }
-.modal { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow); width: min(640px, 100%); }
+.modal-backdrop { position: fixed; inset: 0; background: rgba(10, 18, 30, 0.55); display: flex; align-items: flex-start; justify-content: center; z-index: 100; overflow-y: auto; }
+/* mọi bảng trên thanh công cụ đều mở toàn màn hình, phần thân tự cuộn */
+.modal { background: var(--panel); border: 1px solid var(--border); box-shadow: var(--shadow); width: 100%; height: 100vh; display: flex; flex-direction: column; }
 .modal-h { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-bottom: 1px solid var(--border); font-weight: 700; color: var(--accent); }
 .modal-x { font: inherit; border: none; background: none; cursor: pointer; font-size: 18px; color: var(--muted); }
 .modal-score { padding: 8px 16px; color: var(--muted); font-family: var(--mono); font-size: 13px; border-bottom: 1px solid var(--border); }
-.modal-b { padding: 12px 16px; max-height: 70vh; overflow-y: auto; }
+.modal-b { padding: 12px 16px; flex: 1; min-height: 0; overflow-y: auto; }
 .quiz-q { margin-bottom: 16px; }
 .quiz-qt { margin-bottom: 8px; }
+.quiz-from { margin-left: 6px; padding: 1px 7px; border-radius: 10px; background: var(--panel-2); color: var(--muted); font-size: 12px; font-weight: 400; white-space: nowrap; }
 .quiz-opts { display: flex; flex-direction: column; gap: 6px; }
 .quiz-opt { text-align: left; font: inherit; padding: 8px 10px; border: 1px solid var(--border); background: var(--panel-2); color: var(--text); border-radius: 8px; cursor: pointer; }
 .quiz-opt:hover:not(:disabled) { border-color: var(--accent); }
@@ -257,6 +267,13 @@ html, body {
 .bld-row input { font: inherit; font-family: var(--mono); padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel); color: var(--text); }
 .bld-row em { grid-column: 2; font-size: 11.5px; color: var(--muted); font-style: normal; }
 .bld-err { color: #c0392b; font-size: 13px; margin-top: 8px; min-height: 18px; }
+.bld-guess { margin-top: 12px; font-size: 13px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.bld-guess button { font: inherit; padding: 6px 10px; border: 1px solid var(--border); background: var(--panel-2); color: var(--text); border-radius: 6px; cursor: pointer; }
+.bld-guess button:hover { border-color: var(--accent); }
+.bld-guess span { color: var(--muted); margin-left: 6px; }
+.bld-res { margin-top: 8px; font-size: 13.5px; line-height: 1.5; }
+.bld-res.ok { color: var(--ok); }
+.bld-res.no { color: var(--warn); }
 
 /* Thông báo khi app không khởi động được (xem script tự phục hồi trong index.html) */
 .boot-fail { margin: 12px 16px; padding: 12px 14px; border: 1px solid #c0392b; background: #fbe0da; color: #7a211a; border-radius: 10px; font-size: 14px; }
@@ -267,8 +284,7 @@ html, body {
 
 /* ---------- Lab CLI ---------- */
 .btn-lab { background: var(--ok) !important; color: #fff !important; border-color: var(--ok) !important; font-weight: 600; }
-.lab-back { padding: 0; }
-.lab-modal { width: 100%; max-width: none; height: 100vh; max-height: none; border-radius: 0; display: flex; flex-direction: column; position: relative; }
+.lab-modal { position: relative; }
 .lab-modal.topo-full .lab-body { grid-template-columns: 1fr; }
 .lab-modal.topo-full :is(.lab-list, .lab-side, .lab-select, .lab-head, .lab-tools, .lab-wire, .lab-tabs, .lab-clock, .lab-gui, .lab-term) { display: none; }
 .lab-modal.topo-full .lab-topo { height: calc(100vh - 80px); }
@@ -697,7 +713,6 @@ html, body {
 .brk-none { color: var(--muted); }
 
 /* ---------- 🧮 Luyện subnet ---------- */
-.sn-modal { width: min(720px, 100%); }
 .sn-bar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 8px 16px; border-bottom: 1px solid var(--border); }
 .sn-bar select, .sn-bar button { font: inherit; font-size: 13px; padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel-2); color: var(--text); max-width: 100%; }
 .sn-clock { margin-left: auto; font-family: var(--mono); font-size: 14px; color: var(--accent-dark); }
@@ -724,7 +739,6 @@ html, body {
 @media (max-width: 560px) { .sn-f { grid-template-columns: 1fr 22px; } .sn-f > span { grid-column: 1 / -1; } }
 
 /* ---------- 📊 Điểm yếu ---------- */
-.wk-modal { width: min(760px, 100%); }
 .wk-body h4 { margin: 14px 0 6px; font-size: 14px; color: var(--accent-dark); }
 .wk-note { margin: 0 0 8px; color: var(--muted); font-size: 12.5px; }
 .wk-chart { width: 100%; max-width: 500px; height: auto; display: block; }
@@ -820,27 +834,40 @@ html, body {
 .lab-note-md p { margin: 2px 0; } .lab-note-md ul { margin: 2px 0; padding-left: 18px; }
 .lab-note-md code { font-family: var(--mono); font-size: 11.5px; background: var(--bg); padding: 0 3px; border-radius: 3px; }
 .lab-star { display: flex; gap: 6px; align-items: center; font-size: 12.5px; margin-top: 6px; }
-.cs-modal { width: min(860px, 100%); }
 .cs-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 8px 16px; border-bottom: 1px solid var(--border); }
 .cs-bar input#cs-q { flex: 1; min-width: 140px; }
-.cs-ex { display: flex; gap: 4px; align-items: center; font-size: 12.5px; }
-.cs-body { max-height: calc(100vh - 220px); overflow: auto; }
-.cs-note { font-size: 12.5px; color: var(--muted); margin: 0 0 8px; }
+.cs-ex { display: flex; gap: 4px; align-items: center; font-size: 14px; }
+.cs-body { overflow: auto; }
+.cs-note { font-size: 14px; color: var(--muted); margin: 0 0 8px; }
 .cs-empty { padding: 24px; text-align: center; color: var(--muted); }
-.cs-topic h4 { margin: 14px 0 4px; border-bottom: 2px solid var(--accent, #2e7d32); padding-bottom: 2px; }
-.cs-mode { margin: 8px 0 2px; font-size: 12.5px; font-weight: 700; color: var(--muted); }
-.cs-pr { font-family: var(--mono); font-size: 11.5px; font-weight: 400; }
-.cs-tbl { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.cs-topic h4 { margin: 14px 0 4px; font-size: 16px; border-bottom: 2px solid var(--accent, #2e7d32); padding-bottom: 2px; }
+.cs-mode { margin: 8px 0 2px; font-size: 14px; font-weight: 700; color: var(--muted); }
+.cs-pr { font-family: var(--mono); font-size: 13px; font-weight: 400; }
+.cs-tbl { width: 100%; border-collapse: collapse; font-size: 14px; }
 .cs-tbl td { border-bottom: 1px solid var(--border); padding: 3px 6px; vertical-align: top; }
 .cs-tbl td:first-child { width: 48%; }
-.cs-tbl code { font-family: var(--mono); font-size: 12px; }
-.cs-eg { color: var(--muted); font-size: 11.5px; }
+.cs-tbl code { font-family: var(--mono); font-size: 13.5px; }
+.cs-eg { color: var(--muted); font-size: 13px; }
 .cs-n { color: var(--muted); text-align: right; white-space: nowrap; width: 40px; }
+.cs-bar button.active { font-weight: 700; border-color: var(--accent, #2e7d32); }
+.cs-ex[hidden] { display: none; }
+.cs-ref td:first-child { width: auto; }
+.cs-ref td { overflow-wrap: anywhere; }
+.cs-ref th { text-align: left; font-size: 13px; color: var(--muted); border-bottom: 1px solid var(--border); padding: 3px 6px; }
+.cs-ref + .cs-note { margin: 4px 0 0; }
+.cs-img-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 8px; margin: 8px 0; }
+.cs-img-grid a { font-size: 13px; text-align: center; }
+.cs-img-grid img { display: block; width: 100%; height: 150px; object-fit: cover; object-position: top; border: 1px solid var(--border); border-radius: 4px; margin-bottom: 2px; }
+/* từ viết tắt: gạch chân chấm, trỏ chuột hoặc Tab tới là hiện khung giải thích */
+.cs-ab { text-decoration: underline dotted; text-underline-offset: 2px; cursor: help; position: relative; }
+.cs-ab:hover::after, .cs-ab:focus::after { content: attr(data-tip); position: absolute; left: 0; top: calc(100% + 4px); z-index: 5; width: max-content; max-width: 340px; padding: 6px 9px; border-radius: 6px; background: var(--text); color: var(--panel); font: 400 13px/1.45 var(--sans); white-space: normal; box-shadow: var(--shadow); pointer-events: none; }
+.no-lessons .cs-imgs { display: none; }
 @media print {
   body.cs-printing > *:not(.cs-back) { display: none !important; }
   body.cs-printing .cs-back { position: static; background: none; display: block; padding: 0; }
-  body.cs-printing .cs-modal { width: 100%; box-shadow: none; border: 0; max-height: none; }
-  body.cs-printing .cs-bar, body.cs-printing .modal-x { display: none; }
+  body.cs-printing .cs-modal { width: 100%; height: auto; box-shadow: none; border: 0; max-height: none; }
+  body.cs-printing .cs-bar, body.cs-printing .modal-x, body.cs-printing .cs-imgs { display: none; }
+  body.cs-printing .cs-ab { text-decoration: none; }
   body.cs-printing .cs-body { max-height: none; overflow: visible; }
 }
 
@@ -865,7 +892,6 @@ html, body {
 .df-same { margin-top: 6px; color: var(--muted); }
 
 /* ---------- 🎓 Thi thử CCNA ---------- */
-.ex-modal { width: min(1100px, 100%); max-height: calc(100vh - 40px); display: flex; flex-direction: column; }
 .ex-home, .ex-res { overflow: auto; }
 .ex-dom, .ex-hist { border-collapse: collapse; font-size: 13px; margin: 6px 0 10px; }
 .ex-dom td, .ex-dom th, .ex-hist td, .ex-hist th { border-bottom: 1px solid var(--border); padding: 3px 10px 3px 0; text-align: left; }
@@ -1056,7 +1082,6 @@ html, body {
 @media (max-width: 900px) { .dg-body { grid-template-columns: 150px 1fr; } .dg-fmt { display: none; } }
 
 /* 🧭 Lộ trình */
-.rm-modal { width: min(820px, 100%); }
 .rm-sum { position: sticky; top: -1px; z-index: 1; padding: 8px 0 10px; background: var(--panel); }
 .rm-bar { height: 8px; border-radius: 4px; background: var(--panel-2); overflow: hidden; }
 .rm-bar i { display: block; height: 100%; background: var(--ok); }

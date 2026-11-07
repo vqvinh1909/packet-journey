@@ -79,6 +79,7 @@ export function openExam() {
     tick();
   }
   function tick() {
+    if (!back.isConnected) return close(); // đã chuyển sang bảng khác từ thanh bên trái
     if (!cur || !exam) return;
     const left = cur.t0 + exam.minutes * 60000 - Date.now();
     const el = modal.querySelector('#ex-clock');

@@ -821,14 +821,24 @@ export function trackUp(net, d, id) {
   if (!t) return false;
   if (t.ifn) return ifUp(net, d.id, t.ifn);
   if (TRACKING) return true;
-  const s = d.slas?.[t.sla];
-  if (!s?.target || !s.scheduled) return false;
   TRACKING = true;
-  try { return sendPacket(net, { src: d.id, dst: s.target }).ok; } finally { TRACKING = false; }
+  try { return slaUp(net, d, d.slas?.[t.sla]); } finally { TRACKING = false; }
 }
+/** Thao tác IP SLA có đo được không. udp-jitter còn cần "ip sla responder" ở đầu kia. */
+export function slaUp(net, d, s) {
+  if (!s?.target || !s.scheduled) return false;
+  const r = sendPacket(net, { src: d.id, dst: s.target });
+  return r.ok && (s.type !== 'udp-jitter' || !!net.devices[r.at?.dev]?.slaResponder);
+}
+export const isPrivAs = (a) => (a >= 64512 && a <= 65534) || (a >= 4200000000 && a <= 4294967294);
 
 // ---------- OSPF ----------
-function ospfCost(ifn, f) { if (f.ospfCost != null) return f.ospfCost; const k = kindOf(ifn); return k === 's' ? 64 : k === 'e' || f.speed === 10 ? 10 : 1; }
+function ospfCost(ifn, f, refMbps) {
+  if (f.ospfCost != null) return f.ospfCost;
+  const k = kindOf(ifn);
+  if (k !== 'lo' && (refMbps != null || f.bw != null)) return Math.max(1, Math.floor(((refMbps ?? 100) * 1000) / ifBw(ifn, f)));
+  return k === 's' ? 64 : k === 'e' || f.speed === 10 ? 10 : 1;
+}
 export function ospfIfaces(ctx, rid) {
   const net = ctx.net, r = net.devices[rid];
   if (!r.ospf || !isL3(r)) return [];
@@ -847,8 +857,8 @@ export function ospfIfaces(ctx, rid) {
     const ntype = f.ospfNet || (kindOf(n) === 's' || n.startsWith('tu') ? 'p2p' : 'broadcast');
     const ac = r.ospf.areas?.[area] || {};
     const authT = f.ospfAuth ?? ac.auth ?? 'null';
-    const auth = authT === 'md5' ? `md5:${f.ospfMd5?.id}:${f.ospfMd5?.key}` : authT === 'plain' ? `plain:${f.ospfKey}` : 'null';
-    res.push({ ifn: n, ip: f.ip, prefix: f.prefix, area: String(area), cost: ospfCost(n, f), passive, hello: f.ospfHello ?? (ntype === 'p2mp' || ntype === 'nbma' ? 30 : 10), prio: f.ospfPrio ?? 1, ntype, auth, authT, areaType: ac.type || '' });
+    const auth = authT === 'md5' ? `md5:${f.ospfMd5?.id}:${f.ospfMd5?.key}` : authT === 'plain' ? `plain:${f.ospfKey}` : authT === 'chain' ? `chain:${Object.values(r.keyChains?.[f.ospfChain] || {})[0]?.str}` : 'null';
+    res.push({ ifn: n, ip: f.ip, prefix: f.prefix, area: String(area), cost: ospfCost(n, f, r.ospf.refBw), passive, hello: f.ospfHello ?? (['p2mp', 'p2mpnb', 'nbma'].includes(ntype) ? 30 : 10), prio: f.ospfPrio ?? 1, ntype, auth, authT, areaType: ac.type || '', mtu: f.ipMtu ?? 1500, mtuIgnore: !!f.ospfMtuIgnore });
   }
   return res;
 }
@@ -882,12 +892,15 @@ export function ospfAll(ctx) {
         if (rid[s.id] === rid[r.id]) { issues[r.id].push(`Trùng router-id ${rid[r.id]} với ${s.name}`); continue; }
         if (e.areaType !== e2.areaType) { issues[r.id].push(`${longIf(e.ifn)}: cờ stub/NSSA của area ${e.area} lệch với ${s.name}`); continue; }
         if (e.auth !== e2.auth) { issues[r.id].push(`${longIf(e.ifn)}: xác thực OSPF lệch với ${s.name} (${e.authT} ≠ ${e2.authT} hoặc khác key)`); continue; }
-        if (e.ntype === 'nbma' && !r.ospf.nbrs?.includes(e2.ip) && !s.ospf.nbrs?.includes(e.ip)) { issues[r.id].push(`${longIf(e.ifn)}: non-broadcast không gửi multicast, cần lệnh neighbor ${e2.ip}`); continue; }
+        if ((e.ntype === 'nbma' || e.ntype === 'p2mpnb') && !r.ospf.nbrs?.includes(e2.ip) && !s.ospf.nbrs?.includes(e.ip)) { issues[r.id].push(`${longIf(e.ifn)}: non-broadcast không gửi multicast, cần lệnh neighbor ${e2.ip}`); continue; }
         // lệch kiểu mạng (point-to-point ↔ broadcast): hello cùng 10 s nên vẫn lên láng giềng, nhưng LSA hai bên mô tả
         // link khác nhau → SPF không dùng được link này (route bị thiếu) — lỗi kinh điển khi chỉ đổi một đầu
         const mismatch = e.ntype !== e2.ntype;
         if (mismatch) issues[r.id].push(`${longIf(e.ifn)}: network type ${OSPF_NT[e.ntype]} ≠ ${OSPF_NT[e2.ntype]} của ${s.name} → láng giềng lên nhưng không có route qua link này`);
-        adj[r.id].push({ to: s.id, cost: e.cost, nh: e2.ip, outIf: e.ifn, theirIf: t.ifn, area: e.area, serial: kindOf(e.ifn) === 's', p2p: e.ntype === 'p2p' || e.ntype === 'p2mp', mismatch, prio: e2.prio, myPrio: e.prio });
+        // lệch MTU: đầu MTU nhỏ từ chối DBD nên kẹt EXSTART, trừ khi chính đầu đó đặt mtu-ignore
+        const low = e.mtu < e2.mtu ? e : e2, stuck = e.mtu !== e2.mtu && !low.mtuIgnore;
+        if (stuck) issues[r.id].push(`${longIf(e.ifn)}: MTU ${e.mtu} ≠ ${e2.mtu} của ${s.name} → kẹt EXSTART`);
+        adj[r.id].push({ to: s.id, cost: e.cost, nh: e2.ip, outIf: e.ifn, theirIf: t.ifn, area: e.area, serial: kindOf(e.ifn) === 's', p2p: ['p2p', 'p2mp', 'p2mpnb'].includes(e.ntype), mismatch: mismatch || stuck, stuck, prio: e2.prio, myPrio: e.prio });
       }
     }
   }
@@ -904,10 +917,14 @@ export function ospfAll(ctx) {
     areasOf[r.id] = new Set(en[r.id].map((e) => e.area));
     for (const [a, c0] of Object.entries(r.ospf.areas || {})) { const i = (areaInfo[a] ||= {}); if (c0.type) i.type = c0.type; if (c0.noSummary) i.noSummary = true; if (c0.nssaDefault) i.nssaDefault = true; }
   }
+  // virtual link thuộc area 0: không khai riêng thì theo xác thực của area 0, và khoá phải đặt trên chính virtual link
+  const vlAuth = (o, v) => { const t = v.auth ?? o.areas?.['0']?.auth ?? 'null'; return t === 'md5' ? (v.md5 ? `md5:${v.md5.id}:${v.md5.key}` : null) : t === 'plain' ? (v.key ? `plain:${v.key}` : null) : 'null'; };
   for (const r of rs) {
     vlinks[r.id] = (r.ospf.vlinks || []).map((v) => {
       const s = rs.find((x) => rid[x.id] === v.rid);
-      const up = !!s && !areaInfo[v.area]?.type && areasOf[r.id].has(String(v.area)) && areasOf[s.id].has(String(v.area)) && !!s.ospf.vlinks?.some((w) => w.rid === rid[r.id] && w.area === v.area);
+      const w = s?.ospf.vlinks?.find((o) => o.rid === rid[r.id] && o.area === v.area);
+      const authOk = !!w && vlAuth(r.ospf, v) !== null && vlAuth(r.ospf, v) === vlAuth(s.ospf, w);
+      const up = !!s && !areaInfo[v.area]?.type && areasOf[r.id].has(String(v.area)) && areasOf[s.id].has(String(v.area)) && authOk;
       return { rid: v.rid, area: v.area, peer: s?.id || null, up };
     });
   }
@@ -967,6 +984,7 @@ export function ospfAll(ctx) {
   // ---- pha 2: route external (redistribute) + default-information originate (O E2 / O*E2) ----
   const ext = {};
   for (const s of rs) ext[s.id] = ospfExternals(ctx, s);
+  Object.assign(ctx.ospf, { ads, ext, areasOf, areaInfo, visible, rangeOf, filteredIA });
   for (const r of rs) {
     const { dist, first } = spf[r.id];
     const have = new Set([...myNetsOf[r.id], ...intRoutes[r.id].map((x) => x.net + '/' + x.prefix)]);
@@ -992,6 +1010,69 @@ export function ospfAll(ctx) {
     routes[r.id].push(...best.values());
   }
   return ctx.ospf;
+}
+/**
+ * LSDB mà router thấy, suy ra từ trạng thái OSPF theo đúng phạm vi tràn của từng loại LSA.
+ * Không đổi theo distribute-list vì lệnh đó chỉ chặn route vào RIB, còn LSA vẫn nằm trong database.
+ * shortcut: tính lại từ cấu hình chứ không flood từng LSA nên không có tuổi, số thứ tự thật; cần mô phỏng flooding thì tách LSA thành trạng thái riêng.
+ */
+export function ospfLsdb(ctx, id) {
+  const o = ospfAll(ctx), rs = Object.keys(o.en), rid = o.rid;
+  const res = { rid: rid[id], areas: [], external: [] };
+  const mine = o.areasOf?.[id];
+  if (!mine) return res;
+  const reach = (x) => o.spf[id]?.dist[x] != null;
+  const typeOf = (a) => o.areaInfo[a]?.type || '';
+  const asbrs = rs.filter((x) => reach(x) && o.ext[x]?.length);
+  for (const a of [...mine].sort((p, q) => +p - +q)) {
+    const info = o.areaInfo[a] || {}, inA = rs.filter((x) => reach(x) && o.areasOf[x].has(a));
+    const abrs = inA.filter((x) => o.areasOf[x].size > 1);
+    const L = { area: a, router: [], network: [], summary: [], asbr: [], nssa: [] };
+    for (const x of inA) {
+      const links = [];
+      for (const e of o.en[x].filter((f) => f.area === a)) {
+        const nb = (o.adj[x] || []).filter((n) => n.outIf === e.ifn && !n.stuck);
+        const roles = ospfRoles(ctx, x, e.ifn);
+        if (!nb.length || e.passive) links.push({ kind: 'stub', id: netOf(e.ip, e.prefix), data: prefixToMask(e.prefix), metric: e.cost });
+        else if (roles.dr) links.push({ kind: 'transit', id: roles.dr === x ? e.ip : nb.find((n) => n.to === roles.dr)?.nh, data: e.ip, metric: e.cost });
+        else { for (const n of nb) links.push({ kind: 'p2p', id: rid[n.to], data: e.ip, metric: e.cost }); links.push({ kind: 'stub', id: netOf(e.ip, e.prefix), data: prefixToMask(e.prefix), metric: e.cost }); }
+        if (nb.length && roles.dr === x) L.network.push({ id: e.ip, adv: rid[x], prefix: e.prefix, attached: [rid[x], ...nb.map((n) => rid[n.to])] });
+      }
+      L.router.push({ id: rid[x], adv: rid[x], links });
+    }
+    const sum = new Map();
+    const addSum = (k, s) => { const c0 = sum.get(k); if (!c0 || s.metric > c0.metric) sum.set(k, s); };
+    for (const s of abrs) {
+      if (info.type === 'stub' || info.noSummary) addSum(`0.0.0.0/0|${s}`, { id: '0.0.0.0', adv: rid[s], prefix: 0, metric: 1 });
+      if (info.noSummary) continue;
+      const here = new Set(rs.flatMap((x) => o.ads[x].filter((p) => p.area === a).map((p) => p.net + '/' + p.prefix)));
+      for (const x of rs) for (const p of o.ads[x]) {
+        const d0 = o.spf[s].dist[x];
+        if (d0 == null || p.area === a || here.has(p.net + '/' + p.prefix) || !o.visible(new Set([a]), p.area) || o.filteredIA(p.area, new Set([a]), p)) continue;
+        const g = o.rangeOf(p.area, p);
+        if (g?.hide) continue;
+        const n0 = g ? g.net : p.net, pl = g ? g.prefix : p.prefix;
+        addSum(`${n0}/${pl}|${s}`, { id: n0, adv: rid[s], prefix: pl, metric: d0 + p.cost }); // tóm tắt lấy cost lớn nhất trong các prefix con
+      }
+    }
+    L.summary = [...sum.values()];
+    if (!info.type) for (const x of asbrs) if (!o.areasOf[x].has(a) && [...o.areasOf[x]].some((b) => !typeOf(b))) for (const s of abrs) if (s !== x && o.spf[s].dist[x] != null) L.asbr.push({ id: rid[x], adv: rid[s], metric: o.spf[s].dist[x] });
+    if (info.type === 'nssa') {
+      for (const x of asbrs) if (o.areasOf[x].has(a)) for (const e of o.ext[x]) L.nssa.push({ id: e.def ? '0.0.0.0' : e.net, adv: rid[x], prefix: e.def ? 0 : e.prefix, metric: e.metric, etype: e.type ?? 2, tag: e.tag ?? 0 });
+      if (info.nssaDefault) for (const s of abrs) L.nssa.push({ id: '0.0.0.0', adv: rid[s], prefix: 0, metric: 1, etype: 2, tag: 0 });
+    }
+    res.areas.push(L);
+  }
+  // Type 5 tràn toàn domain trừ stub, NSSA; route trong NSSA được ABR có router-id cao nhất đổi Type 7 thành Type 5
+  if ([...mine].some((a) => !typeOf(a))) for (const x of asbrs) {
+    const areas = [...o.areasOf[x]];
+    if (areas.length && areas.every((a) => typeOf(a) === 'stub')) continue;
+    const n7 = areas.length && areas.every((a) => typeOf(a) === 'nssa');
+    const abr = n7 ? rs.filter((y) => o.areasOf[y].size > 1 && areas.some((a) => o.areasOf[y].has(a))).sort((p, q) => ip2n(rid[q]) - ip2n(rid[p]))[0] : x;
+    if (!abr) continue;
+    for (const e of o.ext[x]) if (!(n7 && e.def)) res.external.push({ id: e.def ? '0.0.0.0' : e.net, adv: rid[abr], prefix: e.def ? 0 : e.prefix, metric: e.metric, etype: e.type ?? 2, tag: e.tag ?? 0 });
+  }
+  return res;
 }
 /** Route mà ASBR `s` đưa vào OSPF dưới dạng external (Type-5): redistribute + default-information originate. */
 function ospfExternals(ctx, s) {
@@ -1036,7 +1117,7 @@ const ospfKey = (rid, a) => `ospf|${rid}|${a.outIf}|${a.to}`;
 export function ospfRoles(ctx, rid, ifn) {
   const o = ospfAll(ctx);
   const me = (o.en[rid] || []).find((e) => e.ifn === ifn);
-  if (me?.ntype === 'p2p' || me?.ntype === 'p2mp') return { dr: null, bdr: null }; // point-to-point: không bầu DR/BDR
+  if (['p2p', 'p2mp', 'p2mpnb'].includes(me?.ntype)) return { dr: null, bdr: null }; // point-to-point: không bầu DR/BDR
   const seg = [{ id: rid, prio: me ? me.prio : 1 }, ...(o.adj[rid] || []).filter((x) => x.outIf === ifn).map((x) => ({ id: x.to, prio: x.prio }))];
   const cand = seg.filter((x) => x.prio > 0).sort((a, b) => b.prio - a.prio || ip2n(o.rid[b.id]) - ip2n(o.rid[a.id]));
   return { dr: cand[0]?.id || null, bdr: cand[1]?.id || null };
@@ -1056,12 +1137,12 @@ export function ospfNeighbors(ctx, rid) {
     // ⏱ đang hình thành adjacency: INIT → 2WAY → EXSTART → EXCHANGE → LOADING (cặp DROTHER dừng ở 2WAY)
     let ph = phaseOf(net, ospfKey(rid, a), 'ospf', { dev: rid, ifn: a.outIf, nbr: o.rid[a.to], pid: net.devices[rid].ospf.pid, full });
     if (ph && !full && ph !== 'INIT') ph = null;
-    const st = ph || (full ? 'FULL' : '2WAY');
-    return { rid: o.rid[a.to], name: net.devices[a.to].name, state: st + '/' + (role === '-' ? ' -' : role), addr: a.nh, iface: a.outIf, dev: a.to, prio: a.prio, role, full: full && !ph, phase: ph };
+    const st = a.stuck ? 'EXSTART' : ph || (full ? 'FULL' : '2WAY');
+    return { rid: o.rid[a.to], name: net.devices[a.to].name, state: st + '/' + (role === '-' ? ' -' : role), addr: a.nh, iface: a.outIf, dev: a.to, prio: a.prio, role, full: full && !ph && !a.stuck, phase: ph };
   });
 }
 
-const OSPF_NT = { p2p: 'POINT_TO_POINT', broadcast: 'BROADCAST', p2mp: 'POINT_TO_MULTIPOINT', nbma: 'NON_BROADCAST' };
+const OSPF_NT = { p2p: 'POINT_TO_POINT', broadcast: 'BROADCAST', p2mp: 'POINT_TO_MULTIPOINT', p2mpnb: 'POINT_TO_MULTIPOINT_NON_BROADCAST', nbma: 'NON_BROADCAST' };
 // ---------- EIGRP ----------
 const EBW = { g: 1000000, fa: 100000, e: 10000, s: 1544, lo: 8000000, vlan: 1000000 };
 const EDLY = { g: 1, fa: 10, e: 100, s: 2000, lo: 500, vlan: 1 };
@@ -1278,7 +1359,9 @@ export function bgpAll(ctx) {
           const back = bgpCfg(P, myIp);
           const ebgp = r.bgp.as !== P.bgp.as;
           // eBGP mặc định TTL 1 nên phải nối trực tiếp; qua loopback cần ebgp-multihop ở cả hai đầu. Lệch mật khẩu MD5 thì TCP không lên.
-          if (back && back.remoteAs === r.bgp.as && !ncfg.shutdown && !back.shutdown && (ncfg.password || '') === (back.password || '') && (!ebgp || rt.code === 'C' || (ncfg.multihop && back.multihop)) && igpLookup(P.id, myIp)) state = 'Established';
+          // disable-connected-check chỉ bỏ kiểm tra "nối trực tiếp", gói vẫn TTL 1 nên láng giềng phải cách đúng một chặng
+          const oneHop = !rt.nextHop || Object.values(P.ifaces).some((f) => f.ip === rt.nextHop);
+          if (back && back.remoteAs === r.bgp.as && !ncfg.shutdown && !back.shutdown && (ncfg.password || '') === (back.password || '') && (!ebgp || rt.code === 'C' || (ncfg.multihop && back.multihop) || (ncfg.ttlSec && back.ttlSec) || (ncfg.noConnCheck && back.noConnCheck && oneHop)) && igpLookup(P.id, myIp)) state = 'Established';
         }
       }
       // ⏱ phiên BGP: Active → OpenSent → OpenConfirm → Established
@@ -1303,8 +1386,12 @@ export function bgpAll(ctx) {
   }
   const igpM = (id, b) => (b.local ? 0 : igpLookup(id, b.nh)?.metric ?? 1e9);
   const ORG = { i: 0, e: 1, '?': 2 };
-  // thứ tự chọn đường BGP: weight, local-pref, tự sinh, AS-path, origin, MED, eBGP trước iBGP, IGP tới next-hop, router-id
-  const pick = (list, id) => [...list].sort((a, b) => (b.weight || 0) - (a.weight || 0) || (b.lp ?? 100) - (a.lp ?? 100) || (b.local ? 1 : 0) - (a.local ? 1 : 0) || a.asPath.length - b.asPath.length || ORG[a.origin || 'i'] - ORG[b.origin || 'i'] || (a.med || 0) - (b.med || 0) || (b.ebgp ? 1 : 0) - (a.ebgp ? 1 : 0) || igpM(id, a) - igpM(id, b) || ip2n(a.fromRid || '0.0.0.0') - ip2n(b.fromRid || '0.0.0.0') || ip2n(a.fromIp || '0.0.0.0') - ip2n(b.fromIp || '0.0.0.0'))[0];
+  const nhOk = (id, p) => !!p.local || p.nh === '0.0.0.0' || !!igpLookup(id, p.nh);
+  res.nhOk = nhOk;
+  // MED chỉ so giữa các đường từ cùng AS kề bên, trừ khi bật always-compare-med
+  const medCmp = (o, a, b) => { if (!o.alwaysMed && a.asPath[0] !== b.asPath[0]) return 0; const m = (p) => p.med ?? (o.medWorst ? 4294967295 : 0); return m(a) - m(b); };
+  // thứ tự chọn đường BGP: next-hop tới được, weight, local-pref, tự sinh, AS-path, origin, MED, eBGP trước iBGP, IGP tới next-hop, router-id
+  const pick = (list, id) => { const o = net.devices[id].bgp; return list.filter((p) => nhOk(id, p)).sort((a, b) => (b.weight || 0) - (a.weight || 0) || (b.lp ?? 100) - (a.lp ?? 100) || (b.local ? 1 : 0) - (a.local ? 1 : 0) || (o.asPathIgnore ? 0 : a.asPath.length - b.asPath.length) || ORG[a.origin || 'i'] - ORG[b.origin || 'i'] || medCmp(o, a, b) || (b.ebgp ? 1 : 0) - (a.ebgp ? 1 : 0) || igpM(id, a) - igpM(id, b) || ip2n(a.fromRid || '0.0.0.0') - ip2n(b.fromRid || '0.0.0.0') || ip2n(a.fromIp || '0.0.0.0') - ip2n(b.fromIp || '0.0.0.0'))[0]; };
   const within = (b, g) => b.prefix > g.prefix && netOf(b.net, g.prefix) === g.net;
   const suppressed = (r, b) => (r.bgp.aggregates || []).some((g) => g.summaryOnly && within(b, g));
   let best = {};
@@ -1322,13 +1409,17 @@ export function bgpAll(ctx) {
         const P = net.devices[s.peer];
         const rx = sessions[P.id].find((x) => x.peer === r.id && x.state === 'Established');
         // iBGP không chuyển tiếp route học từ iBGP, trừ route reflector: route từ client đi tới mọi nơi, route từ non-client chỉ tới client
-        const out = Object.values(best[r.id]).filter((b) => b.from !== P.id && !suppressed(r, b) && (s.ebgp || !b.ibgp || b.fromClient || s.cfg.rrClient));
+        const out = Object.values(best[r.id]).filter((b) => b.from !== P.id && !suppressed(r, b) && (s.ebgp || !b.ibgp || b.fromClient || s.cfg.rrClient) && !b.comm?.includes('no-advertise') && !(s.ebgp && (b.comm?.includes('no-export') || b.comm?.includes('local-AS'))));
         if (s.cfg.defaultOriginate) out.push({ net: '0.0.0.0', prefix: 0, asPath: [], nh: '0.0.0.0', orig: true });
+        const accepted = [];
         for (const b of out) {
           let path0 = b.asPath;
-          if (s.ebgp && s.cfg.removePrivate) path0 = path0.filter((a) => a < 64512 || a > 65534);
+          // không có "all": chỉ xoá khi AS_PATH toàn AS riêng
+          if (s.ebgp && s.cfg.removePrivate) path0 = s.cfg.removePrivate === 'all' ? path0.filter((a) => !isPrivAs(a)) : path0.every(isPrivAs) ? [] : path0;
+          if (s.ebgp && s.cfg.asOverride) path0 = path0.map((a) => (a === s.remoteAs ? r.bgp.as : a));
           const nh = s.ebgp || b.nh === '0.0.0.0' || s.cfg.nextHopSelf ? s.myIp : b.nh;
-          let e = { net: b.net, prefix: b.prefix, asPath: s.ebgp ? [r.bgp.as, ...path0] : path0, nh, from: r.id, fromIp: s.myIp, fromRid: rid[r.id], ebgp: s.ebgp, ibgp: !s.ebgp, origin: b.origin || 'i', med: b.med || 0, lp: s.ebgp ? 100 : b.lp ?? 100, tag: b.tag, originator: s.ebgp ? null : b.originator ?? (b.ibgp ? b.fromRid : rid[r.id]) };
+          // route phản chiếu qua RR mang thêm cluster của RR; cluster ID mặc định là router-id của RR
+          let e = { net: b.net, prefix: b.prefix, asPath: s.ebgp ? [r.bgp.as, ...path0] : path0, nh, from: r.id, fromIp: s.myIp, fromRid: rid[r.id], ebgp: s.ebgp, ibgp: !s.ebgp, origin: b.origin || 'i', med: b.med, lp: s.ebgp ? 100 : b.lp ?? 100, tag: b.tag, comm: b.comm, originator: s.ebgp ? null : b.originator ?? (b.ibgp ? b.fromRid : rid[r.id]), cluster: !s.ebgp && b.ibgp ? [rid[r.id], ...(b.cluster || [])] : undefined };
           if (e.originator && e.originator === rid[P.id]) continue; // route do chính mình phát qua RR quay về
           const policy = (dev, c0, dir) => {
             if (c0[`pl${dir}`] && !plEval(dev, c0[`pl${dir}`], e.net, e.prefix)) return false;
@@ -1336,22 +1427,28 @@ export function bgpAll(ctx) {
             if (!c0[`rm${dir}`]) return true;
             const st = rmEval(dev, c0[`rm${dir}`], { ...e, metric: e.med }, false);
             if (!st) return false;
-            e = { ...e, lp: st.localPref ?? e.lp, med: st.metric ?? e.med, weight: st.weight ?? e.weight, tag: st.tag ?? e.tag, asPath: st.prepend ? [...st.prepend, ...e.asPath] : e.asPath };
+            const cm = st.community;
+            e = { ...e, lp: st.localPref ?? e.lp, med: st.metric ?? e.med, weight: st.weight ?? e.weight, tag: st.tag ?? e.tag, asPath: st.prepend ? [...st.prepend, ...e.asPath] : e.asPath, comm: !cm ? e.comm : cm.additive ? [...new Set([...(e.comm || []), ...cm.vals])] : cm.vals };
             return true;
           };
           if (!policy(r, s.cfg, 'Out')) continue;
-          if (e.asPath.includes(P.bgp.as)) continue; // chống lặp AS-path
+          if (!s.cfg.sendCommunity) e.comm = undefined; // community chỉ đi kèm khi có send-community
+          // chống lặp AS-path; allowas-in cho phép AS của mình xuất hiện tối đa n lần
+          if (e.asPath.filter((a) => a === P.bgp.as).length > (rx?.cfg.allowasIn ?? 0)) continue;
           if (rx) {
             e.weight = rx.cfg.weight ?? 0;
             if (!policy(P, rx.cfg, 'In')) continue;
             if (rx.cfg.rrClient) e.fromClient = true;
           }
-          (cand[P.id][b.net + '/' + b.prefix] ||= []).push(e);
+          accepted.push(e);
         }
+        const lim = rx?.cfg.maxPrefix;
+        if (lim && accepted.length > lim.max && !lim.warnOnly) { rx.state = 'Idle (PfxCt)'; s.state = 'Idle'; continue; }
+        for (const e of accepted) (cand[P.id][e.net + '/' + e.prefix] ||= []).push(e);
       }
     }
     const nb = {};
-    for (const r of rs) { nb[r.id] = {}; for (const [k, l] of Object.entries(cand[r.id])) nb[r.id][k] = pick(l, r.id); }
+    for (const r of rs) { nb[r.id] = {}; for (const [k, l] of Object.entries(cand[r.id])) { const p = pick(l, r.id); if (p) nb[r.id][k] = p; } }
     const same = JSON.stringify(nb) === JSON.stringify(best);
     best = nb;
     Object.assign(tables, Object.fromEntries(rs.map((r) => [r.id, cand[r.id]])));
@@ -2313,7 +2410,7 @@ function stpCompute(net, v, cut) {
       if (P.sts !== 'FWD') continue;
       const dev = k.slice(0, k.indexOf('|'));
       const d = net.devices[dev];
-      if (!P.peer && (d.ports[P.members[0]]?.portfast || d.stp.portfastDefault)) continue;
+      if (d.ports[P.members[0]]?.routed || (!P.peer && (d.ports[P.members[0]]?.portfast || d.stp.portfastDefault))) continue;
       const ph = phaseOf(net, `stp|${k}|${v}`, d.stp.mode === 'pvst' || !d.stp.mode ? 'stp' : 'rstp', { dev, port: P.name, vlan: v });
       if (ph) P.sts = ph;
     }

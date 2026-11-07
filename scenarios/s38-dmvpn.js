@@ -48,11 +48,11 @@ export function build() {
     { proto: 'gre', fields: { ptype: 0x2001, key: KEY } },
     { proto: 'nhrp', fields },
   ]);
-  const data = (to, from, srcIp, dstIp) => sim.frame([
+  const data = (to, from, srcIp, dstIp, ttl = 63) => sim.frame([
     { proto: 'ethernet', fields: { dst: to.mac, src: from.mac, etherType: 0x0800 } },
     { proto: 'ipv4', fields: { src: srcIp, dst: dstIp, ttl: 255, id: 0x3801, protocol: 47 } },
     { proto: 'gre', fields: { ptype: 0x0800, key: KEY } },
-    ...echoFrame({ ethDst: '00:00:00:00:00:00', ethSrc: '00:00:00:00:00:00', srcIp: '192.168.1.10', dstIp: '192.168.2.20', ttl: 63, ipId: 0x3802, identifier: 1, seq: 1, type: ICMP_TYPE.ECHO_REQUEST }).slice(1),
+    ...echoFrame({ ethDst: '00:00:00:00:00:00', ethSrc: '00:00:00:00:00:00', srcIp: '192.168.1.10', dstIp: '192.168.2.20', ttl, ipId: 0x3802, identifier: 1, seq: 1, type: ICMP_TYPE.ECHO_REQUEST }).slice(1),
   ]);
   const cache = (who, rows) => ({ list: { title: `Bảng NHRP ${who}`, cols: ['Tunnel', 'NBMA', 'Loại'], rows } });
   const REG = { op: 3, srcNbma: S1.nbma, srcProto: S1.tun, dstProto: HUB.tun, reqId: 1 };
@@ -75,7 +75,7 @@ export function build() {
     titleVi: 'Gói đầu tiên đi theo route IGP: qua hub', packet: d1,
     overlay: { links: { l1: { cls: 'forwarding', label: 'GRE' }, l3: { cls: 'forwarding', label: 'GRE' } } },
     explanationVi: 'Route tới 192.168.2.0/24 học từ IGP trỏ về hub (phase 3 cho phép hub chỉ quảng bá route tóm tắt). Gói GRE có đích là 40.0.0.254.', lesson: LESSON });
-  const d2 = data(S2, NET, HUB.nbma, S2.nbma);
+  const d2 = data(S2, NET, HUB.nbma, S2.nbma, 62); // hub định tuyến gói bên trong: TTL 63→62
   const ti = ctrl(NET, HUB, HUB.nbma, S1.nbma, { op: 8, srcNbma: HUB.nbma, srcProto: HUB.tun, dstProto: '192.168.2.20', reqId: 2 });
   sim.capture(d2, 'Hub chuyển tiếp tới Spoke2');
   sim.emit({ kind: 'transit', fromDevice: 'net', toDevice: 's2', side: 'forward', activeLayer: 3.5,

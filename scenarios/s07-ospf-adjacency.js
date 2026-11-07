@@ -97,7 +97,7 @@ export function build() {
     explanationVi:
       'Trên đoạn multi-access phải bầu DR (và BDR) để giảm số adjacency. Xét Priority trước (cao hơn thắng; 0 = không ứng cử). ' +
       'Ở đây Priority đều = 1 → so Router ID: R3 (3.3.3.3) cao nhất → DR; R2 (2.2.2.2) → BDR; R1 → DROther. ' +
-      '(Lưu ý: DR/BDR KHÔNG ưu tiên (preempt) — ai lên trước giữ vai trò.)',
+      '(Lưu ý: bầu DR/BDR KHÔNG giành quyền (non-preemptive) — router lên trước giữ vai trò, router tốt hơn đến sau không chiếm được.)',
     lesson: LESSON,
   });
 

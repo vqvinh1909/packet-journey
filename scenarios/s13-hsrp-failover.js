@@ -86,12 +86,13 @@ export function build() {
     explanationVi: 'R1 hỏng/đứt link → ngừng gửi Hello. R2 chờ hết Holdtime (mặc định 10s) không nghe Hello của Active.',
     lesson: LESSON });
 
-  const h3 = hello(R2, 16, 100, 1); // Coup → Active
-  sim.capture(h3, 'HSRP Coup R2 (chuyển Active)');
+  const h3 = hello(R2, 16, 100, 0); // Hello, state Active (Coup chỉ dùng khi preempt)
+  sim.capture(h3, 'HSRP Hello R2 (state Active)');
   sim.emit({ kind: 'transit', fromDevice: 'r2', toDevice: 'sw', side: 'encap', activeLayer: 7,
-    titleVi: 'R2 chuyển sang Active (Coup)', packet: h3,
+    titleVi: 'R2 chuyển sang Active', packet: h3,
     overlay: { links: { l1: { cls: 'blocking', label: 'DOWN ✗' }, l2: { cls: 'root-path', label: 'ACTIVE' } }, badges: { r2: 'ACTIVE' } },
-    explanationVi: 'R2 gửi HSRP với Op Code = Coup, State = Active. Nó TIẾP QUẢN đúng IP ảo 192.168.1.1 và MAC ảo 00:00:0c:07:ac:01.',
+    explanationVi: 'R2 lên Active và gửi Hello với State = Active (Op Code vẫn là Hello; Coup chỉ dùng khi một router priority cao hơn giành quyền bằng preempt). ' +
+      'Nó TIẾP QUẢN đúng IP ảo 192.168.1.1 và MAC ảo 00:00:0c:07:ac:01, đồng thời gửi gratuitous ARP để switch cập nhật bảng MAC sang cổng của R2.',
     lesson: LESSON });
 
   sim.emit({ kind: 'process', atDevice: 'pc', side: 'inspect', activeLayer: 2,

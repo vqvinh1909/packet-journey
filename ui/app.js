@@ -26,7 +26,8 @@ import { renderFieldTree, highlightFieldRow, clearFieldHighlight } from './field
 import { renderHex, highlightRange, clearHexHighlight } from './hexview.js';
 import { renderExplain } from './explain.js';
 import { openQuiz } from './quiz.js';
-import { quizFor } from '../scenarios/quizzes.js';
+import { buildQuiz, QUIZ_LEN } from '../scenarios/quizzes.js';
+import { GUESS } from '../scenarios/guess.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -86,7 +87,11 @@ function buildChrome() {
   const sel = $('sel-scenario');
   sel.innerHTML = SCENARIOS.map((s) => `<option value="${s.meta.id}">${esc(s.meta.titleVi)}</option>`).join('');
   sel.value = state.scenarioId;
-  sel.onchange = () => loadScenario(sel.value);
+  sel.onchange = () => {
+    loadScenario(sel.value);
+    // thanh bên trái vẫn bấm được khi Quiz đang mở: đổi kịch bản thì mở lại Quiz của kịch bản mới
+    if (document.querySelector('body > .modal-backdrop .quiz-q')) openQuizForScenario();
+  };
 
   $('btn-pcap').onclick = exportPcap;
   $('btn-theme').textContent = document.documentElement.getAttribute('data-theme') === 'dark' ? '☀' : '🌙';
@@ -116,7 +121,11 @@ function toggleGuess() {
   state.guessMode = !state.guessMode;
   save('guess', state.guessMode);
   refreshGuessBtn();
-  renderStep(state.step, false); // vẽ lại để hiện/ẩn câu hỏi đoán
+  document.querySelector('body > .modal-backdrop')?.remove(); // Đoán bước chạy ở màn chính, bảng đang mở sẽ che mất
+  const evs = state.sim?.events || [];
+  // bật lên mà bước hiện tại không có câu hỏi thì nhảy tới bước có câu hỏi kế tiếp để thấy ngay
+  const next = state.guessMode && !evs[state.step]?.decision ? evs.findIndex((e, i) => i > state.step && e.decision) : -1;
+  renderStep(next >= 0 ? next : state.step, false);
 }
 
 function openQuizForScenario() {
@@ -124,11 +133,14 @@ function openQuizForScenario() {
   if (!sc) {
     // đang xem mô phỏng tự tạo (🛠️ Tự tạo / ✏️ Vẽ mạng / "Xem gói tin" của Lab CLI) — quiz chỉ có cho kịch bản dựng sẵn
     openQuiz('custom', 'Kịch bản tự tạo', [
-      { q: 'Quiz chỉ có cho 30 kịch bản dựng sẵn. Hãy chọn một kịch bản ở danh sách trên cùng rồi bấm 🎯 Quiz.', options: ['Đã hiểu'], correct: 0, explainVi: 'Mô phỏng bạn tự tạo vẫn xem từng bước, cây trường và hex như bình thường.' },
+      { q: 'Quiz chỉ có cho các kịch bản dựng sẵn. Hãy chọn một kịch bản ở danh sách trên cùng rồi bấm 🎯 Quiz.', options: ['Đã hiểu'], correct: 0, explainVi: 'Mô phỏng bạn tự tạo vẫn xem từng bước, cây trường và hex như bình thường.' },
     ]);
     return;
   }
-  const quiz = quizFor(state.scenarioId) || sc.meta.quiz;
+  // nhớ các câu của lượt trước để lượt này ưu tiên câu chưa gặp
+  const seenKey = `quiz-seen_${state.scenarioId}`;
+  const quiz = buildQuiz(state.scenarioId, Math.random, QUIZ_LEN, new Set(load(seenKey, []))) || sc.meta.quiz;
+  if (quiz?.length) save(seenKey, quiz.map((q) => q.q));
   if (!quiz || !quiz.length) {
     openQuiz(state.scenarioId, sc.meta.titleVi, [
       { q: 'Kịch bản này chưa có bộ quiz riêng.', options: ['Đã hiểu'], correct: 0, explainVi: 'Quiz sẽ được bổ sung dần cho từng bài.' },
@@ -193,6 +205,7 @@ function loadScenario(id) {
   save('scenario', id);
   const sc = getScenario(id);
   state.sim = sc.build();
+  for (const [i, d] of Object.entries(GUESS[id] || {})) if (state.sim.events[i] && !state.sim.events[i].decision) state.sim.events[i].decision = d;
   state.step = 0;
   state.playing = false;
   state.playToken++;

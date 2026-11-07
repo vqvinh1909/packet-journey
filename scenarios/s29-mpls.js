@@ -64,7 +64,7 @@ export function build() {
     titleVi: 'PE1 (ingress): PUSH nhãn 16', packet: pushed,
     changedFields: diffFields(atCe1.tree, pushed.tree),
     overlay: { links: { l2: { cls: 'trunk', label: 'label 16' } } },
-    explanationVi: 'PE1 phân loại gói vào một FEC (vd theo mạng đích), rồi GẮN (push) nhãn 16, đổi EtherType thành 0x8847, đặt MPLS TTL = 255. ' +
+    explanationVi: 'PE1 phân loại gói vào một FEC (vd theo mạng đích), rồi GẮN (push) nhãn 16, đổi EtherType thành 0x8847, đặt MPLS TTL = 255 (khi tắt sao chép TTL: no mpls ip propagate-ttl; mặc định Cisco chép TTL của IP sang nhãn). ' +
       'Từ đây lõi chỉ nhìn nhãn.', lesson: LESSON });
   sim.capture(pushed, 'MPLS label 16 (PE1 → P)');
   sim.emit({ kind: 'transit', fromDevice: 'pe1', toDevice: 'p', side: 'forward', activeLayer: 2.5,
@@ -85,12 +85,12 @@ export function build() {
     overlay: { links: { l3: { cls: 'trunk', label: 'label 17' } } },
     explanationVi: 'Chỉ nhãn và MPLS TTL đổi; gói IP bên trong y nguyên.' });
 
-  const popped = ip(CE2.mac, PE2.mac, 63);
+  const popped = ip(CE2.mac, PE2.mac, 62); // PE2 tra IP rồi chuyển tiếp nên giảm TTL IP 63→62
   sim.emit({ kind: 'process', atDevice: 'pe2', side: 'forward', activeLayer: 3,
     titleVi: 'PE2 (egress): POP nhãn → trả lại IP', packet: popped,
     changedFields: diffFields(swapped.tree, popped.tree),
     overlay: { links: { l4: { cls: 'forwarding', label: 'IP thường' } } },
-    explanationVi: 'PE2 GỠ (pop) nhãn, lộ lại gói IP, rồi tra IP bình thường để giao CE2. ' +
+    explanationVi: 'PE2 GỠ (pop) nhãn, lộ lại gói IP, rồi tra IP bình thường để giao CE2 (TTL IP 63→62 như mọi lần định tuyến). ' +
       '(Thực tế hay dùng PHP — Penultimate Hop Popping: router P pop sẵn để PE2 đỡ phải xử lý 2 lần.)', lesson: LESSON });
   sim.capture(popped, 'IP thường (PE2 → CE2)');
   sim.emit({ kind: 'transit', fromDevice: 'pe2', toDevice: 'ce2', side: 'decap', activeLayer: 3,

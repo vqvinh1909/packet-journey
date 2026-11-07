@@ -30,7 +30,7 @@ export function openQuiz(scenarioId, titleVi, quiz) {
   quiz.forEach((item, qi) => {
     const q = document.createElement('div');
     q.className = 'quiz-q';
-    q.innerHTML = `<div class="quiz-qt"><b>Câu ${qi + 1}.</b> ${esc(item.q)}</div>`;
+    q.innerHTML = `<div class="quiz-qt"><b>Câu ${qi + 1}.</b> ${esc(item.q)}${item.from ? ` <span class="quiz-from">${esc(item.from)}</span>` : ''}</div>`;
     const opts = document.createElement('div');
     opts.className = 'quiz-opts';
     item.options.forEach((opt, oi) => {

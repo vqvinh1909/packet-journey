@@ -72,7 +72,7 @@ export function build() {
   sim.capture(fin1, 'TCP FIN,ACK (client)');
   sim.emit({ kind: 'transit', fromDevice: 'cli', toDevice: 'srv', side: 'encap', activeLayer: 4,
     titleVi: '④ Đóng: client gửi FIN', packet: fin1,
-    explanationVi: 'Client xong việc → gửi FIN,ACK. Bắt đầu quy trình đóng 4 bước (mỗi chiều đóng độc lập).',
+    explanationVi: 'Client xong việc → gửi FIN,ACK. Bắt đầu quy trình đóng 4 bước (mỗi chiều đóng độc lập). (Seq vẫn 1001 vì app bỏ qua phần data ở bước trước; thực tế seq đã tăng thêm đúng số byte đã gửi.)',
     lesson: LESSON });
   const fin2 = seg(SRV, CLI, 5001, 1002, { fin: true, ack: true });
   sim.capture(fin2, 'TCP FIN,ACK (server)');

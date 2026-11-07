@@ -46,7 +46,8 @@ export function build() {
   const sim = new Sim(topology);
 
   const eth = (dst, src, etherType = 0x0800) => ({ proto: 'ethernet', fields: { dst, src, etherType } });
-  const tcpLdp = { proto: 'tcp', fields: { srcPort: 646, dstPort: 41646, seq: 1000, ack: 2000, flags: { ack: true, psh: true }, window: 16384 } };
+  // bên LSR ID lớn hơn chủ động mở TCP: gửi từ cổng tạm tới 646 của bên kia
+  const tcpLdp = { proto: 'tcp', fields: { srcPort: 41646, dstPort: 646, seq: 1000, ack: 2000, flags: { ack: true, psh: true }, window: 16384 } };
   const mapping = (from, to, label) => sim.frame([eth(to.mac, from.mac), { proto: 'ipv4', fields: { src: from.ip, dst: to.ip, ttl: 1, id: 0x3400, protocol: 6 } }, tcpLdp, { proto: 'ldp', fields: { lsrId: from.ip, fec: PE2.ip, prefix: 32, label } } ]);
   const lfib = (who, rows) => ({ list: { title: `LFIB ${who}`, cols: ['Nhãn vào', 'Nhãn ra', 'Đích'], rows } });
   const vrfTable = (who, rows) => ({ list: { title: `Bảng VRF A trên ${who}`, cols: ['Prefix', 'Next hop', 'Nhãn VPN'], rows } });
@@ -96,8 +97,8 @@ export function build() {
     explanationVi: 'Khách hàng không biết gì về MPLS. Cổng vào trên PE1 gắn với VRF A, nên PE1 tra đúng bảng của khách này.', lesson: LESSON });
 
   const ipLayers = inner('00:00:00:00:00:00', '00:00:00:00:00:00', 63).slice(1);
-  const stack = (dst, src, labels) => sim.frame([eth(dst, src, 0x8847), ...labels.map((label, i) => ({ proto: 'mpls', fields: { label, tc: 0, s: i === labels.length - 1 ? 1 : 0, ttl: 254 } })), ...ipLayers]);
-  const two = stack(P.mac, PE1.mac, [16, 100]);
+  const stack = (dst, src, labels, ttl) => sim.frame([eth(dst, src, 0x8847), ...labels.map((label, i) => ({ proto: 'mpls', fields: { label, tc: 0, s: i === labels.length - 1 ? 1 : 0, ttl } })), ...ipLayers]);
+  const two = stack(P.mac, PE1.mac, [16, 100], 255); // không chép TTL IP vào nhãn, giống s29
   sim.capture(two, 'Hai nhãn: 16 ngoài, 100 trong');
   sim.emit({ kind: 'process', atDevice: 'pe1', side: 'encap', activeLayer: 2.5,
     titleVi: 'PE1 gắn hai nhãn: 16 để tới PE2, 100 để vào VRF', packet: two,
@@ -107,7 +108,7 @@ export function build() {
     titleVi: 'Gói vào lõi với hai nhãn', packet: two,
     overlay: { links: { l2: { cls: 'trunk', label: '[16 | 100]' } } },
     explanationVi: 'Router P chỉ nhìn nhãn ngoài, không đọc địa chỉ khách hàng.', lesson: LESSON });
-  const one = stack(PE2.mac, P.mac, [100]);
+  const one = stack(PE2.mac, P.mac, [100], 254); // P giảm TTL nhãn ngoài rồi chép xuống nhãn còn lại khi PHP
   sim.capture(one, 'P gỡ nhãn ngoài, còn nhãn 100');
   sim.emit({ kind: 'transit', fromDevice: 'p', toDevice: 'pe2', side: 'forward', activeLayer: 2.5,
     titleVi: 'P gỡ nhãn ngoài (PHP), chỉ còn nhãn VPN', packet: one, tables: lfib('P', [['16', 'pop', '3.3.3.3/32 qua PE2']]),

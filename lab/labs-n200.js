@@ -547,4 +547,26 @@ export const N200_LABS = [
     hints: ['cat site.yml để xem cấu hình mong muốn.', 'ansible-playbook site.yml', 'Chạy lại lệnh đó: PLAY RECAP phải có changed=0.'],
     solution: [['ctl', ['ansible-playbook site.yml', 'ansible-playbook site.yml']]],
   },
+  {
+    id: 'N23', group: 'n2', lesson: 'CCNA 200-301 · 2.1.a — Cổng Layer 3', level: 2, kind: 'config', topics: ['Static'],
+    title: 'Cổng định tuyến: switch Layer 3 nối thẳng lên router bằng no switchport',
+    story: 'SW-CORE là switch Layer 3 làm gateway cho VLAN 10 của PC1. Đường lên R-EDGE không cần VLAN hay trunk, chỉ cần một cổng định tuyến. Bật ip routing, đổi Gi0/1 thành cổng Layer 3, đặt IP 10.0.0.2/30 và default route qua R-EDGE. PC1 phải ping được 8.8.8.8 trên R-EDGE.',
+    build: () => makeNet([
+      pc('p1', 'PC1', 100, 200, { ip: '192.168.10.10', gw: '192.168.10.1' }),
+      sw('s1', 'SW-CORE', 380, 200, ['fa0/1', 'g0/1'], { l3: true }),
+      router('r1', 'R-EDGE', 660, 200, ['g0/0']),
+    ], [['p1', 'fa0', 's1', 'fa0/1'], ['s1', 'g0/1', 'r1', 'g0/0']]),
+    init: [
+      ['s1', cfg('hostname SW-CORE', 'no ip routing', 'vlan 10', 'exit', 'interface fa0/1', 'switchport mode access', 'switchport access vlan 10', 'exit', 'interface vlan 10', 'ip address 192.168.10.1 255.255.255.0', 'no shutdown')],
+      ['r1', cfg('hostname R-EDGE', 'interface g0/0', 'ip address 10.0.0.1 255.255.255.252', 'no shutdown', 'exit', 'interface loopback 0', 'ip address 8.8.8.8 255.255.255.255', 'exit', 'ip route 192.168.10.0 255.255.255.0 10.0.0.2')],
+    ],
+    tasks: [
+      { text: 'Gi0/1 của SW-CORE là cổng định tuyến có IP 10.0.0.2/30', verify: 'show running-config interface g0/1', check: (a) => { const p = a.d('s1').ports['g0/1']; return !!p.routed && a.d('s1').svis[`vlan${p.routed}`]?.ip === '10.0.0.2'; } },
+      { text: 'SW-CORE bật ip routing và ping được R-EDGE', verify: 'show ip route ; ping 10.0.0.1', check: (a) => a.d('s1').ipRouting && a.ping('s1', '10.0.0.1') },
+      { text: 'PC1 ping được 8.8.8.8', verify: 'ping 8.8.8.8 trên PC1', check: (a) => a.ping('p1', '8.8.8.8') },
+      quiz('Cổng định tuyến khác SVI ở điểm nào?', ['Cổng định tuyến gắn với một cổng vật lý và không phục vụ VLAN người dùng, SVI phục vụ cả một VLAN', 'SVI luôn nhanh hơn', 'Cổng định tuyến cần trunk', 'SVI không có IP'], 0, 'Link điểm nối điểm giữa các thiết bị nên dùng cổng định tuyến: đứt là biết ngay và không phụ thuộc STP.'),
+    ],
+    hints: ['ip routing', 'interface g0/1, no switchport, ip address 10.0.0.2 255.255.255.252', 'ip route 0.0.0.0 0.0.0.0 10.0.0.1'],
+    solution: [['s1', cfg('ip routing', 'interface g0/1', 'no switchport', 'ip address 10.0.0.2 255.255.255.252', 'no shutdown', 'exit', 'ip route 0.0.0.0 0.0.0.0 10.0.0.1')]],
+  },
 ];

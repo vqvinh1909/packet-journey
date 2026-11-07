@@ -1024,12 +1024,19 @@ async function inflateDrawio(payload) {
 }
 export async function importDrawioFile(text) { return (await importDrawioPages(text)).find((p) => p.d.shapes.length).d; }
 /** Đọc JSON đã xuất; ném lỗi tiếng Việt nếu sai định dạng. Bỏ dây trỏ tới hình không tồn tại. */
+// ID và các trường số được ghép thẳng vào SVG và ô nhập, nên file lạ không được đưa chữ vào đó (chống chạy script).
+const SAFE_ID = /^[\w-]+$/;
+const NUM_FIELDS = ['sw', 'fs', 'op', 'radius', 'rackUnits', 'rackU', 'rackStartU', 'rackBase', 'width'];
+const cleanNums = (x) => { for (const k of NUM_FIELDS) { if (!(k in x)) continue; if (x[k] !== null && x[k] !== '' && Number.isFinite(+x[k])) x[k] = +x[k]; else delete x[k]; } };
 export function importJson(text) {
   const o = typeof text === 'string' ? JSON.parse(text) : text;
   if (!o || o.format !== FORMAT || !Array.isArray(o.shapes) || !Array.isArray(o.edges)) throw new Error('File không phải sơ đồ Packet Journey');
-  const shapes = o.shapes.filter((s) => s && SHAPES[s.t] && typeof s.id === 'string' && [s.x, s.y, s.w, s.h].every(Number.isFinite));
+  const shapes = o.shapes.filter((s) => s && Object.hasOwn(SHAPES, s.t) && typeof s.id === 'string' && SAFE_ID.test(s.id) && [s.x, s.y, s.w, s.h].every(Number.isFinite));
   const ids = new Set(shapes.map((s) => s.id));
-  const edges = o.edges.filter((e) => e && ids.has(e.a) && ids.has(e.b) && e.a !== e.b);
+  const edges = o.edges.filter((e) => e && SAFE_ID.test(e.id) && ids.has(e.a) && ids.has(e.b) && e.a !== e.b);
+  for (const x of [...shapes, ...edges]) cleanNums(x);
+  for (const s of shapes) s.fs ??= 12;
+  for (const e of edges) e.width ??= 2;
   const maxSeq = Math.max(0, ...[...shapes, ...edges].map((x) => +String(x.id).slice(1) || 0));
   const diagram={ format: FORMAT, version: 1, shapes, edges, seq: Math.max(o.seq || 0, maxSeq) };
   for(const rack of shapes.filter(s=>s.t==='rack')){const usage=rackUsage(diagram,rack.id);rack.rackUsed=usage.used;rack.rackFree=usage.free;}

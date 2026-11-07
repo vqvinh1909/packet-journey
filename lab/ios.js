@@ -32,6 +32,7 @@ const { longIf, shortIf, normIf, isIp, maskToPrefix, prefixToMask, netOf, ifSort
 const pad = (s, n) => String(s ?? '').padEnd(n);
 const lpad = (s, n) => String(s ?? '').padStart(n);
 const R = (out, extra = {}) => ({ out, ...extra });
+const INTERNAL_VLAN = 'internal (routed port)'; // có dấu cách nên lệnh name không tạo trùng được
 const IFS = (d) => N.l3ifs(d);
 
 export function parseVlist(s) {
@@ -240,6 +241,12 @@ export function createCli(net) {
     }),
     c('debug ip ospf adj', (x) => { (x.d.debug ||= {}).ospfAdj = true; return R(['OSPF adjacency debugging is on']); }),
     c('debug ip ospf adjacency', (x) => { (x.d.debug ||= {}).ospfAdj = true; return R(['OSPF adjacency debugging is on']); }),
+    c('debug ip ospf hello', (x) => { (x.d.debug ||= {}).ospfHello = true; const o = x.d.ospf ? N.ospfAll(ctxOf()) : null; return R(['OSPF hello debugging is on', ...(o?.issues[x.d.id] || []).map((t) => `OSPF-${x.d.ospf.pid} HELLO ${t}`)]); }),
+    c('no debug ip ospf hello', (x) => { (x.d.debug ||= {}).ospfHello = false; return R(['OSPF hello debugging is off']); }),
+    c('undebug ip ospf hello', (x) => { (x.d.debug ||= {}).ospfHello = false; return R(['OSPF hello debugging is off']); }),
+    c('debug ip bgp', (x) => { (x.d.debug ||= {}).bgp = true; return R(['BGP debugging is on for address family: IPv4 Unicast', ...(x.d.bgp ? (N.bgpAll(ctxOf()).sessions[x.d.id] || []).filter((s) => s.state !== 'Established').map((s) => `BGP: ${s.ip} state ${s.state}, remote AS ${s.remoteAs}`) : [])]); }),
+    c('no debug ip bgp', (x) => { (x.d.debug ||= {}).bgp = false; return R(['BGP debugging is off for address family: IPv4 Unicast']); }),
+    c('undebug ip bgp', (x) => { (x.d.debug ||= {}).bgp = false; return R(['BGP debugging is off for address family: IPv4 Unicast']); }),
     c('debug ip icmp', (x) => { (x.d.debug ||= {}).icmp = true; return R(['ICMP packet debugging is on']); }),
     c('debug ip packet', (x) => { (x.d.debug ||= {}).ipPacket = true; return R(['IP packet debugging is on']); }),
     c('no debug ip packet', (x) => { (x.d.debug ||= {}).ipPacket = false; return R(['IP packet debugging is off']); }),
@@ -250,7 +257,7 @@ export function createCli(net) {
     c('no debug all', (x) => { x.d.debug = {}; return R(['All possible debugging has been turned off']); }),
     c('undebug ip icmp', (x) => { (x.d.debug ||= {}).icmp = false; return R(['ICMP packet debugging is off']); }),
     c('undebug ip ospf adj', (x) => { (x.d.debug ||= {}).ospfAdj = false; return R(['OSPF adjacency debugging is off']); }),
-    c('show debugging', (x) => { const g = x.d.debug || {}; const L = []; if (g.ospfAdj) L.push('OSPF:', '  OSPF adjacency debugging is on'); if (g.icmp) L.push('IP:', '  ICMP packet debugging is on'); if (g.ipPacket) L.push('Generic IP:', '  IP packet debugging is on'); return R(L); }),
+    c('show debugging', (x) => { const g = x.d.debug || {}; const L = []; if (g.ospfAdj) L.push('OSPF:', '  OSPF adjacency debugging is on'); if (g.ospfHello) L.push('OSPF:', '  OSPF hello debugging is on'); if (g.bgp) L.push('BGP:', '  BGP debugging is on for address family: IPv4 Unicast'); if (g.icmp) L.push('IP:', '  ICMP packet debugging is on'); if (g.ipPacket) L.push('Generic IP:', '  IP packet debugging is on'); return R(L); }),
     c('clear logging', (x) => { x.d.logBuf = []; return R(['Clear logging buffer [confirm]', '']); }),
     c('show running-config', (x) => R(runningConfig(x.d))),
     c('show running-config interface <if>', (x) => R(runIfBlock(x.d, x.a[0]))),
@@ -312,8 +319,9 @@ export function createCli(net) {
     c('show ip interface brief', (x) => R(showIpIntBriefRouter(x.d))),
     c('show ipv6 interface brief', (x) => R(showIpv6IntBr(x.d))),
     c('show ipv6 route', (x) => R(showIpv6Route(x.d, null))),
-    c('show ipv6 route {ospf|static|connected|local}', (x) => R(showIpv6Route(x.d, x.a[0]))),
+    c('show ipv6 route {ospf|static|connected|local|eigrp|bgp}', (x) => R(showIpv6Route(x.d, x.a[0]))),
     c('show ipv6 ospf neighbor', (x) => R(showOspf6Nei(x.d))),
+    c('show ospfv3 neighbor', (x) => R(showOspf6Nei(x.d))),
     c('show zone security', (x) => R(showZones(x.d))),
     c('show zone-pair security', (x) => R(showZonePairs(x.d))),
     c('show class-map type inspect', (x) => R(showCmapI(x.d))),
@@ -585,6 +593,8 @@ export function createCli(net) {
     c('zone-pair security <word> source <word> destination <word>', (x) => zpair(x)),
     c('no zone-pair security <word>', (x) => { const z = zbf(x.d); z.pairs = z.pairs.filter((p) => p.name !== x.a[0]); return R([]); }),
     c('no ipv6 router ospf <num>', (x) => { if (x.d.ospf6?.pid === x.a[0]) x.d.ospf6 = null; return R([]); }),
+    c('router ospfv3 <num>', (x) => { const r = routerOspf6(x); if (x.d.ospf6) x.d.ospf6.af = true; return r; }),
+    c('no router ospfv3 <num>', (x) => { if (x.d.ospf6?.pid === x.a[0]) x.d.ospf6 = null; return R([]); }),
   ];
   const CFG_ROUTER = [
     ...CFG_COMMON,
@@ -723,6 +733,9 @@ export function createCli(net) {
     c('no ipv6 enable', (x) => ifAll(x, (f) => { f.ipv6Enable = false; })),
     c('ipv6 ospf <num> area <num>', (x) => ospf6If(x, x.a[0], x.a[1])),
     c('no ipv6 ospf <num> area <num>', (x) => ifAll(x, (f) => { f.ospf6 = null; })),
+    c('ospfv3 <num> ipv6 area <num>', (x) => { const r = ospf6If(x, x.a[0], x.a[1]); if (x.d.ospf6) x.d.ospf6.af = true; return r; }),
+    c('no ospfv3 <num> ipv6 area <num>', (x) => ifAll(x, (f) => { f.ospf6 = null; })),
+    c('ospfv3 <num> ipv4 area <num>', () => R(['% Lab: chỉ mô phỏng address-family ipv6 của OSPFv3'])),
     c('encapsulation dot1q <num>', (x) => encapSet(x, x.a[0], false)),
     c('encapsulation dot1q <num> native', (x) => encapSet(x, x.a[0], true)),
     c('encapsulation {ppp|hdlc}', (x) => l2encSet(x, x.a[0])),
@@ -749,6 +762,27 @@ export function createCli(net) {
     c('speed {auto|10|100|1000}', (x) => ifAll(x, (f, n) => setSpeed(f, n, x.a[0]))),
   ];
   const IF_SWITCH = [
+    // Catalyst cũng cấp VLAN nội bộ từ 1006 cho cổng định tuyến; Lab làm y vậy để dùng lại toàn bộ đường SVI.
+    // shortcut: show ip interface brief và show ip route hiện Vlan1006 thay cho tên cổng, cần giống hệt thì gộp tên trong các bảng show
+    c('no switchport', (x) => {
+      if (x.d.model !== '3560') return R(['% Invalid input detected.', '(Lab: switch 2960 là Layer 2 — cần switch Layer 3 như 3560 mới có cổng định tuyến)']);
+      return ports(x, (p) => {
+        if (p.routed) return;
+        let iv = 1006;
+        while (x.d.vlans[iv]) iv++;
+        x.d.vlans[iv] = INTERNAL_VLAN;
+        Object.assign(p, { routed: iv, mode: 'access', modeSet: true, vlan: iv });
+        x.d.svis[`vlan${iv}`] = { ...N.newSubIf(`vlan${iv}`), shutdown: false };
+      });
+    }),
+    c('switchport', (x) => ports(x, (p) => {
+      if (!p.routed) return;
+      delete x.d.svis[`vlan${p.routed}`];
+      delete x.d.vlans[p.routed];
+      Object.assign(p, { routed: null, vlan: 1 });
+    })),
+    c('ip address <ip> <mask>', (x) => ports(x, (p) => (p.routed ? ipSet(x, x.d.svis[`vlan${p.routed}`], `vlan${p.routed}`, x.a[0], x.a[1]) : ['% Lab: cổng đang là Layer 2, gõ "no switchport" trước khi đặt IP']))),
+    c('no ip address', (x) => ports(x, (p) => { if (p.routed) Object.assign(x.d.svis[`vlan${p.routed}`], { ip: null, prefix: null }); })),
     c('switchport mode {access|trunk}', (x) => ports(x, (p) => { p.mode = x.a[0]; p.modeSet = true; })),
     c('switchport mode dynamic {auto|desirable}', (x) => ports(x, (p) => { if (p.nonegotiate) return ["Conflict between 'nonegotiate' and 'dynamic' status on this interface"]; p.mode = 'access'; p.modeSet = false; p.dyn = x.a[0]; })),
     c('switchport mode private-vlan {host|promiscuous}', (x) => ports(x, (p) => { p.mode = 'private-vlan'; p.modeSet = true; p.pv = { ...(p.pv || {}), mode: x.a[0] }; })),
@@ -848,6 +882,11 @@ export function createCli(net) {
   const OSPF6_MODE = [
     c('router-id <ip>', (x) => { x.d.ospf6.rid = x.a[0]; return R([]); }),
     c('no router-id', (x) => { x.d.ospf6.rid = null; return R([]); }),
+    // shortcut: router ospfv3 chỉ chạy address-family ipv6, chưa mang route IPv4 qua OSPFv3; cần thì thêm bảng ospf6 riêng cho IPv4
+    c('address-family ipv6', () => R([])),
+    c('address-family ipv6 unicast', () => R([])),
+    c('address-family ipv4 unicast', () => R(['% Lab: chỉ mô phỏng address-family ipv6 của OSPFv3'])),
+    c('exit-address-family', () => R([])),
     c('passive-interface <if>', (x) => { const o = x.d.ospf6; if (!o.passive.includes(x.a[0])) o.passive.push(x.a[0]); return R([]); }),
     c('no passive-interface <if>', (x) => { x.d.ospf6.passive = x.d.ospf6.passive.filter((n) => n !== x.a[0]); return R([]); }),
     c('exit', (x) => { x.s.mode = 'config'; return R([]); }),
@@ -875,7 +914,7 @@ export function createCli(net) {
     c('redistribute bgp <num> subnets', (x) => redist(x, 'ospf', 'bgp', { as: x.a[0], subnets: true })),
     c('no redistribute {static|connected}', (x) => { delete x.d.ospf.redist?.[x.a[0]]; return R([]); }),
     c('no redistribute {eigrp|bgp} <num>', (x) => { delete x.d.ospf.redist?.[x.a[0]]; return R([]); }),
-    c('auto-cost reference-bandwidth <num>', () => R(['% OSPF: Reference bandwidth is changed.', '        Please ensure reference bandwidth is consistent across all routers.'])),
+    c('auto-cost reference-bandwidth <num>', (x) => { x.d.ospf.refBw = x.a[0]; return R(['% OSPF: Reference bandwidth is changed.', '        Please ensure reference bandwidth is consistent across all routers.']); }),
     c('log-adjacency-changes', () => R([])),
     c('exit', (x) => { x.s.mode = 'config'; return R([]); }),
     c('end', (x) => toPriv(x)),
@@ -1025,7 +1064,7 @@ export function createCli(net) {
   const GUIFW = makeGuiFw({ R });
   const VENDOR = { fortios: makeForti({ net, R }), panos: makePan({ net, R }), sophos: GUIFW, checkpoint: GUIFW, pfsense: GUIFW, wlc: makeWlc({ net, R }) };
   const LINUX = makeLinux({ net, R, sshConnect: (d, ip, user, s) => sshConnect(d, ip, user, s), iosRun: (dev, cmds) => { const c = createCli(net); c.session(dev).mode = 'priv'; return cmds.map((l) => c.exec(dev, l).out); }, iosConfig: (dev) => { const { logBuf, ...rest } = net.devices[dev]; return JSON.stringify(rest); } });
-  const NP = makeNp({ c, net, IFS, toPriv, doExec, ifAll, ctxOf, showIpRoute, iosPing, iosTrace, execLine: (id, line) => exec(id, line), sess, redistSet: redist, T: { CFG_ROUTER, CFG_SWITCH, IF_ROUTER, IF_SVI, OSPF_MODE, EIGRP_MODE, BGP_MODE, LINE_MODE, VLAN_MODE, SHOW_ROUTER, SHOW_SWITCH, EXEC_PRIV, routerEigrp, showEigrpNei } });
+  const NP = makeNp({ c, net, IFS, toPriv, doExec, ifAll, ctxOf, showIpRoute, iosPing, iosTrace, execLine: (id, line) => exec(id, line), sess, redistSet: redist, T: { CFG_ROUTER, CFG_SWITCH, IF_ROUTER, IF_SVI, OSPF_MODE, EIGRP_MODE, BGP_MODE, LINE_MODE, VLAN_MODE, SHOW_ROUTER, SHOW_SWITCH, EXEC_PRIV, routerEigrp, showEigrpNei, showBgp, showBgpSum } });
   function tableFor(d, s) {
     if (d.os === 'asa') return ASA.tableFor(d, s);
     switch (s.mode) {
@@ -1468,9 +1507,9 @@ export function createCli(net) {
     return L;
   }
   function showIpv6Route(d, filter) {
-    const code = { ospf: ['O', 'OI'], static: ['S'], connected: ['C'], local: ['L'] }[filter];
+    const code = { ospf: ['O', 'OI'], static: ['S'], connected: ['C'], local: ['L'], eigrp: ['D'], bgp: ['B'] }[filter];
     const rows = V6.routeTable6(net, d.id).filter((r) => !code || code.includes(r.code));
-    const L = [`IPv6 Routing Table - default - ${rows.length} entries`, 'Codes: C - Connected, L - Local, S - Static, O - OSPF Intra, OI - OSPF Inter', ''];
+    const L = [`IPv6 Routing Table - default - ${rows.length} entries`, 'Codes: C - Connected, L - Local, S - Static, O - OSPF Intra, OI - OSPF Inter, D - EIGRP, B - BGP', ''];
     if (!d.ipv6Routing) L.push('(Lab: "ipv6 unicast-routing" CHƯA bật — router có bảng nhưng KHÔNG chuyển tiếp gói IPv6)', '');
     for (const r of rows) {
       L.push(`${pad(r.code, 4)}${r.net}/${r.prefix} [${r.ad}/${r.metric}]`);
@@ -1843,7 +1882,7 @@ export function createCli(net) {
   }
   function vtpMode(x, m) {
     // VTPv1/v2 không quảng bá VLAN mở rộng 1006–4094 → không rời transparent được khi đang có VLAN mở rộng
-    const ext = Object.keys(x.d.vlans).map(Number).filter((v) => v >= 1006);
+    const ext = Object.keys(x.d.vlans).map(Number).filter((v) => v >= 1006 && x.d.vlans[v] !== INTERNAL_VLAN);
     if (m !== 'transparent' && ext.length) return R([`Cannot set the device to VTP ${m.toUpperCase()} mode when extended VLANs exist (${ext.join(',')}).`, '(Lab: xoá VLAN mở rộng trước, hoặc giữ VTP transparent.)']);
     if (m === 'transparent' || x.d.vtpMode === 'transparent') x.d.vtpRev = 0;
     x.d.vtpMode = m;
@@ -2667,7 +2706,7 @@ export function createCli(net) {
     for (const e of N.ospfIfaces(ctx, d.id)) {
       const cnt = nb.filter((n) => n.iface === e.ifn).length;
       let st = 'P2P';
-      if (e.ntype !== 'p2p' && e.ntype !== 'p2mp') { const r = N.ospfRoles(ctx, d.id, e.ifn); st = r.dr === d.id ? 'DR' : r.bdr === d.id ? 'BDR' : e.prio === 0 ? 'DROTH' : cnt ? 'DROTH' : 'DR'; }
+      if (!['p2p', 'p2mp', 'p2mpnb'].includes(e.ntype)) { const r = N.ospfRoles(ctx, d.id, e.ifn); st = r.dr === d.id ? 'DR' : r.bdr === d.id ? 'BDR' : e.prio === 0 ? 'DROTH' : cnt ? 'DROTH' : 'DR'; }
       L.push(`${pad(shortIf(e.ifn), 13)}${pad(d.ospf.pid, 6)}${pad(e.area, 16)}${pad(`${e.ip}/${e.prefix}`, 19)}${pad(e.cost, 6)}${pad(st, 6)}${cnt}/${cnt}`);
     }
     return L;
@@ -2680,12 +2719,12 @@ export function createCli(net) {
     const L = [];
     for (const e of N.ospfIfaces(ctx, d.id)) {
       if (only && e.ifn !== only) continue;
-      const p2p = e.ntype === 'p2p' || e.ntype === 'p2mp';
+      const p2p = ['p2p', 'p2mp', 'p2mpnb'].includes(e.ntype);
       const cnt = nb.filter((n) => n.iface === e.ifn), full = cnt.filter((n) => n.full);
       L.push(`${longIf(e.ifn)} is up, line protocol is up`, `  Internet Address ${e.ip}/${e.prefix}, Area ${e.area}, Attached via Network Statement`,
-        `  Process ID ${d.ospf.pid}, Router ID ${o.rid[d.id]}, Network Type ${{ p2p: 'POINT_TO_POINT', p2mp: 'POINT_TO_MULTIPOINT', nbma: 'NON_BROADCAST', broadcast: 'BROADCAST' }[e.ntype]}, Cost: ${e.cost}`);
+        `  Process ID ${d.ospf.pid}, Router ID ${o.rid[d.id]}, Network Type ${{ p2p: 'POINT_TO_POINT', p2mp: 'POINT_TO_MULTIPOINT', p2mpnb: 'POINT_TO_MULTIPOINT_NON_BROADCAST', nbma: 'NON_BROADCAST', broadcast: 'BROADCAST' }[e.ntype]}, Cost: ${e.cost}`);
       if (e.authT !== 'null') L.push(`  ${e.authT === 'md5' ? 'Cryptographic' : 'Simple password'} authentication enabled`);
-      if (p2p) L.push(`  Transmit Delay is 1 sec, State ${e.ntype === 'p2mp' ? 'POINT_TO_MULTIPOINT' : 'POINT_TO_POINT'}`);
+      if (p2p) L.push(`  Transmit Delay is 1 sec, State ${e.ntype === 'p2mp' || e.ntype === 'p2mpnb' ? 'POINT_TO_MULTIPOINT' : 'POINT_TO_POINT'}`);
       else {
         const r = N.ospfRoles(ctx, d.id, e.ifn);
         const ipOf = (id) => (id === d.id ? e.ip : nb.find((n) => n.dev === id)?.addr);
@@ -2882,27 +2921,30 @@ export function createCli(net) {
   }
 
   // ---- BGP ----
-  function showBgpSum(d) {
+  const asTxt = (d, a) => (d.bgp.asDot && a > 65535 ? `${Math.floor(a / 65536)}.${a % 65536}` : a);
+  // phiên trong VRF không hiện ở bảng toàn cục, phải xem bằng "vpnv4 vrf"
+  function showBgpSum(d, inVrf = false) {
     if (!d.bgp) return ['% BGP not active'];
     const b = N.bgpAll(ctxOf());
-    const L = [`BGP router identifier ${b.rid[d.id]}, local AS number ${d.bgp.as}`, 'BGP table version is 7, main routing table version 7', '', 'Neighbor        V           AS MsgRcvd MsgSent   TblVer  InQ OutQ Up/Down  State/PfxRcd'];
-    for (const s of b.sessions[d.id] || []) {
+    const L = [`BGP router identifier ${b.rid[d.id]}, local AS number ${asTxt(d, d.bgp.as)}`, 'BGP table version is 7, main routing table version 7', '', 'Neighbor        V           AS MsgRcvd MsgSent   TblVer  InQ OutQ Up/Down  State/PfxRcd'];
+    for (const s of !!d.bgp.vrf === inVrf ? b.sessions[d.id] || [] : []) {
       const rcv = Object.values(b.best[d.id] || {}).filter((p) => p.fromIp && s.peer && p.from === s.peer).length;
-      L.push(`${pad(s.ip, 16)}4 ${lpad(s.remoteAs, 12)}${lpad(s.state === 'Established' ? 15 : 0, 8)}${lpad(s.state === 'Established' ? 14 : 0, 8)}${lpad(7, 9)}${lpad(0, 5)}${lpad(0, 5)} ${pad(s.state === 'Established' ? '00:05:12' : 'never', 9)}${s.state === 'Established' ? rcv : s.state}`);
+      L.push(`${pad(s.ip, 16)}4 ${lpad(asTxt(d, s.remoteAs), 12)}${lpad(s.state === 'Established' ? 15 : 0, 8)}${lpad(s.state === 'Established' ? 14 : 0, 8)}${lpad(7, 9)}${lpad(0, 5)}${lpad(0, 5)} ${pad(s.state === 'Established' ? '00:05:12' : 'never', 9)}${s.state === 'Established' ? rcv : s.state}`);
     }
     return L;
   }
-  function showBgp(d) {
+  function showBgp(d, inVrf = false) {
     if (!d.bgp) return ['% BGP not active'];
     const b = N.bgpAll(ctxOf());
     const L = [`BGP table version is 7, local router ID is ${b.rid[d.id]}`, 'Status codes: s suppressed, d damped, h history, * valid, > best, i - internal,', 'Origin codes: i - IGP, e - EGP, ? - incomplete', '', '   Network          Next Hop            Metric LocPrf Weight Path'];
+    if (!!d.bgp.vrf !== inVrf) return L;
     const tbl = b.tables[d.id] || {};
     const best = b.best[d.id] || {};
     for (const k of Object.keys({ ...tbl, ...best }).sort((x, y) => N.ip2n(x.split('/')[0]) - N.ip2n(y.split('/')[0]))) {
       const list = tbl[k] || [best[k]];
       for (const p of list) {
         const isBest = best[k] === p || (best[k] && p.nh === best[k].nh && JSON.stringify(p.asPath) === JSON.stringify(best[k].asPath));
-        L.push(`${isBest ? '*>' : '* '}${p.ibgp ? 'i' : ' '}${pad(p.prefix === 0 ? '0.0.0.0' : k, 17)}${pad(p.nh, 20)}${lpad(p.med || 0, 6)} ${lpad(p.ibgp || (p.lp ?? 100) !== 100 ? p.lp ?? 100 : '', 6)} ${lpad(p.weight || 0, 6)} ${[...p.asPath, p.origin || 'i'].join(' ')}`);
+        L.push(`${!b.nhOk(d.id, p) ? '  ' : isBest ? '*>' : '* '}${p.ibgp ? 'i' : ' '}${pad(p.prefix === 0 ? '0.0.0.0' : k, 17)}${pad(p.nh, 20)}${lpad(p.med || 0, 6)} ${lpad(p.ibgp || (p.lp ?? 100) !== 100 ? p.lp ?? 100 : '', 6)} ${lpad(p.weight || 0, 6)} ${[...p.asPath.map((a) => asTxt(d, a)), p.origin || 'i'].join(' ')}`);
       }
     }
     return L;
@@ -2981,7 +3023,7 @@ export function createCli(net) {
   }
   function showVlanBrief(d) {
     const L = ['', 'VLAN Name                             Status    Ports', '---- -------------------------------- --------- -------------------------------'];
-    for (const v of Object.keys(d.vlans).map(Number).sort((a, b) => a - b)) {
+    for (const v of Object.keys(d.vlans).map(Number).filter((v) => d.vlans[v] !== INTERNAL_VLAN).sort((a, b) => a - b)) {
       const ps = accessPortsOfVlan(d, v).map(shortIf);
       const chunks = [];
       for (let i = 0; i < ps.length; i += 4) chunks.push(ps.slice(i, i + 4).join(', '));
@@ -3520,7 +3562,7 @@ export function createCli(net) {
     if (f.nat) L.push(` ip nat ${f.nat}`);
     if (f.ospfCost != null) L.push(` ip ospf cost ${f.ospfCost}`);
     if (f.ospfPrio != null) L.push(` ip ospf priority ${f.ospfPrio}`);
-    if (f.ospfNet) L.push(` ip ospf network ${{ p2p: 'point-to-point', p2mp: 'point-to-multipoint', nbma: 'non-broadcast', broadcast: 'broadcast' }[f.ospfNet]}`);
+    if (f.ospfNet) L.push(` ip ospf network ${{ p2p: 'point-to-point', p2mp: 'point-to-multipoint', p2mpnb: 'point-to-multipoint non-broadcast', nbma: 'non-broadcast', broadcast: 'broadcast' }[f.ospfNet]}`);
     if (f.ospfHello != null) L.push(` ip ospf hello-interval ${f.ospfHello}`);
     if (f.ospfPid != null) L.push(` ip ospf ${f.ospfPid} area ${f.ospfArea}`);
     if (f.ll) L.push(` ipv6 address ${f.ll} link-local`);
@@ -3528,7 +3570,7 @@ export function createCli(net) {
     for (const a of f.ipv6 || []) L.push(a.dhcp ? ' ipv6 address dhcp' : a.eui ? ` ipv6 address ${A6.net6(a.ip, 64)}/64 eui-64` : ` ipv6 address ${a.ip}/${a.prefix}`);
     if (f.ipv6Enable) L.push(' ipv6 enable');
     for (const dir of ['in', 'out']) if (f.ipv6Filter?.[dir]) L.push(` ipv6 traffic-filter ${f.ipv6Filter[dir]} ${dir}`);
-    if (f.ospf6) L.push(` ipv6 ospf ${f.ospf6.pid} area ${f.ospf6.area}`);
+    if (f.ospf6) L.push(d.ospf6?.af ? ` ospfv3 ${f.ospf6.pid} ipv6 area ${f.ospf6.area}` : ` ipv6 ospf ${f.ospf6.pid} area ${f.ospf6.area}`);
     if (f.zone) L.push(` zone-member security ${f.zone}`);
     if (f.bw != null) L.push(` bandwidth ${f.bw}`);
     if (n.startsWith('s') && f.l2enc === 'ppp') L.push(' encapsulation ppp');
@@ -3561,6 +3603,11 @@ export function createCli(net) {
     const L = [`interface ${longIf(n)}`];
     const p = d.ports[n];
     if (p.desc) L.push(` description ${p.desc}`);
+    if (p.routed) {
+      const v = d.svis[`vlan${p.routed}`];
+      L.push(' no switchport', v.ip ? ` ip address ${v.ip} ${prefixToMask(v.prefix)}` : ' no ip address', p.shutdown ? ' shutdown' : ' no shutdown', '!');
+      return L;
+    }
     if (p.pv?.mode === 'host' && p.pv.primary) L.push(` switchport private-vlan host-association ${p.pv.primary} ${p.pv.secondary}`);
     if (p.pv?.mode === 'promiscuous' && p.pv.primary) L.push(` switchport private-vlan mapping ${p.pv.primary} ${fmtVlist(p.pv.mapping || [])}`);
     if (p.native !== 1) L.push(` switchport trunk native vlan ${p.native}`);
@@ -3633,7 +3680,7 @@ export function createCli(net) {
       for (const r of d.routes) L.push(`ip route ${r.net} ${prefixToMask(r.prefix)} ${r.iface ? longIf(r.iface) + (r.nh ? ' ' + r.nh : '') : r.nh}${r.ad !== 1 ? ' ' + r.ad : ''}${r.name ? ' name ' + r.name : ''}`);
       if (d.ipv6Routing) L.push('ipv6 unicast-routing');
       for (const r of d.routes6 || []) L.push(`ipv6 route ${r.net}/${r.prefix} ${r.iface ? longIf(r.iface) + (r.nh ? ' ' + r.nh : '') : r.nh}${(r.ad ?? 1) !== 1 ? ' ' + r.ad : ''}`);
-      if (d.ospf6) L.push(`ipv6 router ospf ${d.ospf6.pid}`, ...(d.ospf6.rid ? [` router-id ${d.ospf6.rid}`] : []), ...d.ospf6.passive.map((n) => ` passive-interface ${longIf(n)}`), '!');
+      if (d.ospf6) L.push(d.ospf6.af ? `router ospfv3 ${d.ospf6.pid}` : `ipv6 router ospf ${d.ospf6.pid}`, ...(d.ospf6.rid ? [` router-id ${d.ospf6.rid}`] : []), ...(d.ospf6.af ? [' address-family ipv6 unicast'] : []), ...d.ospf6.passive.map((n) => ` passive-interface ${longIf(n)}`), '!');
       L.push('!', ...NP.running(d), '!', ...aclBlock(d), '!', ...ACL6.acl6Running(d.acls6));
     } else {
       L = headBlock(d);
@@ -3659,7 +3706,7 @@ export function createCli(net) {
       L.push('!');
       if (d.vtpMode === 'transparent') {
         L.push('vtp mode transparent', '!');
-        for (const v of Object.keys(d.vlans).map(Number).filter((v) => v !== 1)) {
+        for (const v of Object.keys(d.vlans).map(Number).filter((v) => v !== 1 && d.vlans[v] !== INTERNAL_VLAN)) {
           L.push(`vlan ${v}`, ` name ${d.vlans[v]}`);
           const pv = d.pvlan[v];
           if (pv) { L.push(` private-vlan ${pv.type}`); if (pv.type === 'primary' && pv.assoc?.length) L.push(` private-vlan association ${fmtVlist(pv.assoc)}`); }
@@ -3667,7 +3714,7 @@ export function createCli(net) {
         }
       }
       for (const n of Object.keys(d.ports).sort((a, b) => (a.startsWith('po') ? -1 : 0) - (b.startsWith('po') ? -1 : 0) || ifSort(a, b))) L.push(...runIfSwitch(d, n));
-      for (const n of Object.keys(d.svis).sort(ifSort)) L.push(...runIfSwitch(d, n));
+      for (const n of Object.keys(d.svis).sort(ifSort)) if (d.vlans[+n.slice(4)] !== INTERNAL_VLAN) L.push(...runIfSwitch(d, n));
       L.push(...routingBlock(d));
       for (const r of d.routes) L.push(`ip route ${r.net} ${prefixToMask(r.prefix)} ${r.iface ? longIf(r.iface) + (r.nh ? ' ' + r.nh : '') : r.nh}${r.ad !== 1 ? ' ' + r.ad : ''}${r.name ? ' name ' + r.name : ''}`);
       if (d.defaultGateway) L.push(`ip default-gateway ${d.defaultGateway}`);

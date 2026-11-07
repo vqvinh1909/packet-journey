@@ -1,7 +1,7 @@
 // ui/progress.js — modal Tiến độ học: kịch bản đã xem, điểm quiz, và xuất/nhập tiến độ.
 import { esc } from './topo.js';
 import { SCENARIOS } from '../scenarios/index.js';
-import { quizFor } from '../scenarios/quizzes.js';
+import { quizFor, QUIZ_LEN } from '../scenarios/quizzes.js';
 import { getDone, load, exportAll, importAll } from './store.js';
 
 
@@ -29,7 +29,7 @@ export function openProgress() {
       if (isDone) nDone += 1;
       const quiz = quizFor(id);
       const best = load(`quiz_${id}`, null);
-      const quizTxt = quiz ? (best != null ? `quiz ${best}/${quiz.length}` : `quiz 0/${quiz.length}`) : '—';
+      const quizTxt = quiz ? `quiz ${best ?? 0}/${QUIZ_LEN}` : '—';
       return `<div class="pg-row"><span class="pg-chk">${isDone ? '✓' : '○'}</span>` +
         `<span class="pg-name">${esc(s.meta.titleVi)}</span><span class="pg-quiz">${quizTxt}</span></div>`;
     }).join('');

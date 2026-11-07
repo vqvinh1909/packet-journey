@@ -3,7 +3,8 @@
 // Hàm makeNp nhận các bảng lệnh của ios.js rồi bổ sung vào đó, đồng thời khai báo các chế độ cấu hình mới.
 import * as N from './net.js';
 import * as A6 from './ip6.js';
-import { hm } from './policy.js';
+import * as V6 from './net6.js';
+import { hm, asPathOk, plEval, rmEval, commOk, iosRegex } from './policy.js';
 
 const { longIf, shortIf, maskToPrefix, prefixToMask, netOf } = N;
 const pad = (s, n) => String(s ?? '').padEnd(n);
@@ -81,6 +82,9 @@ export function makeNp({ c, net, IFS, toPriv, doExec, ifAll, ctxOf, showIpRoute,
     c('match tag <rest>', (x) => rmMatch(x, 'tag', words(x.a[0]).map(Number))),
     c('match metric <rest>', (x) => rmMatch(x, 'metric', words(x.a[0]).map(Number))),
     c('match as-path <rest>', (x) => rmMatch(x, 'aspath', words(x.a[0]))),
+    c('match community <rest>', (x) => rmMatch(x, 'comm', words(x.a[0]))),
+    c('set community <rest>', (x) => { const w = words(x.a[0]), additive = w.includes('additive'); return rmSet(x, 'community', { vals: w.includes('none') ? [] : w.filter((v) => v !== 'additive'), additive }); }),
+    c('no set community', (x) => { delete x.s.rm.sets.community; return R([]); }),
     c('no match {tag|metric}', (x) => { x.s.rm.matches = x.s.rm.matches.filter((m) => m.k !== x.a[0]); return R([]); }),
     c('set metric <num>', (x) => rmSet(x, 'metric', x.a[0])),
     c('set tag <num>', (x) => rmSet(x, 'tag', x.a[0])),
@@ -119,6 +123,13 @@ export function makeNp({ c, net, IFS, toPriv, doExec, ifAll, ctxOf, showIpRoute,
 
   // ---------- OSPF ----------
   const area = (x, w) => ((x.d.ospf.areas ||= {})[areaKey(w)] ||= {});
+  const vl = (x) => {
+    const list = (x.d.ospf.vlinks ||= []), a = areaKey(x.a[0]);
+    if (a === '0') return {};
+    let v = list.find((o) => o.area === a && o.rid === x.a[1]);
+    if (!v) { v = { area: a, rid: x.a[1] }; list.push(v); }
+    return v;
+  };
   const OSPF_X = [
     c('area <word> stub', (x) => { Object.assign(area(x, x.a[0]), { type: 'stub', noSummary: false }); return R([]); }),
     c('area <word> stub no-summary', (x) => { Object.assign(area(x, x.a[0]), { type: 'stub', noSummary: true }); return R([]); }),
@@ -129,7 +140,12 @@ export function makeNp({ c, net, IFS, toPriv, doExec, ifAll, ctxOf, showIpRoute,
     c('area <word> range <ip> <mask>', (x) => { const a = area(x, x.a[0]), prefix = maskToPrefix(x.a[2]); (a.ranges ||= []).push({ net: netOf(x.a[1], prefix), prefix }); return R([]); }),
     c('area <word> range <ip> <mask> not-advertise', (x) => { const a = area(x, x.a[0]), prefix = maskToPrefix(x.a[2]); (a.ranges ||= []).push({ net: netOf(x.a[1], prefix), prefix, hide: true }); return R([]); }),
     c('no area <word> range <ip> <mask>', (x) => { const a = area(x, x.a[0]); a.ranges = (a.ranges || []).filter((g) => g.net !== x.a[1]); return R([]); }),
-    c('area <word> virtual-link <ip>', (x) => { const o = x.d.ospf, a = areaKey(x.a[0]); if (a === '0') return R(['% OSPF: Area 0 cannot be a transit area']); (o.vlinks ||= []).push({ area: a, rid: x.a[1] }); return R([]); }),
+    c('area <word> virtual-link <ip>', (x) => { vl(x); return areaKey(x.a[0]) === '0' ? R(['% OSPF: Area 0 cannot be a transit area']) : R([]); }),
+    c('area <word> virtual-link <ip> authentication', (x) => { vl(x).auth = 'plain'; return R([]); }),
+    c('area <word> virtual-link <ip> authentication message-digest', (x) => { vl(x).auth = 'md5'; return R([]); }),
+    c('area <word> virtual-link <ip> authentication null', (x) => { vl(x).auth = 'null'; return R([]); }),
+    c('area <word> virtual-link <ip> authentication-key <word>', (x) => { vl(x).key = x.a[2]; return R([]); }),
+    c('area <word> virtual-link <ip> message-digest-key <num> md5 <word>', (x) => { vl(x).md5 = { id: x.a[2], key: x.a[3] }; return R([]); }),
     c('no area <word> virtual-link <ip>', (x) => { x.d.ospf.vlinks = (x.d.ospf.vlinks || []).filter((v) => v.rid !== x.a[1]); return R([]); }),
     c('area <word> authentication', (x) => { area(x, x.a[0]).auth = 'plain'; return R([]); }),
     c('area <word> authentication message-digest', (x) => { area(x, x.a[0]).auth = 'md5'; return R([]); }),
@@ -141,6 +157,8 @@ export function makeNp({ c, net, IFS, toPriv, doExec, ifAll, ctxOf, showIpRoute,
     c('neighbor <ip>', (x) => { (x.d.ospf.nbrs ||= []).push(x.a[0]); return R([]); }),
     c('distance <num>', (x) => { x.d.ospf.distance = x.a[0]; return R([]); }),
     c('no distance', (x) => { x.d.ospf.distance = null; return R([]); }),
+    c('distance ospf <rest>', (x) => { const w = words(x.a[0]), by = {}; for (let i = 0; i < w.length; i += 2) { if (!['intra-area', 'inter-area', 'external'].includes(w[i]) || !(+w[i + 1] > 0)) return R(["% Invalid input detected at '^' marker."]); by[w[i]] = +w[i + 1]; } x.d.ospf.distanceBy = by; return R([]); }),
+    c('no distance ospf', (x) => { x.d.ospf.distanceBy = null; return R([]); }),
     c('redistribute {static|connected|eigrp|bgp} <rest>', (x) => redistGen('ospf', x)),
     c('bfd all-interfaces', (x) => { x.d.ospf.bfd = true; return R([]); }),
     c('no bfd all-interfaces', (x) => { x.d.ospf.bfd = false; return R([]); }),
@@ -202,7 +220,41 @@ export function makeNp({ c, net, IFS, toPriv, doExec, ifAll, ctxOf, showIpRoute,
     c('address-family ipv4 unicast autonomous-system <num>', (x) => namedAf(x, x.a[0])),
     // shortcut: mỗi router chỉ một tiến trình EIGRP nên một VRF, cần nhiều VRF thì tách d.eigrp theo VRF
     c('address-family ipv4 vrf <word> autonomous-system <num>', (x) => namedAf(x, x.a[1], x.a[0])),
+    c('address-family ipv6 autonomous-system <num>', go('eaf6', (x) => e6Open(x, x.a[0], x.s.eName))),
+    c('address-family ipv6 unicast autonomous-system <num>', go('eaf6', (x) => e6Open(x, x.a[0], x.s.eName))),
     ...tail(),
+  ];
+  // ---------- EIGRP cho IPv6 ----------
+  const e6Open = (x, as, named = null) => {
+    if (!x.d.ipv6Routing) return R(['% IPv6 routing not enabled']);
+    if (x.d.eigrp6 && x.d.eigrp6.as !== as) return R([`% Lab: thiết bị này đã chạy EIGRP IPv6 AS ${x.d.eigrp6.as}.`]);
+    x.d.eigrp6 ||= { as, named, rid: null, passive: [], shutdown: false };
+    x.d.eigrp6.named = named;
+    return null;
+  };
+  const e6Common = [
+    c('eigrp router-id <ip>', (x) => { x.d.eigrp6.rid = x.a[0]; return R([]); }),
+    c('no eigrp router-id', (x) => { x.d.eigrp6.rid = null; return R([]); }),
+  ];
+  const E6_MODE = [
+    ...e6Common,
+    c('passive-interface <if>', (x) => { x.d.eigrp6.passive = [...new Set([...x.d.eigrp6.passive, x.a[0]])]; return R([]); }),
+    c('no passive-interface <if>', (x) => { x.d.eigrp6.passive = x.d.eigrp6.passive.filter((n) => n !== x.a[0]); return R([]); }),
+    c('shutdown', (x) => { x.d.eigrp6.shutdown = true; return R([]); }),
+    c('no shutdown', (x) => { x.d.eigrp6.shutdown = false; return R([]); }),
+    ...tail(),
+  ];
+  const EAF6_MODE = [
+    ...e6Common,
+    c('af-interface <if>', go('eaf6if', (x) => { x.s.afIf = x.a[0]; })),
+    c('exit-address-family', go('enamed')),
+    ...tail('enamed'),
+  ];
+  const EAF6IF_MODE = [
+    c('passive-interface', (x) => { x.d.eigrp6.passive = [...new Set([...x.d.eigrp6.passive, x.s.afIf])]; return R([]); }),
+    c('no passive-interface', (x) => { x.d.eigrp6.passive = x.d.eigrp6.passive.filter((n) => n !== x.s.afIf); return R([]); }),
+    c('exit-af-interface', go('eaf6')),
+    ...tail('eaf6'),
   ];
 
   // ---------- BGP ----------
@@ -212,12 +264,14 @@ export function makeNp({ c, net, IFS, toPriv, doExec, ifAll, ctxOf, showIpRoute,
     return ((b.groups ||= {})[k] ||= {});
   };
   const bset = (fn) => (x) => { const n = bn(x); const r = fn(n, x); return r || R([]); };
+  const bopt = (k, v) => (x) => { x.d.bgp[k] = v; return R([]); };
   const BGP_X = [
     c('neighbor <word> peer-group', (x) => { (x.d.bgp.groups ||= {})[x.a[0]] ||= {}; return R([]); }),
     c('neighbor <ip> peer-group <word>', (x) => { if (!x.d.bgp.groups?.[x.a[1]]) return R([`% Create the peer-group ${x.a[1]} first`]); bn(x).group = x.a[1]; return R([]); }),
     c('neighbor <word> remote-as <num>', bset((n, x) => { n.remoteAs = x.a[1]; })),
     c('neighbor <word> update-source <if>', bset((n, x) => { n.updateSource = x.a[1]; })),
     c('neighbor <word> next-hop-self', bset((n) => { n.nextHopSelf = true; })),
+    c('no neighbor <word> next-hop-self', bset((n) => { n.nextHopSelf = false; })),
     c('neighbor <word> route-reflector-client', bset((n) => { n.rrClient = true; })),
     c('no neighbor <word> route-reflector-client', bset((n) => { n.rrClient = false; })),
     c('neighbor <word> route-map <word> {in|out}', bset((n, x) => { n[x.a[2] === 'in' ? 'rmIn' : 'rmOut'] = x.a[1]; })),
@@ -233,11 +287,41 @@ export function makeNp({ c, net, IFS, toPriv, doExec, ifAll, ctxOf, showIpRoute,
     c('no neighbor <word> password', bset((n) => { n.password = null; })),
     c('neighbor <word> timers <num> <num>', bset((n, x) => { n.timers = [x.a[1], x.a[2]]; })),
     c('neighbor <word> remove-private-as', bset((n) => { n.removePrivate = true; })),
+    c('neighbor <word> remove-private-as all', bset((n) => { n.removePrivate = 'all'; })),
+    c('no neighbor <word> remove-private-as', bset((n) => { n.removePrivate = false; })),
+    c('neighbor <word> disable-connected-check', bset((n) => { n.noConnCheck = true; })),
+    c('no neighbor <word> disable-connected-check', bset((n) => { n.noConnCheck = false; })),
+    c('neighbor <word> ttl-security hops <num>', bset((n, x) => { if (n.multihop) return R(['% Lab: ttl-security không dùng chung với ebgp-multihop']); n.ttlSec = x.a[1]; })),
+    c('no neighbor <word> ttl-security', bset((n) => { n.ttlSec = null; })),
+    c('neighbor <word> allowas-in', bset((n) => { n.allowasIn = 3; })),
+    c('neighbor <word> allowas-in <num>', bset((n, x) => { n.allowasIn = x.a[1]; })),
+    c('no neighbor <word> allowas-in', bset((n) => { n.allowasIn = null; })),
+    c('neighbor <word> as-override', bset((n) => { n.asOverride = true; })),
+    c('no neighbor <word> as-override', bset((n) => { n.asOverride = false; })),
+    c('neighbor <word> maximum-prefix <num>', bset((n, x) => { n.maxPrefix = { max: x.a[1] }; })),
+    c('neighbor <word> maximum-prefix <num> warning-only', bset((n, x) => { n.maxPrefix = { max: x.a[1], warnOnly: true }; })),
+    c('neighbor <word> maximum-prefix <num> <num>', bset((n, x) => { n.maxPrefix = { max: x.a[1], thr: x.a[2] }; })),
+    c('neighbor <word> maximum-prefix <num> <num> warning-only', bset((n, x) => { n.maxPrefix = { max: x.a[1], thr: x.a[2], warnOnly: true }; })),
+    c('no neighbor <word> maximum-prefix', bset((n) => { n.maxPrefix = null; })),
+    c('bgp always-compare-med', bopt('alwaysMed', true)),
+    c('no bgp always-compare-med', bopt('alwaysMed', false)),
+    c('bgp bestpath as-path ignore', bopt('asPathIgnore', true)),
+    c('no bgp bestpath as-path ignore', bopt('asPathIgnore', false)),
+    c('bgp bestpath med missing-as-worst', bopt('medWorst', true)),
+    c('no bgp bestpath med missing-as-worst', bopt('medWorst', false)),
+    // shortcut: Lab không tính tuổi đường eBGP nên luôn so router-id, lệnh này chỉ được lưu; cần phân biệt thì thêm thời điểm học route
+    c('bgp bestpath compare-routerid', bopt('cmpRid', true)),
+    c('no bgp bestpath compare-routerid', bopt('cmpRid', false)),
+    // shortcut: asdot chỉ đổi cách hiển thị, chưa nhận "remote-as 1.0"; cần nhập kiểu chấm thì thêm kiểu token cho AS
+    c('bgp asnotation dot', bopt('asDot', true)),
+    c('no bgp asnotation dot', bopt('asDot', false)),
     c('neighbor <word> soft-reconfiguration inbound', bset((n) => { n.softIn = true; })),
     c('neighbor <word> shutdown', bset((n) => { n.shutdown = true; })),
     c('no neighbor <word> shutdown', bset((n) => { n.shutdown = false; })),
     c('neighbor <word> activate', () => R([])),
-    c('neighbor <word> send-community', () => R([])),
+    c('neighbor <word> send-community', bset((n) => { n.sendCommunity = true; })),
+    c('neighbor <word> send-community {standard|both}', bset((n) => { n.sendCommunity = true; })),
+    c('no neighbor <word> send-community', bset((n) => { n.sendCommunity = false; })),
     c('neighbor <word> fall-over bfd', bset((n) => { n.bfd = true; })),
     c('address-family ipv4', () => R([])),
     c('address-family ipv4 unicast', () => R([])),
@@ -258,6 +342,28 @@ export function makeNp({ c, net, IFS, toPriv, doExec, ifAll, ctxOf, showIpRoute,
     c('redistribute {ospf|eigrp} <num> route-map <word>', (x) => { (x.d.bgp.redist ||= {})[x.a[0]] = { id: x.a[1], routeMap: x.a[2] }; return R([]); }),
     c('no redistribute {connected|static|ospf|eigrp} <rest>', (x) => { delete x.d.bgp.redist?.[x.a[0]]; return R([]); }),
     ...distList('bgp'),
+  ];
+  // ---------- BGP cho IPv6: láng giềng khai chung, phải activate trong address-family ----------
+  const b6 = (x) => (x.d.bgp.v6 ||= { neighbors: {}, networks: [] });
+  const b6n = (x, fn) => { const n = b6(x).neighbors[x.a[0]]; if (!n) return R([`% Specify remote-as or peer-group commands first`]); fn(n); return R([]); };
+  const b6Af = go('bgpaf6', (x) => { b6(x); });
+  const BGP6_X = [
+    c('neighbor <ip6> remote-as <num>', (x) => { (b6(x).neighbors[x.a[0]] ||= {}).remoteAs = x.a[1]; return R([]); }),
+    c('no neighbor <ip6>', (x) => { delete b6(x).neighbors[x.a[0]]; return R([]); }),
+    c('no bgp default ipv4-unicast', () => R([])),
+    c('address-family ipv6', b6Af),
+    c('address-family ipv6 unicast', b6Af),
+  ];
+  const BGPAF6_MODE = [
+    c('neighbor <ip6> activate', (x) => b6n(x, (n) => { n.active = true; })),
+    c('no neighbor <ip6> activate', (x) => b6n(x, (n) => { n.active = false; })),
+    c('neighbor <ip6> next-hop-self', (x) => b6n(x, (n) => { n.nextHopSelf = true; })),
+    c('no neighbor <ip6> next-hop-self', (x) => b6n(x, (n) => { n.nextHopSelf = false; })),
+    c('neighbor <ip6> remove-private-as', (x) => b6n(x, (n) => { n.removePrivate = true; })),
+    c('network <ip6p>', (x) => { const v = b6(x), net0 = A6.net6(x.a[0].ip, x.a[0].prefix); if (!v.networks.some((p) => p.net === net0 && p.prefix === x.a[0].prefix)) v.networks.push({ net: net0, prefix: x.a[0].prefix }); return R([]); }),
+    c('no network <ip6p>', (x) => { const v = b6(x), net0 = A6.net6(x.a[0].ip, x.a[0].prefix); v.networks = v.networks.filter((p) => !(p.net === net0 && p.prefix === x.a[0].prefix)); return R([]); }),
+    c('exit-address-family', go('bgp')),
+    ...tail('bgp'),
   ];
 
   // ---------- QoS, CoPP ----------
@@ -389,12 +495,35 @@ export function makeNp({ c, net, IFS, toPriv, doExec, ifAll, ctxOf, showIpRoute,
   const SLA_MODE = [
     c('icmp-echo <ip>', (x) => { sla(x.d, x.s.sla).target = x.a[0]; return R([]); }),
     c('icmp-echo <ip> source-interface <if>', (x) => { Object.assign(sla(x.d, x.s.sla), { target: x.a[0], srcIf: x.a[1] }); return R([]); }),
+    c('udp-jitter <ip> <num>', (x) => { Object.assign(sla(x.d, x.s.sla), { type: 'udp-jitter', target: x.a[0], port: x.a[1], codec: null }); return R([]); }),
+    c('udp-jitter <ip> <num> codec <word>', (x) => { Object.assign(sla(x.d, x.s.sla), { type: 'udp-jitter', target: x.a[0], port: x.a[1], codec: x.a[2] }); return R([]); }),
+    c('icmp-jitter <ip>', (x) => { Object.assign(sla(x.d, x.s.sla), { type: 'icmp-jitter', target: x.a[0] }); return R([]); }),
     c('frequency <num>', (x) => { sla(x.d, x.s.sla).freq = x.a[0]; return R([]); }),
     c('threshold <num>', () => R([])),
     c('timeout <num>', () => R([])),
     ...tail(),
   ];
   const TRACK_MODE = [c('delay <rest>', () => R([])), ...tail()];
+  // shortcut: telemetry chỉ kiểm tra cấu hình đăng ký và collector tới được, không phát dữ liệu thật; cần mô phỏng luồng dữ liệu thì thêm cache như NetFlow
+  const mdt = (x) => x.d.mdt[x.s.mdt];
+  const MDT_MODE = [
+    c('stream yang-push', (x) => { mdt(x).stream = 'yang-push'; return R([]); }),
+    c('encoding encode-kvgpb', (x) => { mdt(x).encoding = 'encode-kvgpb'; return R([]); }),
+    c('filter xpath <rest>', (x) => { mdt(x).xpath = x.a[0]; return R([]); }),
+    c('update-policy periodic <num>', (x) => { mdt(x).policy = `periodic ${x.a[0]}`; return R([]); }),
+    c('update-policy on-change', (x) => { mdt(x).policy = 'on-change'; return R([]); }),
+    c('source-address <ip>', (x) => { mdt(x).source = x.a[0]; return R([]); }),
+    c('receiver ip address <ip> <num> protocol grpc-tcp', (x) => { mdt(x).receiver = { ip: x.a[0], port: x.a[1] }; return R([]); }),
+    ...tail(),
+  ];
+  const mdtValid = (s) => !!(s.stream && s.encoding && s.xpath && s.policy && s.receiver);
+  function showMdt(d, only) {
+    return Object.entries(d.mdt || {}).filter(([id]) => only == null || +id === only).flatMap(([id, s]) => [
+      `Subscription ID: ${id}`, `  Type: Configured`, `  State: ${mdtValid(s) ? 'Valid' : 'Invalid (thiếu stream, filter, encoding, update-policy hoặc receiver)'}`,
+      `  Stream: ${s.stream || 'not set'}`, `  Filter: ${s.xpath || 'not set'}`, `  Update policy: ${s.policy || 'not set'}`, `  Encoding: ${s.encoding || 'not set'}`,
+      ...(s.receiver ? [`  Receiver: ${s.receiver.ip}:${s.receiver.port} grpc-tcp, ${N.sendPacket(net, { src: d.id, dst: s.receiver.ip }).ok ? 'Connected' : 'Connecting'}`] : []), '',
+    ]);
+  }
   const eem = (x) => x.d.eem[x.s.eem];
   const unq = (s) => s.replace(/^"|"$/g, '');
   const EEM_MODE = [
@@ -441,6 +570,12 @@ export function makeNp({ c, net, IFS, toPriv, doExec, ifAll, ctxOf, showIpRoute,
   }
 
   // ---------- cấu hình: bổ sung vào bảng có sẵn ----------
+  const commAdd = (x, name, action, rest, expanded) => {
+    const vals = words(rest);
+    if (expanded ? !iosRegex(vals.join(' ')) : !vals.every((v) => /^\d+:\d+$|^(no-export|no-advertise|local-AS|internet)$/.test(v))) return R(["% Invalid input detected at '^' marker."]);
+    ((x.d.commLists ||= {})[name] ||= []).push({ action, vals, expanded });
+    return R([]);
+  };
   const CFG_X = [
     c('ip vrf <word>', go('vrf', (x) => { vrfSet(x, x.a[0]); x.s.vrfName = x.a[0]; })),
     c('no ip vrf <word>', (x) => { if (x.d.vrfs) delete x.d.vrfs[x.a[0]]; return R([]); }),
@@ -458,7 +593,12 @@ export function makeNp({ c, net, IFS, toPriv, doExec, ifAll, ctxOf, showIpRoute,
     c('route-map <word> {permit|deny}', (x) => rmOpen(x, x.a[0], x.a[1], 10)),
     c('route-map <word> {permit|deny} <num>', (x) => rmOpen(x, x.a[0], x.a[1], x.a[2])),
     c('no route-map <word>', (x) => { if (x.d.routeMaps) delete x.d.routeMaps[x.a[0]]; return R([]); }),
-    c('ip as-path access-list <word> {permit|deny} <word>', (x) => { ((x.d.asPathAcls ||= {})[x.a[0]] ||= []).push({ action: x.a[1], re: x.a[2] }); return R([]); }),
+    c('ip as-path access-list <word> {permit|deny} <word>', (x) => { if (!iosRegex(x.a[2])) return R(["% Invalid input detected at '^' marker."]); ((x.d.asPathAcls ||= {})[x.a[0]] ||= []).push({ action: x.a[1], re: x.a[2] }); return R([]); }),
+    c('ip bgp-community new-format', (x) => { x.d.commNew = true; return R([]); }),
+    c('no ip bgp-community new-format', (x) => { x.d.commNew = false; return R([]); }),
+    c('ip community-list {standard|expanded} <word> {permit|deny} <rest>', (x) => commAdd(x, x.a[1], x.a[2], x.a[3], x.a[0] === 'expanded')),
+    c('ip community-list <num> {permit|deny} <rest>', (x) => commAdd(x, String(x.a[0]), x.a[1], x.a[2], x.a[0] > 99)),
+    c('no ip community-list {standard|expanded} <word>', (x) => { delete x.d.commLists?.[x.a[1]]; return R([]); }),
     c('key chain <word>', go('keychain', (x) => { ((x.d.keyChains ||= {})[x.a[0]] ||= {}); x.s.kc = x.a[0]; })),
     c('time-range <word>', go('trange', (x) => { ((x.d.timeRanges ||= {})[x.a[0]] ||= []); x.s.tr = x.a[0]; })),
     c('class-map <word>', go('qcmap', (x) => { x.s.qc = (qos(x.d).classes[x.a[0]] ||= { all: true, matches: [] }); })),
@@ -483,6 +623,10 @@ export function makeNp({ c, net, IFS, toPriv, doExec, ifAll, ctxOf, showIpRoute,
     c('monitor session <num> type {erspan-source|erspan-destination}', (x) => { mon(x).kind = x.a[1]; x.s.mon = x.a[0]; x.s.mode = 'erspan'; return R([]); }),
     c('ip sla <num>', go('sla', (x) => { sla(x.d, x.a[0]); x.s.sla = x.a[0]; })),
     c('no ip sla <num>', (x) => { if (x.d.slas) delete x.d.slas[x.a[0]]; return R([]); }),
+    c('ip sla responder', (x) => { x.d.slaResponder = true; return R([]); }),
+    c('no ip sla responder', (x) => { x.d.slaResponder = false; return R([]); }),
+    c('telemetry ietf subscription <num>', go('mdt', (x) => { ((x.d.mdt ||= {})[x.a[0]] ||= {}); x.s.mdt = x.a[0]; })),
+    c('no telemetry ietf subscription <num>', (x) => { if (x.d.mdt) delete x.d.mdt[x.a[0]]; return R([]); }),
     c('ip sla schedule <num> <rest>', (x) => { if (!x.d.slas?.[x.a[0]]) return R([`% Lab: chưa có ip sla ${x.a[0]}`]); x.d.slas[x.a[0]].scheduled = /start-time now/.test(x.a[1]) || /start-time/.test(x.a[1]); return R([]); }),
     c('track <num> ip sla <num>', go('track', (x) => { (x.d.tracks ||= {})[x.a[0]] = { sla: x.a[1] }; })),
     c('track <num> ip sla <num> {reachability|state}', go('track', (x) => { (x.d.tracks ||= {})[x.a[0]] = { sla: x.a[1], kind: x.a[2] }; })),
@@ -538,6 +682,14 @@ export function makeNp({ c, net, IFS, toPriv, doExec, ifAll, ctxOf, showIpRoute,
     c('ip ospf authentication', (x) => ifAll(x, (f) => { f.ospfAuth = 'plain'; })),
     c('ip ospf authentication message-digest', (x) => ifAll(x, (f) => { f.ospfAuth = 'md5'; })),
     c('ip ospf authentication null', (x) => ifAll(x, (f) => { f.ospfAuth = 'null'; })),
+    c('ip ospf authentication key-chain <word>', (x) => ifAll(x, (f) => { f.ospfAuth = 'chain'; f.ospfChain = x.a[0]; })),
+    c('ip ospf mtu-ignore', (x) => ifAll(x, (f) => { f.ospfMtuIgnore = true; })),
+    c('no ip ospf mtu-ignore', (x) => ifAll(x, (f) => { f.ospfMtuIgnore = false; })),
+    c('ip ospf network point-to-multipoint non-broadcast', (x) => ifAll(x, (f) => { f.ospfNet = 'p2mpnb'; })),
+    c('ospfv3 authentication <rest>', (x) => ifAll(x, (f) => { f.ospf6Auth = x.a[0]; })),
+    c('no ospfv3 authentication', (x) => ifAll(x, (f) => { f.ospf6Auth = null; })),
+    c('ipv6 ospf authentication <rest>', (x) => ifAll(x, (f) => { f.ospf6Auth = x.a[0]; })),
+    c('no ipv6 ospf authentication', (x) => ifAll(x, (f) => { f.ospf6Auth = null; })),
     c('no ip ospf authentication', (x) => ifAll(x, (f) => { f.ospfAuth = null; })),
     c('ip ospf authentication-key <word>', (x) => ifAll(x, (f) => { f.ospfKey = x.a[0]; })),
     c('ip ospf message-digest-key <num> md5 <word>', (x) => ifAll(x, (f) => { f.ospfMd5 = { id: x.a[0], key: x.a[1] }; })),
@@ -545,6 +697,8 @@ export function makeNp({ c, net, IFS, toPriv, doExec, ifAll, ctxOf, showIpRoute,
     c('ip ospf network point-to-multipoint', (x) => ifAll(x, (f) => { f.ospfNet = 'p2mp'; })),
     c('ip ospf network non-broadcast', (x) => ifAll(x, (f) => { f.ospfNet = 'nbma'; })),
     c('ip ospf bfd', () => R([])),
+    c('ipv6 eigrp <num>', (x) => { const e = e6Open(x, x.a[0]); if (e) return e; return ifAll(x, (f) => { f.eigrp6 = x.a[0]; }); }),
+    c('no ipv6 eigrp <num>', (x) => ifAll(x, (f) => { f.eigrp6 = null; })),
     c('ip authentication mode eigrp <num> md5', (x) => ifAll(x, (f) => { Object.assign((f.eigrpAuth ||= {}), { mode: 'md5', as: x.a[0] }); })),
     c('no ip authentication mode eigrp <num> md5', (x) => ifAll(x, (f) => { if (f.eigrpAuth) f.eigrpAuth.mode = null; })),
     c('ip authentication key-chain eigrp <num> <word>', (x) => ifAll(x, (f) => { (f.eigrpAuth ||= {}).chain = x.a[1]; })),
@@ -590,7 +744,8 @@ export function makeNp({ c, net, IFS, toPriv, doExec, ifAll, ctxOf, showIpRoute,
     c('ip nhrp authentication <word>', (x) => ifAll(x, (f) => { nhrp(f).auth = x.a[0]; })),
     c('ip nhrp holdtime <num>', () => R([])),
     c('ip nhrp registration <rest>', () => R([])),
-    c('ip mtu <num>', () => R([])),
+    c('ip mtu <num>', (x) => ifAll(x, (f) => { f.ipMtu = x.a[0]; })),
+    c('no ip mtu', (x) => ifAll(x, (f) => { f.ipMtu = null; })),
     c('ip tcp adjust-mss <num>', () => R([])),
   ];
   const LINE_X = [
@@ -610,12 +765,13 @@ export function makeNp({ c, net, IFS, toPriv, doExec, ifAll, ctxOf, showIpRoute,
   function showPl(d, only) {
     return Object.entries(d.prefixLists || {}).filter(([n]) => !only || n === only).flatMap(([n, l]) => [`ip prefix-list ${n}: ${l.length} entries`, ...l.map((e) => `   seq ${e.seq} ${e.action} ${e.net}/${e.prefix}${e.ge != null ? ` ge ${e.ge}` : ''}${e.le != null ? ` le ${e.le}` : ''}`)]);
   }
+  const commSet = (v) => `${v.vals.join(' ') || 'none'}${v.additive ? ' additive' : ''}`;
   function showRm(d, only) {
     const L = [];
     for (const [n, list] of Object.entries(d.routeMaps || {})) {
       if (only && n !== only) continue;
       for (const e of list) {
-        L.push(`route-map ${n}, ${e.action}, sequence ${e.seq}`, '  Match clauses:', ...e.matches.map((m) => `    ${{ pl: 'ip address prefix-lists:', acl: 'ip address (access-lists):', tag: 'tag', metric: 'metric', aspath: 'as-path (as-path filter):' }[m.k]} ${m.vals.join(' ')}`), '  Set clauses:', ...Object.entries(e.sets).map(([k, v]) => `    ${{ metric: 'metric', tag: 'tag', localPref: 'local-preference', weight: 'weight', prepend: 'as-path prepend', metricType: 'metric-type', nextHop: 'ip next-hop' }[k]} ${Array.isArray(v) ? v.join(' ') : v}`), `  Policy routing matches: ${e.pkts || 0} packets, ${(e.pkts || 0) * 100} bytes`);
+        L.push(`route-map ${n}, ${e.action}, sequence ${e.seq}`, '  Match clauses:', ...e.matches.map((m) => `    ${{ pl: 'ip address prefix-lists:', acl: 'ip address (access-lists):', tag: 'tag', metric: 'metric', aspath: 'as-path (as-path filter):', comm: 'community (community-list filter):' }[m.k]} ${m.vals.join(' ')}`), '  Set clauses:', ...Object.entries(e.sets).map(([k, v]) => `    ${{ metric: 'metric', tag: 'tag', localPref: 'local-preference', weight: 'weight', prepend: 'as-path prepend', metricType: 'metric-type', nextHop: 'ip next-hop', community: 'community' }[k]} ${k === 'community' ? commSet(v) : Array.isArray(v) ? v.join(' ') : v}`),`  Policy routing matches: ${e.pkts || 0} packets, ${(e.pkts || 0) * 100} bytes`);
       }
     }
     return L;
@@ -654,6 +810,114 @@ export function makeNp({ c, net, IFS, toPriv, doExec, ifAll, ctxOf, showIpRoute,
   }
   const bgpLine = (p, k, best) => `${best ? '*>' : '* '}${p.ibgp ? 'i' : ' '}${pad(k, 17)}${pad(p.nh, 20)}${String(p.med || 0).padStart(6)} ${String(p.ibgp ? p.lp ?? 100 : p.lp != null && p.lp !== 100 ? p.lp : '').padStart(6)} ${String(p.weight ?? (p.local ? 32768 : 0)).padStart(6)} ${[...p.asPath, p.origin || 'i'].join(' ')}`;
   const BGP_HEAD = '   Network          Next Hop            Metric LocPrf Weight Path';
+  /** Bảng BGP chỉ giữ các đường thoả `keep` (regexp, filter-list, prefix-list, route-map, community). */
+  function bgpFiltered(d, keep) {
+    if (!d.bgp) return ['% BGP not active'];
+    const b = N.bgpAll(ctxOf()), L = [BGP_HEAD];
+    for (const [k, l] of Object.entries(b.tables[d.id] || {})) for (const p of l) if (keep(p)) L.push(bgpLine(p, k, b.best[d.id][k] === p));
+    return L;
+  }
+  const commText = (d, c0) => c0.map((v) => (d.commNew || !/^\d+:\d+$/.test(v) ? v : String(+v.split(':')[0] * 65536 + +v.split(':')[1]))).join(' ');
+  /** "show ip bgp <prefix>": mọi đường của prefix, đường nào best, next-hop có tới được không. */
+  function showBgpEntry(d, ip, prefix) {
+    if (!d.bgp) return ['% BGP not active'];
+    const b = N.bgpAll(ctxOf()), tbl = b.tables[d.id] || {};
+    const k = prefix != null ? `${netOf(ip, prefix)}/${prefix}` : Object.keys(tbl).filter((o) => { const [n, p] = o.split('/'); return netOf(ip, +p) === n; }).sort((x, y) => +y.split('/')[1] - +x.split('/')[1])[0];
+    const list = tbl[k];
+    if (!list?.length) return ['% Network not in table'];
+    const best = b.best[d.id][k], ix = list.indexOf(best);
+    const L = [`BGP routing table entry for ${k}, version 7`, `Paths: (${list.length} available, ${ix >= 0 ? `best #${ix + 1}` : 'no best path'}, table ${d.bgp.vrf || 'default'})`];
+    for (const p of list) {
+      const ok = b.nhOk(d.id, p);
+      L.push(`  ${p.asPath.length ? p.asPath.join(' ') : 'Local'}`);
+      L.push(`    ${p.nh}${ok ? '' : ' (inaccessible)'} from ${p.fromIp || '0.0.0.0'} (${p.fromRid || b.rid[d.id]})`);
+      L.push(`      Origin ${{ i: 'IGP', e: 'EGP', '?': 'incomplete' }[p.origin || 'i']}, metric ${p.med || 0}, localpref ${p.lp ?? 100}, weight ${p.weight ?? (p.local ? 32768 : 0)}${ok ? ', valid' : ''}, ${p.local ? 'sourced, local' : p.ebgp ? 'external' : 'internal'}${p === best ? ', best' : ''}`);
+      if (p.comm?.length) L.push(`      Community: ${commText(d, p.comm)}`);
+      if (p.cluster) L.push(`      Originator: ${p.originator}, Cluster list: ${p.cluster.join(' ')}`);
+    }
+    return L;
+  }
+  /** RIB-failure: route BGP best nhưng RIB đã dùng nguồn khác có AD thấp hơn. */
+  function showRibFail(d) {
+    if (!d.bgp) return ['% BGP not active'];
+    const ctx = ctxOf(), b = N.bgpAll(ctx), rib = N.routeTable(ctx, d.id, d.bgp.vrf || null);
+    const L = ['Network            Next Hop                      RIB-failure   RIB-NH Matches'];
+    for (const [k, p] of Object.entries(b.best[d.id] || {})) {
+      if (p.local) continue;
+      const r = rib.find((o) => `${o.net}/${o.prefix}` === k);
+      if (r && r.code !== 'B') L.push(`${pad(k, 19)}${pad(p.nh, 30)}Higher admin distance  n/a`);
+    }
+    return L;
+  }
+  const lsaAge = 300, lsaSeq = '0x80000002';
+  const lsaCk = (s) => `0x${[...s].reduce((a, ch) => (a * 31 + ch.charCodeAt(0)) % 0xffffff, 7).toString(16).toUpperCase().padStart(6, '0')}`;
+  const lsaRow = (l, extra = '') => `${pad(l.id, 16)}${pad(l.adv, 16)}${pad(lsaAge, 12)}${pad(lsaSeq, 11)}${pad(lsaCk(l.id + l.adv), 9)}${extra}`;
+  const LSA_KIND = { router: 'Router Links', network: 'Network Links', summary: 'Summary Links(Network)', asbr: 'Summary Links(AS Boundary Router)', nssa: 'AS External Link', external: 'AS External Link' };
+  function lsaDetail(l, kind) {
+    const L = [`  LS age: ${lsaAge}`, '  Options: (No TOS-capability, DC)', `  LS Type: ${LSA_KIND[kind]}`, `  Link State ID: ${l.id}`, `  Advertising Router: ${l.adv}`, `  LS Seq Number: ${lsaSeq.slice(2)}`, `  Checksum: ${lsaCk(l.id + l.adv)}`];
+    if (kind === 'router') {
+      L.push(`  Number of Links: ${l.links.length}`, '');
+      for (const k of l.links) L.push(`    Link connected to: ${{ stub: 'a Stub Network', transit: 'a Transit Network', p2p: 'another Router (point-to-point)' }[k.kind]}`, `     (Link ID) ${{ stub: 'Network/subnet number', transit: 'Designated Router address', p2p: 'Neighboring Router ID' }[k.kind]}: ${k.id}`, `     (Link Data) ${k.kind === 'stub' ? 'Network Mask' : 'Router Interface address'}: ${k.data}`, `      TOS 0 Metrics: ${k.metric}`, '');
+    } else if (kind === 'network') {
+      L.push(`  Network Mask: /${l.prefix}`, ...l.attached.map((a) => `        Attached Router: ${a}`), '');
+    } else {
+      if (l.prefix != null) L.push(`  Network Mask: /${l.prefix}`);
+      if (l.etype) L.push(`        Metric Type: ${l.etype} (${l.etype === 1 ? 'Comparable directly to link state metric' : 'Larger than any link state path'})`);
+      L.push(`        TOS: 0  Metric: ${l.metric}`, ...(l.etype ? [`        External Route Tag: ${l.tag}`] : []), '');
+    }
+    return L;
+  }
+  function showLsdb(d, only) {
+    if (!d.ospf) return ['% OSPF not active'];
+    const db = N.ospfLsdb(ctxOf(), d.id), L = ['', `            OSPF Router with ID (${db.rid}) (Process ID ${d.ospf.pid})`];
+    const part = (kind, title, list, rowHead, row) => {
+      if (only && only !== kind) return;
+      if (!list.length) return;
+      L.push('', `                ${title}`, '');
+      if (only) { for (const l of list) L.push(...lsaDetail(l, kind)); return; }
+      L.push(rowHead);
+      for (const l of list) L.push(row(l));
+    };
+    const HEAD = 'Link ID         ADV Router      Age         Seq#       Checksum';
+    for (const a of db.areas) {
+      const nm = a.area;
+      part('router', `Router Link States (Area ${nm})`, a.router, `${HEAD} Link count`, (l) => lsaRow(l, l.links.length));
+      part('network', `Net Link States (Area ${nm})`, a.network, HEAD, (l) => lsaRow(l));
+      part('summary', `Summary Net Link States (Area ${nm})`, a.summary, HEAD, (l) => lsaRow(l));
+      part('asbr', `Summary ASB Link States (Area ${nm})`, a.asbr, HEAD, (l) => lsaRow(l));
+      part('nssa', `Type-7 AS External Link States (Area ${nm})`, a.nssa, `${HEAD} Tag`, (l) => lsaRow(l, l.tag));
+    }
+    part('external', 'Type-5 AS External Link States', db.external, `${HEAD} Tag`, (l) => lsaRow(l, l.tag));
+    return L;
+  }
+  /** shortcut: LSDB OSPFv3 suy từ láng giềng và prefix hiện có, không có tuổi, số thứ tự thật; cột Prefix của LSA 9 thêm cho dễ đọc. */
+  function showLsdb6(d) {
+    if (!d.ospf6) return ['% OSPFv3 not active'];
+    const o = V6.ospf6All(net), rid = o.rid;
+    if (!o.en[d.id]) return ['% OSPFv3 not active'];
+    const seen = new Set([d.id]), q = [d.id];
+    while (q.length) for (const a of o.adj[q.shift()] || []) if (!seen.has(a.to)) { seen.add(a.to); q.push(a.to); }
+    const rs = [...seen], L = ['', `            OSPFv3 Router with ID (${rid[d.id]}) (Process ID ${d.ospf6.pid})`];
+    for (const a of [...new Set(o.en[d.id].map((e) => e.area))]) {
+      const inA = rs.filter((x) => o.en[x].some((e) => e.area === a));
+      L.push('', `                Router Link States (Area ${a})`, '', 'ADV Router      Age         Seq#        Fragment ID  Link count');
+      for (const x of inA) L.push(`${pad(rid[x], 16)}${pad(lsaAge, 12)}${pad(lsaSeq, 12)}${pad(0, 13)}${(o.adj[x] || []).filter((n) => n.area === a).length}`);
+      const inter = rs.filter((x) => o.en[x].some((e) => e.area === a) && new Set(o.en[x].map((e) => e.area)).size > 1).flatMap((abr) => rs.flatMap((x) => o.en[x].filter((e) => e.area !== a).flatMap((e) => e.prefixes.map((p) => `${pad(rid[abr], 16)}${pad(lsaAge, 12)}${pad(lsaSeq, 12)}${p.net}/${p.prefix}`))));
+      if (inter.length) L.push('', `                Inter Area Prefix Link States (Area ${a})`, '', 'ADV Router      Age         Seq#        Prefix', ...new Set(inter));
+      L.push('', `                Link (Type-8) Link States (Area ${a})`, '', 'ADV Router      Age         Seq#        Interface');
+      for (const e of o.en[d.id].filter((f) => f.area === a)) for (const x of [d.id, ...(o.adj[d.id] || []).filter((n) => n.outIf === e.ifn).map((n) => n.to)]) L.push(`${pad(rid[x], 16)}${pad(lsaAge, 12)}${pad(lsaSeq, 12)}${shortIf(e.ifn)}`);
+      L.push('', `                Intra Area Prefix Link States (Area ${a})`, '', 'ADV Router      Age         Seq#        Prefix');
+      for (const x of inA) for (const e of o.en[x].filter((f) => f.area === a)) for (const p of e.prefixes) L.push(`${pad(rid[x], 16)}${pad(lsaAge, 12)}${pad(lsaSeq, 12)}${p.net}/${p.prefix}`);
+    }
+    return L;
+  }
+  const inVrf = (x, fn) => { if (!x.d.bgp) return R(['% BGP not active']); if (x.d.bgp.vrf !== x.a[0]) return R([`% VRF ${x.a[0]} chưa chạy BGP`]); return R(fn()); };
+  /** shortcut: chỉ liệt kê phiên BGP vì Lab không có bảng TCP riêng; cần thêm SSH, HTTP thì đưa phiên quản trị vào đây. */
+  function showTcpBrief(d) {
+    const L = ['TCB       Local Address               Foreign Address             (state)'];
+    if (d.bgp) (N.bgpAll(ctxOf()).sessions[d.id] || []).forEach((s, i) => { if (s.state === 'Established') L.push(`${(0x6f000 + i).toString(16).toUpperCase().padStart(8, '0')}  ${pad(`${s.myIp}.179`, 28)}${pad(`${s.ip}.${49152 + i}`, 28)}ESTAB`); });
+    return L;
+  }
   function showAdv(d, ip, recv) {
     if (!d.bgp) return ['% BGP not active'];
     const b = N.bgpAll(ctxOf()), s = (b.sessions[d.id] || []).find((o) => o.ip === ip);
@@ -711,9 +975,11 @@ export function makeNp({ c, net, IFS, toPriv, doExec, ifAll, ctxOf, showIpRoute,
   }
   function showSla(d, cfgOnly) {
     return Object.entries(d.slas || {}).flatMap(([id, s]) => {
-      if (cfgOnly) return [`IP SLAs Infrastructure Engine-III`, `Entry number: ${id}`, 'Type of operation to perform: icmp-echo', `Target address/Source address: ${s.target || '0.0.0.0'}/${s.srcIf ? IFS(d)[s.srcIf]?.ip : '0.0.0.0'}`, `Frequency (seconds): ${s.freq}`, `Schedule:`, `   Operation frequency (seconds): ${s.freq}`, `   Life (seconds): ${s.scheduled ? 'Forever' : 'not scheduled'}`];
-      const ok = s.scheduled && s.target && N.sendPacket(net, { src: d.id, dst: s.target }).ok;
-      return [`IPSLAs Latest Operation Statistics`, '', `IPSLA operation id: ${id}`, `\tLatest RTT: ${ok ? '1 milliseconds' : 'NoConnection/Busy/Timeout'}`, `Latest operation return code: ${!s.scheduled ? 'Unknown (chưa schedule)' : ok ? 'OK' : 'Timeout'}`, `Number of successes: ${ok ? 5 : 0}`, `Number of failures: ${ok ? 0 : 5}`, ''];
+      if (cfgOnly) return [`IP SLAs Infrastructure Engine-III`, `Entry number: ${id}`, `Type of operation to perform: ${s.type || 'icmp-echo'}`, `Target address/Source address: ${s.target || '0.0.0.0'}/${s.srcIf ? IFS(d)[s.srcIf]?.ip : '0.0.0.0'}`, ...(s.port ? [`Target port: ${s.port}`] : []), ...(s.codec ? [`Codec Type: ${s.codec}`] : []), `Frequency (seconds): ${s.freq}`, `Schedule:`, `   Operation frequency (seconds): ${s.freq}`, `   Life (seconds): ${s.scheduled ? 'Forever' : 'not scheduled'}`];
+      const ok = N.slaUp(net, d, s);
+      // shortcut: mạng Lab không có trễ thật nên RTT, jitter, MOS là số minh hoạ khi đo thành công
+      const jitter = s.type && ok ? ['Latest RTT detail:', '\tRTT Values: Min 1 ms, Avg 1 ms, Max 2 ms', '\tJitter Time: Source to Destination 0 ms, Destination to Source 0 ms', '\tPacket Loss: Source to Destination 0, Destination to Source 0, Out of sequence 0', ...(s.codec ? ['\tVoice Scores: MOS 4.34, ICPIF 1'] : []), '(Lab: số đo chỉ minh hoạ)'] : [];
+      return [`IPSLAs Latest Operation Statistics`, '', `IPSLA operation id: ${id}`, `Type of operation: ${s.type || 'icmp-echo'}`, `\tLatest RTT: ${ok ? '1 milliseconds' : 'NoConnection/Busy/Timeout'}`, `Latest operation return code: ${!s.scheduled ? 'Unknown (chưa schedule)' : ok ? 'OK' : s.type === 'udp-jitter' ? 'Timeout (đầu kia có "ip sla responder" chưa?)' : 'Timeout'}`, ...jitter, `Number of successes: ${ok ? 5 : 0}`, `Number of failures: ${ok ? 0 : 5}`, ''];
     });
   }
   function showTrack(d, only) {
@@ -763,7 +1029,29 @@ export function makeNp({ c, net, IFS, toPriv, doExec, ifAll, ctxOf, showIpRoute,
     c('show ip bgp neighbors <ip>', (x) => R(showBgpNbr(x.d, x.a[0]))),
     c('show ip bgp neighbors <ip> advertised-routes', (x) => R(showAdv(x.d, x.a[0], false))),
     c('show ip bgp neighbors <ip> routes', (x) => R(showAdv(x.d, x.a[0], true))),
-    c('show ip bgp neighbors <ip> received-routes', (x) => R(showAdv(x.d, x.a[0], true))),
+    c('show ip bgp neighbors <ip> received-routes', (x) => { const n = N.bgpCfg(x.d, x.a[0]); return R(n && !n.softIn ? [`% Inbound soft reconfiguration not enabled on ${x.a[0]}`] : showAdv(x.d, x.a[0], true)); }),
+    c('show ip ospf database', (x) => R(showLsdb(x.d))),
+    c('show ip ospf database {router|network|summary|asbr-summary|external|nssa-external}', (x) => R(showLsdb(x.d, { 'asbr-summary': 'asbr', 'nssa-external': 'nssa' }[x.a[0]] || x.a[0]))),
+    c('show ip ospf rib', (x) => { if (!x.d.ospf) return R(['% OSPF not active']); const o = N.ospfAll(ctxOf()); return R([`OSPF Router with ID (${o.rid[x.d.id]}) (Process ID ${x.d.ospf.pid})`, '', ...(o.routes[x.d.id] || []).flatMap((r) => [`*>  ${r.net}/${r.prefix}, ${r.code}, cost ${r.metric}`, `      via ${r.nextHop || 'Null0'}${r.iface ? `, ${longIf(r.iface)}` : ''}`])]); }),
+    // shortcut: Lab không làm hỏng LSA nên bảng này luôn trống; cần tập lỗi LOADING thì thêm trạng thái LSA lỗi
+    c('show ip ospf bad-checksum', (x) => R(x.d.ospf ? [`OSPF Router with ID (${N.ospfAll(ctxOf()).rid[x.d.id]}) (Process ID ${x.d.ospf.pid})`, '', 'Bad checksum LSAs: 0'] : ['% OSPF not active'])),
+    c('show ospfv3 database', (x) => R(showLsdb6(x.d))),
+    c('show ipv6 ospf database', (x) => R(showLsdb6(x.d))),
+    c('show ip bgp <ip>', (x) => R(showBgpEntry(x.d, x.a[0]))),
+    c('show ip bgp <ip> <mask>', (x) => R(showBgpEntry(x.d, x.a[0], maskToPrefix(x.a[1])))),
+    c('show ip bgp regexp <rest>', (x) => { const re = iosRegex(x.a[0]); return R(re ? bgpFiltered(x.d, (p) => re.test(p.asPath.join(' '))) : ["% Invalid input detected at '^' marker."]); }),
+    c('show ip bgp filter-list <word>', (x) => R(bgpFiltered(x.d, (p) => asPathOk(x.d, x.a[0], p.asPath)))),
+    c('show ip bgp prefix-list <word>', (x) => R(bgpFiltered(x.d, (p) => plEval(x.d, x.a[0], p.net, p.prefix)))),
+    c('show ip bgp route-map <word>', (x) => R(bgpFiltered(x.d, (p) => !!rmEval(x.d, x.a[0], { ...p, metric: p.med })))),
+    c('show ip bgp community <rest>', (x) => R(bgpFiltered(x.d, (p) => x.a[0].trim().split(/\s+/).every((v) => p.comm?.includes(v))))),
+    c('show ip bgp community-list <word>', (x) => R(bgpFiltered(x.d, (p) => commOk(x.d, x.a[0], p.comm)))),
+    c('show ip bgp rib-failure', (x) => R(showRibFail(x.d))),
+    c('show ip bgp vpnv4 vrf <word>', (x) => inVrf(x, () => T.showBgp(x.d, true))),
+    c('show ip bgp vpnv4 vrf <word> summary', (x) => inVrf(x, () => T.showBgpSum(x.d, true))),
+    c('show bgp vpnv4 unicast vrf <word>', (x) => inVrf(x, () => T.showBgp(x.d, true))),
+    c('show bgp vpnv4 unicast vrf <word> summary', (x) => inVrf(x, () => T.showBgpSum(x.d, true))),
+    c('show ip community-list', (x) => R(Object.entries(x.d.commLists || {}).flatMap(([n, l]) => [`Community ${l[0]?.expanded ? 'expanded' : 'standard'} list ${n}`, ...l.map((e) => `    ${e.action} ${e.vals.join(' ')}`)]))),
+    c('show tcp brief', (x) => R(showTcpBrief(x.d))),
     c('show ip bgp peer-group', (x) => R(Object.entries(x.d.bgp?.groups || {}).flatMap(([n, g]) => [`BGP peer-group is ${n}, remote AS ${g.remoteAs ?? 'not set'}`, ...Object.entries(x.d.bgp.neighbors).filter(([, o]) => o.group === n).map(([ip]) => `  Peer-group member: ${ip}`)]))),
     c('show dmvpn', (x) => R(showDmvpn(x.d))),
     c('show ip nhrp', (x) => R(showNhrp(x.d))),
@@ -788,6 +1076,13 @@ export function makeNp({ c, net, IFS, toPriv, doExec, ifAll, ctxOf, showIpRoute,
     c('show monitor session <num>', (x) => R(showMon(x.d, x.a[0]))),
     c('show ip sla configuration', (x) => R(showSla(x.d, true))),
     c('show ip sla statistics', (x) => R(showSla(x.d, false))),
+    c('show ip sla responder', (x) => R([`IP SLAs Responder is: ${x.d.slaResponder ? 'Enabled' : 'Disabled'}`])),
+    c('show telemetry ietf subscription all', (x) => R(showMdt(x.d))),
+    c('show telemetry ietf subscription <num> detail', (x) => R(showMdt(x.d, x.a[0]))),
+    c('show ipv6 eigrp neighbors', (x) => { const o = V6.eigrp6All(net); return R(x.d.eigrp6 ? [`EIGRP-IPv6 Neighbors for AS(${x.d.eigrp6.as})`, 'H   Address                 Interface', ...(o.adj[x.d.id] || []).flatMap((a, i) => [`${pad(i, 4)}Link-local address:     ${shortIf(a.outIf)}`, `    ${a.nh}`])] : ['% EIGRP IPv6 not active']); }),
+    c('show ipv6 protocols', (x) => { const e = x.d.eigrp6, o = x.d.ospf6, b = x.d.bgp?.v6; return R([...(e ? [`IPv6 Routing Protocol is "eigrp ${e.as}"`, `  Router-ID: ${V6.eigrp6Rid(net, x.d) || 'chưa có (cần eigrp router-id)'}`, ...(e.shutdown ? ['  Process is shutdown'] : []), ...(e.passive.length ? [`  Passive interfaces: ${e.passive.map(shortIf).join(', ')}`] : [])] : []), ...(o ? [`IPv6 Routing Protocol is "ospf ${o.pid}"`] : []), ...(b ? [`IPv6 Routing Protocol is "bgp ${x.d.bgp.as}"`] : [])]); }),
+    c('show bgp ipv6 unicast', (x) => { if (!x.d.bgp?.v6) return R(['% BGP IPv6 not active']); const t = V6.bgp6All(net).best[x.d.id]; return R([BGP_HEAD, ...[...(t?.values() || [])].flatMap((b) => [`*>${b.ibgp ? 'i' : ' '}${b.net}/${b.prefix}`, `                    ${pad(b.nh || '::', 28)}${[...b.asPath, 'i'].join(' ')}`])]); }),
+    c('show bgp ipv6 unicast summary', (x) => { if (!x.d.bgp?.v6) return R(['% BGP IPv6 not active']); const b = V6.bgp6All(net); return R([`BGP router identifier ${x.d.bgp.rid || 'tự chọn'}, local AS number ${x.d.bgp.as}`, '', `${pad('Neighbor', 42)}${pad('AS', 12)}State/PfxRcd`, ...(b.sessions[x.d.id] || []).map((s) => `${pad(s.ip, 42)}${pad(s.remoteAs, 12)}${s.state === 'Established' ? [...b.best[x.d.id].values()].filter((p) => p.nh === s.ip).length : s.cfg.active ? 'Idle' : 'Idle (chưa activate)'}`)]); }),
     c('show track', (x) => R(showTrack(x.d))),
     c('show track <num>', (x) => R(showTrack(x.d, x.a[0]))),
     c('show event manager policy registered', (x) => R(['No.  Class     Type    Event Type          Trap  Time Registered           Name', ...Object.entries(x.d.eem || {}).map(([n, a], i) => `${pad(i + 1, 5)}applet    user    ${pad(a.event?.k || 'none', 20)}Off   Mon Mar 2 12:00:00 2026   ${n}`)])),
@@ -831,6 +1126,8 @@ export function makeNp({ c, net, IFS, toPriv, doExec, ifAll, ctxOf, showIpRoute,
   function running(d) {
     const L = [];
     for (const [n, v] of Object.entries(d.vrfs || {})) L.push(`ip vrf ${n}`, ...(v.rd ? [` rd ${v.rd}`] : []), '!');
+    if (d.commNew) L.push('ip bgp-community new-format');
+    for (const [n, l] of Object.entries(d.commLists || {})) for (const e of l) L.push(`ip community-list ${/^\d+$/.test(n) ? n : `${e.expanded ? 'expanded' : 'standard'} ${n}`} ${e.action} ${e.vals.join(' ')}`);
     for (const [n, ks] of Object.entries(d.keyChains || {})) L.push(`key chain ${n}`, ...Object.entries(ks).flatMap(([id, k]) => [` key ${id}`, ...(k.str ? [`  key-string ${k.str}`] : [])]), '!');
     for (const [n, l] of Object.entries(d.timeRanges || {})) L.push(`time-range ${n}`, ...l.map((p) => ` ${p.text}`), '!');
     for (const [n, q] of Object.entries(d.qos?.classes || {})) L.push(`class-map ${q.all ? 'match-all' : 'match-any'} ${n}`, ...q.matches.map((m) => ` match ${m.k === 'acl' ? `access-group name ${m.v}` : m.k === 'dscp' ? `ip dscp ${m.v}` : 'any'}`), '!');
@@ -852,11 +1149,16 @@ export function makeNp({ c, net, IFS, toPriv, doExec, ifAll, ctxOf, showIpRoute,
       for (const e of list) {
         L.push(`route-map ${n} ${e.action} ${e.seq}`);
         for (const m of e.matches) L.push(` match ${{ pl: 'ip address prefix-list', acl: 'ip address', tag: 'tag', metric: 'metric', aspath: 'as-path' }[m.k]} ${m.vals.join(' ')}`);
-        for (const [k, v] of Object.entries(e.sets)) L.push(` set ${{ metric: 'metric', tag: 'tag', localPref: 'local-preference', weight: 'weight', prepend: 'as-path prepend', metricType: 'metric-type', nextHop: 'ip next-hop' }[k]} ${k === 'metricType' ? `type-${v}` : Array.isArray(v) ? v.join(' ') : v}`);
+        for (const [k, v] of Object.entries(e.sets)) L.push(` set ${{ metric: 'metric', tag: 'tag', localPref: 'local-preference', weight: 'weight', prepend: 'as-path prepend', metricType: 'metric-type', nextHop: 'ip next-hop', community: 'community' }[k]} ${k === 'community' ? commSet(v) : k === 'metricType' ? `type-${v}` : Array.isArray(v) ? v.join(' ') : v}`);
         L.push('!');
       }
     }
-    for (const [id, s] of Object.entries(d.slas || {})) L.push(`ip sla ${id}`, ...(s.target ? [` icmp-echo ${s.target}${s.srcIf ? ` source-interface ${longIf(s.srcIf)}` : ''}`] : []), ` frequency ${s.freq}`, ...(s.scheduled ? [`ip sla schedule ${id} life forever start-time now`] : []), '!');
+    for (const [id, s] of Object.entries(d.slas || {})) L.push(`ip sla ${id}`, ...(s.target ? [s.type === 'udp-jitter' ? ` udp-jitter ${s.target} ${s.port}${s.codec ? ` codec ${s.codec}` : ''}` : s.type ? ` icmp-jitter ${s.target}` : ` icmp-echo ${s.target}${s.srcIf ? ` source-interface ${longIf(s.srcIf)}` : ''}`] : []), ` frequency ${s.freq}`, ...(s.scheduled ? [`ip sla schedule ${id} life forever start-time now`] : []), '!');
+    if (d.slaResponder) L.push('ip sla responder');
+    for (const [id, s] of Object.entries(d.mdt || {})) L.push(`telemetry ietf subscription ${id}`, ...(s.encoding ? [` encoding ${s.encoding}`] : []), ...(s.xpath ? [` filter xpath ${s.xpath}`] : []), ...(s.source ? [` source-address ${s.source}`] : []), ...(s.stream ? [` stream ${s.stream}`] : []), ...(s.policy ? [` update-policy ${s.policy}`] : []), ...(s.receiver ? [` receiver ip address ${s.receiver.ip} ${s.receiver.port} protocol grpc-tcp`] : []), '!');
+    const e6 = d.eigrp6;
+    if (e6?.named) L.push(`router eigrp ${e6.named}`, ` address-family ipv6 unicast autonomous-system ${e6.as}`, ...(e6.rid ? [`  eigrp router-id ${e6.rid}`] : []), ...e6.passive.flatMap((n) => [`  af-interface ${longIf(n)}`, '   passive-interface', '  exit-af-interface']), ' exit-address-family', '!');
+    else if (e6) L.push(`ipv6 router eigrp ${e6.as}`, ...(e6.rid ? [` eigrp router-id ${e6.rid}`] : []), ...e6.passive.map((n) => ` passive-interface ${longIf(n)}`), ...(e6.shutdown ? [' shutdown'] : []), '!');
     for (const [id, t] of Object.entries(d.tracks || {})) L.push(t.ifn ? `track ${id} interface ${longIf(t.ifn)} line-protocol` : `track ${id} ip sla ${t.sla}${t.kind ? ` ${t.kind}` : ''}`);
     for (const [n, s] of Object.entries(d.monitor || {})) {
       if (s.kind) { L.push(`monitor session ${n} type ${s.kind}`, ...(s.srcPorts || []).map((p) => ` source interface ${longIf(p)}`), ...(s.dst ? [` destination interface ${longIf(s.dst)}`] : []), s.kind === 'erspan-source' ? ' destination' : ' source', ...(s.erspanId != null ? [`  erspan-id ${s.erspanId}`] : []), ...(s.erspanDst || s.erspanIp ? [`  ip address ${s.erspanDst || s.erspanIp}`] : []), ...(s.origin ? [`  origin ip address ${s.origin}`] : []), '!'); continue; }
@@ -882,7 +1184,11 @@ export function makeNp({ c, net, IFS, toPriv, doExec, ifAll, ctxOf, showIpRoute,
   function ifLines(f) {
     const L = [];
     if (f.policy) L.push(` ip policy route-map ${f.policy}`);
-    if (f.ospfAuth) L.push(` ip ospf authentication${f.ospfAuth === 'md5' ? ' message-digest' : f.ospfAuth === 'null' ? ' null' : ''}`);
+    if (f.eigrp6) L.push(` ipv6 eigrp ${f.eigrp6}`);
+    if (f.ospfAuth) L.push(` ip ospf authentication${f.ospfAuth === 'md5' ? ' message-digest' : f.ospfAuth === 'null' ? ' null' : f.ospfAuth === 'chain' ? ` key-chain ${f.ospfChain}` : ''}`);
+    if (f.ospfMtuIgnore) L.push(' ip ospf mtu-ignore');
+    if (f.ipMtu != null) L.push(` ip mtu ${f.ipMtu}`);
+    if (f.ospf6Auth) L.push(` ospfv3 authentication ${f.ospf6Auth}`);
     if (f.ospfKey) L.push(` ip ospf authentication-key ${f.ospfKey}`);
     if (f.ospfMd5) L.push(` ip ospf message-digest-key ${f.ospfMd5.id} md5 ${f.ospfMd5.key}`);
     if (f.dly != null) L.push(` delay ${f.dly}`);
@@ -924,10 +1230,17 @@ export function makeNp({ c, net, IFS, toPriv, doExec, ifAll, ctxOf, showIpRoute,
       if (c0.flIn) L.push(` area ${a} filter-list prefix ${c0.flIn} in`);
       if (c0.flOut) L.push(` area ${a} filter-list prefix ${c0.flOut} out`);
     }
-    for (const v of o.vlinks || []) L.push(` area ${v.area} virtual-link ${v.rid}`);
+    for (const v of o.vlinks || []) {
+      L.push(` area ${v.area} virtual-link ${v.rid}`);
+      if (v.auth) L.push(` area ${v.area} virtual-link ${v.rid} authentication${v.auth === 'md5' ? ' message-digest' : v.auth === 'null' ? ' null' : ''}`);
+      if (v.key) L.push(` area ${v.area} virtual-link ${v.rid} authentication-key ${v.key}`);
+      if (v.md5) L.push(` area ${v.area} virtual-link ${v.rid} message-digest-key ${v.md5.id} md5 ${v.md5.key}`);
+    }
     for (const g of o.summaries || []) L.push(` summary-address ${g.net} ${prefixToMask(g.prefix)}${g.hide ? ' not-advertise' : ''}`);
     for (const n of o.nbrs || []) L.push(` neighbor ${n}`);
+    if (o.refBw != null) L.push(` auto-cost reference-bandwidth ${o.refBw}`);
     if (o.distance != null) L.push(` distance ${o.distance}`);
+    if (o.distanceBy) L.push(` distance ospf ${Object.entries(o.distanceBy).map(([k, v]) => `${k} ${v}`).join(' ')}`);
     if (o.distList) L.push(distText(o.distList));
     if (o.bfd) L.push(' bfd all-interfaces');
     return L;
@@ -963,11 +1276,23 @@ export function makeNp({ c, net, IFS, toPriv, doExec, ifAll, ctxOf, showIpRoute,
   }
   function bgpLines(b) {
     const L = [];
+    for (const [k, t] of [['asDot', 'bgp asnotation dot'], ['alwaysMed', 'bgp always-compare-med'], ['asPathIgnore', 'bgp bestpath as-path ignore'], ['medWorst', 'bgp bestpath med missing-as-worst'], ['cmpRid', 'bgp bestpath compare-routerid']]) if (b[k]) L.push(` ${t}`);
     for (const [g, o] of Object.entries(b.groups || {})) { L.push(` neighbor ${g} peer-group`); L.push(...nbrAttrs(g, o)); }
     for (const [ip, n] of Object.entries(b.neighbors)) { if (n.group) L.push(` neighbor ${ip} peer-group ${n.group}`); L.push(...nbrAttrs(ip, n, true)); }
     for (const g of b.aggregates || []) L.push(` aggregate-address ${g.net} ${prefixToMask(g.prefix)}${g.summaryOnly ? ' summary-only' : ''}`);
     for (const [k, v] of Object.entries(b.redist || {})) L.push(` redistribute ${k}${v.id != null ? ` ${v.id}` : ''}${v.routeMap ? ` route-map ${v.routeMap}` : ''}`);
     if (b.distanceE != null) L.push(` distance bgp ${b.distanceE} ${b.distanceI} 200`);
+    if (b.v6) {
+      for (const [ip, n] of Object.entries(b.v6.neighbors)) L.push(` neighbor ${ip} remote-as ${n.remoteAs}`);
+      L.push(' address-family ipv6');
+      for (const p of b.v6.networks) L.push(`  network ${p.net}/${p.prefix}`);
+      for (const [ip, n] of Object.entries(b.v6.neighbors)) {
+        if (n.active) L.push(`  neighbor ${ip} activate`);
+        if (n.nextHopSelf) L.push(`  neighbor ${ip} next-hop-self`);
+        if (n.removePrivate) L.push(`  neighbor ${ip} remove-private-as`);
+      }
+      L.push(' exit-address-family');
+    }
     return L;
   }
   function nbrAttrs(k, n, memberOnly) {
@@ -979,7 +1304,13 @@ export function makeNp({ c, net, IFS, toPriv, doExec, ifAll, ctxOf, showIpRoute,
     if (n.multihop) L.push(` neighbor ${k} ebgp-multihop ${n.multihop}`);
     if (n.password) L.push(` neighbor ${k} password ${n.password}`);
     if (n.timers) L.push(` neighbor ${k} timers ${n.timers.join(' ')}`);
-    if (n.removePrivate) L.push(` neighbor ${k} remove-private-as`);
+    if (n.removePrivate) L.push(` neighbor ${k} remove-private-as${n.removePrivate === 'all' ? ' all' : ''}`);
+    if (n.noConnCheck) L.push(` neighbor ${k} disable-connected-check`);
+    if (n.ttlSec) L.push(` neighbor ${k} ttl-security hops ${n.ttlSec}`);
+    if (n.allowasIn) L.push(` neighbor ${k} allowas-in ${n.allowasIn}`);
+    if (n.asOverride) L.push(` neighbor ${k} as-override`);
+    if (n.maxPrefix) L.push(` neighbor ${k} maximum-prefix ${n.maxPrefix.max}${n.maxPrefix.thr ? ` ${n.maxPrefix.thr}` : ''}${n.maxPrefix.warnOnly ? ' warning-only' : ''}`);
+    if (n.sendCommunity) L.push(` neighbor ${k} send-community`);
     if (n.softIn) L.push(` neighbor ${k} soft-reconfiguration inbound`);
     if (n.shutdown) L.push(` neighbor ${k} shutdown`);
     if (n.weight != null) L.push(` neighbor ${k} weight ${n.weight}`);
@@ -994,7 +1325,7 @@ export function makeNp({ c, net, IFS, toPriv, doExec, ifAll, ctxOf, showIpRoute,
   T.IF_SVI.push(...IF_X.filter((e) => /^(no )?(ip (vrf|ospf|policy|verify|authentication|summary|split)|vrf|delay|standby|service-policy|bfd|ipv6 dhcp)/.test(e.spec)));
   T.OSPF_MODE.push(...OSPF_X);
   T.EIGRP_MODE.push(...EIGRP_X);
-  T.BGP_MODE.push(...BGP_X);
+  T.BGP_MODE.push(...BGP6_X, ...BGP_X); // BGP6_X trước vì <word> của BGP_X cũng khớp địa chỉ IPv6
   T.LINE_MODE.push(...LINE_X);
   T.VLAN_MODE.push(c('remote-span', (x) => { x.d.rspanVlans = [...new Set([...(x.d.rspanVlans || []), ...x.s.vlans])]; return R([]); }));
   T.SHOW_ROUTER.push(...SHOW_X);
@@ -1012,7 +1343,7 @@ export function makeNp({ c, net, IFS, toPriv, doExec, ifAll, ctxOf, showIpRoute,
     }),
     c('router eigrp <word>', (x) => { if (/^\d+$/.test(x.a[0])) return T.routerEigrp(x); x.s.eName = x.a[0]; x.s.mode = 'enamed'; return R([]); }),
   ];
-  T.CFG_ROUTER.push(...CFG_RP);
+  T.CFG_ROUTER.push(...CFG_RP, c('ipv6 router eigrp <num>', go('eigrp6', (x) => e6Open(x, x.a[0]))));
   T.CFG_SWITCH.push(...CFG_RP);
   let eaf = null;
   return {
@@ -1020,9 +1351,9 @@ export function makeNp({ c, net, IFS, toPriv, doExec, ifAll, ctxOf, showIpRoute,
     modes: {
       vrf: VRF_MODE, rmap: RMAP_MODE, keychain: KEYCHAIN_MODE, key: KEY_MODE, trange: TR_MODE, qcmap: QCMAP_MODE, qpmap: QPMAP_MODE, qpmapc: QPMAPC_MODE, cpp: CPP_MODE, dhcp6: DHCP6_MODE,
       frec: FREC_MODE, fexp: FEXP_MODE, fmon: FMON_MODE, erspan: ERSPAN_MODE, erspand: ERSPAND_MODE, sla: SLA_MODE, track: TRACK_MODE, eem: EEM_MODE, ipsecp: IPSECP_MODE,
-      enamed: ENAMED_MODE, eafif: EAFIF_MODE, etopo: ETOPO_MODE,
+      enamed: ENAMED_MODE, eafif: EAFIF_MODE, etopo: ETOPO_MODE, eigrp6: E6_MODE, eaf6: EAF6_MODE, eaf6if: EAF6IF_MODE, bgpaf6: BGPAF6_MODE, mdt: MDT_MODE,
       get eaf() { return (eaf ||= EAF_MODE()); },
     },
-    prompts: { vrf: 'config-vrf', rmap: 'config-route-map', keychain: 'config-keychain', key: 'config-keychain-key', trange: 'config-time-range', qcmap: 'config-cmap', qpmap: 'config-pmap', qpmapc: 'config-pmap-c', cpp: 'config-cp', dhcp6: 'config-dhcpv6', frec: 'config-flow-record', fexp: 'config-flow-exporter', fmon: 'config-flow-monitor', erspan: 'config-mon-erspan-src', erspand: 'config-mon-erspan-src-dst', sla: 'config-ip-sla-echo', track: 'config-track', eem: 'config-applet', ipsecp: 'ipsec-profile', enamed: 'config-router', eaf: 'config-router-af', eafif: 'config-router-af-interface', etopo: 'config-router-af-topology' },
+    prompts: { vrf: 'config-vrf', rmap: 'config-route-map', keychain: 'config-keychain', key: 'config-keychain-key', trange: 'config-time-range', qcmap: 'config-cmap', qpmap: 'config-pmap', qpmapc: 'config-pmap-c', cpp: 'config-cp', dhcp6: 'config-dhcpv6', frec: 'config-flow-record', fexp: 'config-flow-exporter', fmon: 'config-flow-monitor', erspan: 'config-mon-erspan-src', erspand: 'config-mon-erspan-src-dst', sla: 'config-ip-sla-echo', track: 'config-track', eem: 'config-applet', ipsecp: 'ipsec-profile', enamed: 'config-router', eaf: 'config-router-af', eafif: 'config-router-af-interface', etopo: 'config-router-af-topology', eigrp6: 'config-rtr', eaf6: 'config-router-af', eaf6if: 'config-router-af-interface', bgpaf6: 'config-router-af', mdt: 'config-mdt-subs' },
   };
 }

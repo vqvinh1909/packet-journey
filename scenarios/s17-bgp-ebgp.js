@@ -38,12 +38,18 @@ export function build() {
   };
 
   const sim = new Sim(topology);
-  const bgpMsg = (from, to, sport, dport, bgp) => sim.frame([
-    { proto: 'ethernet', fields: { dst: to.mac, src: from.mac, etherType: 0x0800 } },
-    { proto: 'ipv4', fields: { src: from.ip, dst: to.ip, ttl: 1, id: 0x1000, protocol: 6 } },
-    { proto: 'tcp', fields: { srcPort: sport, dstPort: dport, seq: 1000, ack: 2000, flags: { ack: true, psh: true }, window: 16384 } },
-    { proto: 'bgp', fields: bgp },
-  ]);
+  // seq/ack TCP mỗi chiều tăng đúng theo số byte BGP đã gửi (sau bắt tay: R1 bắt đầu 1001, R2 bắt đầu 2001)
+  const nextSeq = { [R1.ip]: 1001, [R2.ip]: 2001 };
+  const bgpMsg = (from, to, sport, dport, bgp) => {
+    const f = sim.frame([
+      { proto: 'ethernet', fields: { dst: to.mac, src: from.mac, etherType: 0x0800 } },
+      { proto: 'ipv4', fields: { src: from.ip, dst: to.ip, ttl: 1, id: 0x1000, protocol: 6 } },
+      { proto: 'tcp', fields: { srcPort: sport, dstPort: dport, seq: nextSeq[from.ip], ack: nextSeq[to.ip], flags: { ack: true, psh: true }, window: 16384 } },
+      { proto: 'bgp', fields: bgp },
+    ]);
+    nextSeq[from.ip] += f.bytes.length - 54; // trừ Ethernet 14 + IP 20 + TCP 20
+    return f;
+  };
 
   sim.emit({ kind: 'process', side: 'inspect', activeLayer: 7,
     titleVi: 'eBGP: R1 (AS 65001) ↔ R2 (AS 65002)',

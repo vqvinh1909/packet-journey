@@ -30,6 +30,20 @@ export function t(key) {
 const HTML_BY_TRACK = {
   'Quản trị Hạ tầng mạng (Infrastructure Administrator)': 'Infrastructure-Administrator-Giao-trinh.html',
   'Network security': 'Network-Security-Giao-trinh.html',
+  'CCNP/Module-01_ENCOR': 'CCNP-ENCOR-Giao-trinh.html',
+  'CCNP/Module-02_ENARSI': 'CCNP-ENARSI-Giao-trinh.html',
+  'CCNP/Module-03_ENSLD': 'CCNP-ENSLD-Giao-trinh.html',
+  'CCNP/Module-04_ENAUTO': 'CCNP-ENAUTO-Giao-trinh.html',
+  'CCNP/Module-05_ENSDWI': 'CCNP-ENSDWI-Giao-trinh.html',
+  'CCNP/Module-06_ENCC': 'CCNP-ENCC-Giao-trinh.html',
+  'CCNP/Module-07_ENNA': 'CCNP-ENNA-Giao-trinh.html',
+  'CCNP/Module-08_WLCOR': 'CCNP-WLCOR-Giao-trinh.html',
+  'CCNP/Module-09_WLSD': 'CCNP-WLSD-Giao-trinh.html',
+  'CCNP/Module-10_WLSI': 'CCNP-WLSI-Giao-trinh.html',
+  'CCNP/Module-11_SCOR': 'CCNP-SCOR-Giao-trinh.html',
+  'CCNP/Module-12_DCCOR': 'CCNP-DCCOR-Giao-trinh.html',
+  'CCNP/Module-13_SPCOR': 'CCNP-SPCOR-Giao-trinh.html',
+  'CCNP/Module-14_CLCOR': 'CCNP-CLCOR-Giao-trinh.html',
 };
 // App ở E:\SAP\Packet-Journey, giáo trình ở E:\SAP\Mạng máy tính\ (ngoài repo).
 const LESSON_ROOT = '../Mạng máy tính/';
@@ -41,10 +55,12 @@ const LESSON_ROOT = '../Mạng máy tính/';
  */
 export function lessonHref(path) {
   let target = path;
-  const m = path.match(/^\.\.\/([^/]+)\/.*\/Bai-0*(\d+)_[^/]*\.md$/);
-  if (m && HTML_BY_TRACK[m[1]]) {
-    const n = String(m[2]).padStart(2, '0');
-    target = `../${m[1]}/${HTML_BY_TRACK[m[1]]}#b${n}-s0`;
+  const m = path.match(/^\.\.\/([^/]+)\/([^/]+)\/(?:.*\/)?Bai-0*(\d+)_[^/]*\.md$/);
+  // CCNP mỗi đề một file nên tra theo cả thư mục đề.
+  const html = m && (HTML_BY_TRACK[m[1]] || HTML_BY_TRACK[`${m[1]}/${m[2]}`]);
+  if (html) {
+    const n = String(m[3]).padStart(2, '0');
+    target = `../${m[1]}/${html}#b${n}-s0`;
   }
   target = target.replace(/^\.\.\//, LESSON_ROOT);
   const hashIdx = target.indexOf('#');
