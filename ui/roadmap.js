@@ -35,6 +35,7 @@ export function openRoadmap(o = {}) {
 
   const labRow = (id, done) => `<button class="rm-item${done ? ' done' : ''}" data-lab="${id}"><span>${done ? '✓' : '○'}</span><b>${id}</b> ${esc(getLab(id).title)}</button>`;
   const topicHtml = (t, st, isNext, optional) => {
+    const more = [...t.more, ...(t.shared || [])];
     const p = topicProgress(t, st);
     return `<article class="rm-topic${p.complete && !optional ? ' done' : ''}${isNext ? ' next' : ''}"${isNext ? ' id="rm-next"' : ''}>` +
       `<header><span class="rm-ref">${esc(t.ref)}</span><h4>${esc(t.title)}</h4>${optional ? '' : `<span class="rm-count">${p.done}/${p.total}</span>`}</header>` +
@@ -44,14 +45,14 @@ export function openRoadmap(o = {}) {
       (t.notes ? `<details class="rm-notes"><summary>📝 Bài đọc ngắn</summary><ul>${t.notes.map((n) => `<li>${esc(n)}</li>`).join('')}</ul></details>` : '') +
       t.sc.map((id) => { const d = !optional && scenarioDone(id, st); return `<button class="rm-item${d ? ' done' : ''}" data-sc="${id}"><span>${d ? '✓' : '○'}</span><b>Xem gói tin</b> ${esc(scenarioOf(id).meta.titleVi)}, rồi làm 🎯 Quiz</button>`; }).join('') +
       t.core.map((id) => labRow(id, !!st.labsDone[id])).join('') +
-      (t.more.length ? `<details class="rm-more"><summary>${optional ? 'Lab' : 'Lab luyện thêm'} (${t.more.filter((id) => st.labsDone[id]).length}/${t.more.length})</summary>${t.more.map((id) => labRow(id, !!st.labsDone[id])).join('')}</details>` : '') +
+      (more.length ? `<details class="rm-more"><summary>${optional ? 'Lab' : 'Lab luyện thêm'} (${more.filter((id) => st.labsDone[id]).length}/${more.length})</summary>${more.map((id) => labRow(id, !!st.labsDone[id])).join('')}</details>` : '') +
       (t.gap ? `<p class="rm-gap">⚠ App ${esc(t.gap)}.</p>` : '') + `</article>`;
   };
 
   function render() {
     const st = readState(), P = roadmapProgress(st);
     if (!openStages.size && P.next) openStages.add(P.next.stage.id);
-    modal.innerHTML = `<div class="modal-h"><span>🧭 Lộ trình CCNA 200-301 v2.0</span><button class="modal-x" aria-label="Đóng">✕</button></div>` +
+    modal.innerHTML = `<div class="modal-h"><span>🧭 Lộ trình: CCNA, CCNP, Security, System</span><button class="modal-x" aria-label="Đóng">✕</button></div>` +
       `<div class="modal-b rm-body"><div class="rm-sum"><div class="rm-bar" role="progressbar" aria-valuenow="${P.pct}" aria-valuemin="0" aria-valuemax="100" aria-label="Tiến độ lộ trình"><i style="width:${P.pct}%"></i></div>` +
       `<div class="rm-sumt"><b>${P.pct}%</b> · ${P.done}/${P.total} việc bắt buộc${P.next ? `<button id="rm-go" class="btn-accent">▶ Học tiếp: ${esc(P.next.topic.ref)} ${esc(P.next.topic.title)}</button>` : ' · Đã xong, sẵn sàng thi thử'}</div></div>` +
       `<div class="rm-read">${CCNP_DOCS.map((d) => `<a href="${lessonHref(d.path)}" target="_blank" rel="noopener">${esc(d.label)}</a>`).join('')}</div>` +

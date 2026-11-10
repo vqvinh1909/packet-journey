@@ -13,6 +13,7 @@ export const ETHERTYPE = {
   DOT1Q: 0x8100,
   IPv6: 0x86dd,
   MPLS: 0x8847,
+  EAPOL: 0x888e,
 };
 
 function etherTypeName(v) {

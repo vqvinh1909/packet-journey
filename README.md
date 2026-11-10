@@ -166,7 +166,7 @@ packet/     addr, bytes (BitWriter), checksum (RFC 1071), serialize, pcap
 protocols/  ethernet, dot1q, arp, ipv4, icmp, llc, stp, ospf, eigrp, udp, dhcp, dns,
             tcp, hsrp, bgp, raw, ipv6, icmpv6, ospfv3, mstp, dhcpv6, mpls, vxlan,
             np (igmp, pim, gre, nhrp, lisp, bfd, ldp, esp),
-            voice (sip, rtp, rtcp)   (34 giao thức)
+            voice (sip, rtp, rtcp)   (34 giao thức) + sec (tls, ike, eapol, radius) = 38
 engine/     tables (ARP/MAC/routing + longest-prefix), devices, simulate (recorder)
 lab/        net (máy mô phỏng mạng tính từ cấu hình), net6 + ip6 (IPv6), fw (lõi firewall stateful),
             ios (CLI Cisco IOS + PC + Zone-Based Firewall), asa (CLI Cisco ASA), fortios, panos,

@@ -59,8 +59,10 @@ export function lessonHref(path) {
   // CCNP mỗi đề một file nên tra theo cả thư mục đề.
   const html = m && (HTML_BY_TRACK[m[1]] || HTML_BY_TRACK[`${m[1]}/${m[2]}`]);
   if (html) {
-    const n = String(m[3]).padStart(2, '0');
-    target = `../${m[1]}/${html}#b${n}-s0`;
+    // Giáo trình Hạ tầng: b31–b43 là Mini Lab và Lab tổng hợp nên Bài 31 trở đi nằm từ b44.
+    const n = String(html.startsWith('Infrastructure') && +m[3] > 30 ? +m[3] + 13 : m[3]).padStart(2, '0');
+    // Giáo trình Network Security không có mục s0: phần đầu mỗi bài là s1.
+    target = `../${m[1]}/${html}#b${n}-s${html.startsWith('Network-Security') ? 1 : 0}`;
   }
   target = target.replace(/^\.\.\//, LESSON_ROOT);
   const hashIdx = target.indexOf('#');

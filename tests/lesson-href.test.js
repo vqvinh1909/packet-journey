@@ -4,7 +4,7 @@ import { lessonHref } from '../ui/i18n.js';
 
 test('lessonHref: bài học trỏ vào HTML giáo trình trong thư mục Mạng máy tính', () => {
   const href = lessonHref('../Network security/Module-01/Bai-05_Abc.md');
-  assert.equal(decodeURI(href), '../Mạng máy tính/Network security/Network-Security-Giao-trinh.html#b05-s0');
+  assert.equal(decodeURI(href), '../Mạng máy tính/Network security/Network-Security-Giao-trinh.html#b05-s1');
 });
 
 test('lessonHref: mỗi đề CCNP trỏ vào HTML riêng của đề đó', () => {
@@ -42,4 +42,11 @@ test('lessonHref: file ngoài dạng Bai-NN vẫn đúng thư mục và được
   const href = lessonHref('../Quản trị/Lab Tonghop/Lab-01.md');
   assert.equal(decodeURI(href), '../Mạng máy tính/Quản trị/Lab Tonghop/Lab-01.md');
   assert.ok(!href.includes(' '));
+});
+
+test('lessonHref: giáo trình Hạ tầng, Bài 31 trở đi nằm sau Mini Lab và Lab tổng hợp (b44)', () => {
+  const B = '../Quản trị Hạ tầng mạng (Infrastructure Administrator)/x/';
+  assert.match(decodeURI(lessonHref(`${B}Bai-30_x.md`)), /#b30-s0$/);
+  assert.match(decodeURI(lessonHref(`${B}Bai-31_x.md`)), /#b44-s0$/);
+  assert.match(decodeURI(lessonHref(`${B}Bai-36_x.md`)), /#b49-s0$/);
 });

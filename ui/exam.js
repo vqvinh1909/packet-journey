@@ -12,6 +12,7 @@ import { getLang } from './i18n.js';
 const fmt = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 const isHost = (d) => d.type === 'pc' || d.type === 'server';
 const LANGS = [['vi', 'VI'], ['en', 'EN'], ['both', 'VI + EN']];
+const MODE = { full: ['đầy đủ', 'full'], quick: ['rút gọn', 'short'], sec: ['Security', 'Security'] };
 
 export function openExam() {
   document.querySelector('.modal-backdrop')?.remove();
@@ -34,7 +35,7 @@ export function openExam() {
   const tx = (vi, en) => (lang === 'en' ? esc(en ?? vi) : lang === 'both' && en && en !== vi ? `${esc(vi)}<span class="ex-en">${esc(en)}</span>` : esc(vi));
   /** Chữ thường (trong <option>): VI / EN trên cùng một dòng. */
   const tp = (vi, en) => (lang === 'en' ? en ?? vi : lang === 'both' && en && en !== vi ? `${vi} / ${en}` : vi);
-  const dom = (id) => { const d = E.DOMAINS.find((x) => x.id === id); if (!d) return ''; return lang === 'en' ? d.name : lang === 'both' ? `${d.vi} (${d.name})` : d.vi; };
+  const dom = (id) => { const d = [...E.DOMAINS, ...E.SEC_DOMAINS].find((x) => x.id === id); if (!d) return ''; return lang === 'en' ? d.name : lang === 'both' ? `${d.vi} (${d.name})` : d.vi; };
   const langBar = () => `<span class="ex-lang" role="group" aria-label="Ngôn ngữ đề / Language">${LANGS.map(([l, t]) => `<button data-lang="${l}" class="${l === lang ? 'on' : ''}">${t}</button>`).join('')}</span>`;
   function bindLang() {
     modal.querySelectorAll('.ex-lang button').forEach((b) => (b.onclick = () => { lang = b.dataset.lang; save('exam-lang', lang); screen(); }));
@@ -47,19 +48,20 @@ export function openExam() {
     remove('ccna-exam-cur'); // bài dở của đề 6 mảng cũ không còn mở lại được
     cur = load('ccna-exam-cur-v2', null);
     const hist = load('ccna-exam-hist', []);
-    const full = E.makeExam(1, 'full'), quick = E.makeExam(1, 'quick');
+    const full = E.makeExam(1, 'full'), quick = E.makeExam(1, 'quick'), sec = E.makeExam(1, 'sec');
     modal.innerHTML = `<div class="modal-h"><span>🎓 ${ui('Thi thử CCNA 200-301', 'CCNA 200-301 mock exam')}</span>${langBar()}<button class="modal-x" aria-label="đóng">✕</button></div>` +
       `<div class="modal-b ex-home"><p>${ui(`Đề tự soạn theo 5 mảng kiến thức của CCNA 200-301 v2.0 (không phải đề thật): trắc nghiệm một / nhiều đáp án, ghép cặp và câu <b>lab mô phỏng</b> gõ lệnh như Lab CLI. Mỗi đề có thêm các câu <b>sinh tự động với số liệu mới</b> (subnet, wildcard, bảng định tuyến, ACL…). Chấm thang <b>300–1000</b>, đạt từ <b>${E.PASS}</b>. Không xem được đáp án cho tới khi nộp bài.`, `Self-written questions covering the 5 CCNA 200-301 v2.0 domains (not real exam questions): single / multiple answer, drag-and-drop matching and <b>simulation labs</b> typed in a CLI. Every exam also gets <b>auto-generated questions with fresh numbers</b> (subnetting, wildcards, routing tables, ACLs…). Scored <b>300–1000</b>, passing <b>${E.PASS}</b>. Answers are revealed only after you submit.`)}</p>` +
       `<table class="ex-dom"><tr><th>${ui('Mảng kiến thức', 'Domain')}</th><th>${ui('Tỉ trọng', 'Weight')}</th></tr>${E.DOMAINS.map((d) => `<tr><td>${esc(dom(d.id))}</td><td>${d.w}%</td></tr>`).join('')}</table>` +
-      (cur ? `<div class="ex-resume">${ui(`Bạn đang làm dở một đề (${cur.mode === 'quick' ? 'rút gọn' : 'đầy đủ'}).`, `You have an unfinished ${cur.mode === 'quick' ? 'short' : 'full'} exam.`)} <button id="ex-cont" class="btn-accent">▶ ${ui('Làm tiếp', 'Resume')}</button> <button id="ex-drop">${ui('Bỏ bài này', 'Discard')}</button></div>` : '') +
-      `<div class="ex-start"><button id="ex-full" class="btn-accent">${ui('Đề đầy đủ', 'Full exam')} — ${full.qs.length} ${ui('câu', 'questions')} · ${full.minutes} ${ui('phút', 'min')}</button><button id="ex-quick">${ui('Đề rút gọn', 'Short exam')} — ${quick.qs.length} ${ui('câu', 'questions')} · ${quick.minutes} ${ui('phút', 'min')}</button></div>` +
-      (hist.length ? `<h4>${ui('Lịch sử thi', 'History')}</h4><table class="ex-hist"><tr><th>${ui('Ngày', 'Date')}</th><th>${ui('Đề', 'Exam')}</th><th>${ui('Điểm', 'Score')}</th><th>${ui('Thời gian', 'Time')}</th><th>${ui('Mảng yếu nhất', 'Weakest domain')}</th></tr>${hist.slice(0, 10).map((h) => `<tr><td>${new Date(h.at).toLocaleString(lang === 'en' ? 'en-GB' : 'vi-VN', { dateStyle: 'short', timeStyle: 'short' })}</td><td>${h.mode === 'quick' ? ui('Rút gọn', 'Short') : ui('Đầy đủ', 'Full')}</td><td class="${h.pass ? 'ok' : 'bad'}">${h.score}${h.pass ? ' ✓' : ''}</td><td>${fmt(h.secs)}</td><td>${esc(h.weakId ? dom(h.weakId) : h.weak || '—')}</td></tr>`).join('')}</table>` : '') +
+      (cur ? `<div class="ex-resume">${ui(`Bạn đang làm dở một đề (${MODE[cur.mode][0]}).`, `You have an unfinished ${MODE[cur.mode][1]} exam.`)} <button id="ex-cont" class="btn-accent">▶ ${ui('Làm tiếp', 'Resume')}</button> <button id="ex-drop">${ui('Bỏ bài này', 'Discard')}</button></div>` : '') +
+      `<div class="ex-start"><button id="ex-full" class="btn-accent">${ui('Đề đầy đủ', 'Full exam')} — ${full.qs.length} ${ui('câu', 'questions')} · ${full.minutes} ${ui('phút', 'min')}</button><button id="ex-quick">${ui('Đề rút gọn', 'Short exam')} — ${quick.qs.length} ${ui('câu', 'questions')} · ${quick.minutes} ${ui('phút', 'min')}</button><button id="ex-sec">🛡️ ${ui('Đề Security', 'Security exam')} — ${sec.qs.length} ${ui('câu', 'questions')} · ${sec.minutes} ${ui('phút', 'min')}</button></div>` +
+      (hist.length ? `<h4>${ui('Lịch sử thi', 'History')}</h4><table class="ex-hist"><tr><th>${ui('Ngày', 'Date')}</th><th>${ui('Đề', 'Exam')}</th><th>${ui('Điểm', 'Score')}</th><th>${ui('Thời gian', 'Time')}</th><th>${ui('Mảng yếu nhất', 'Weakest domain')}</th></tr>${hist.slice(0, 10).map((h) => `<tr><td>${new Date(h.at).toLocaleString(lang === 'en' ? 'en-GB' : 'vi-VN', { dateStyle: 'short', timeStyle: 'short' })}</td><td>${ui(...(MODE[h.mode] || MODE.full))}</td><td class="${h.pass ? 'ok' : 'bad'}">${h.score}${h.pass ? ' ✓' : ''}</td><td>${fmt(h.secs)}</td><td>${esc(h.weakId ? dom(h.weakId) : h.weak || '—')}</td></tr>`).join('')}</table>` : '') +
       `</div>`;
     modal.querySelector('.modal-x').onclick = close;
     bindLang();
     const start = (mode) => { if (cur && !confirm(ui('Bỏ bài đang làm dở và bắt đầu đề mới?', 'Discard the unfinished exam and start a new one?'))) return; begin({ seed: (Math.random() * 0x7fffffff) >>> 0 || 1, mode, t0: Date.now(), answers: {}, flags: {}, simlog: {} }); };
     modal.querySelector('#ex-full').onclick = () => start('full');
     modal.querySelector('#ex-quick').onclick = () => start('quick');
+    modal.querySelector('#ex-sec').onclick = () => start('sec');
     if (cur) {
       modal.querySelector('#ex-cont').onclick = () => begin(cur);
       modal.querySelector('#ex-drop').onclick = () => { if (confirm(ui('Bỏ bài đang làm? Bài này không được tính điểm.', 'Discard this exam? It will not be scored.'))) { save('ccna-exam-cur-v2', null); home(); } };
@@ -91,7 +93,7 @@ export function openExam() {
   /** Khung phòng thi (vẽ lại khi đổi ngôn ngữ, không đụng đồng hồ / bài làm). */
   function room() {
     screen = room;
-    modal.innerHTML = `<div class="modal-h ex-h"><span>🎓 ${ui('Thi thử CCNA', 'CCNA mock exam')} — ${cur.mode === 'quick' ? ui('đề rút gọn', 'short') : ui('đề đầy đủ', 'full')}</span>${langBar()}<span class="ex-clock" id="ex-clock"></span><button id="ex-submit" class="btn-accent">📝 ${ui('Nộp bài', 'Submit')}</button></div>` +
+    modal.innerHTML = `<div class="modal-h ex-h"><span>🎓 ${cur.mode === 'sec' ? ui('Thi thử Security', 'Security mock exam') : ui('Thi thử CCNA', 'CCNA mock exam')} — ${ui('đề ' + MODE[cur.mode][0], MODE[cur.mode][1])}</span>${langBar()}<span class="ex-clock" id="ex-clock"></span><button id="ex-submit" class="btn-accent">📝 ${ui('Nộp bài', 'Submit')}</button></div>` +
       `<div class="ex-body"><nav class="ex-nav" id="ex-nav"></nav><section class="ex-q" id="ex-q"></section></div>` +
       `<div class="ex-foot"><button id="ex-prev">← ${ui('Câu trước', 'Previous')}</button><button id="ex-flag">⚑ ${ui('Đánh dấu xem lại', 'Mark for review')}</button><button id="ex-next">${ui('Câu sau', 'Next')} →</button></div>`;
     bindLang();

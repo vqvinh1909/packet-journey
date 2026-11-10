@@ -6,13 +6,74 @@
 
 import { NP_STAGES } from './roadmap-np.js';
 
+// Mini Lab và Lab tổng hợp trong giáo trình HTML Hạ tầng (neo b31–b43).
+const IA = '../Quản trị Hạ tầng mạng (Infrastructure Administrator)/Infrastructure-Administrator-Giao-trinh.html';
+const IA_LABS = [
+  ...[1, 2, 3, 4, 5, 6, 7].map((m) => ({ label: `Mini Lab Module ${m}`, path: `${IA}#b${30 + m}-s1` })),
+  ...['GreenMart', 'VietManu', 'SunCare', 'sự cố VLAN/Trunk', 'sự cố OSPF/NAT', 'sự cố HSRP/ACL'].map((n, i) => ({ label: `Lab tổng hợp ${i + 1}: ${n}`, path: `${IA}#b${38 + i}-s1` })),
+];
+
+// Giáo trình Network Security (HTML ngoài repo): mỗi module một chủ đề, bài trỏ thẳng vào HTML.
+// `shared`: lab đã có chỗ chính ở chặng khác, hiện lại ở đây để luyện theo giáo trình này (không tính trùng).
+const NS = '../Network security/';
+const nsDocs = (from, to) => Array.from({ length: to - from + 1 }, (_, i) => ({ label: `Bài ${from + i}`, path: `${NS}x/Bai-${String(from + i).padStart(2, '0')}_x.md` }));
+const NS_LABS = ['Ransomware', 'Insider Threat', 'DDoS và tấn công Web', 'Lộ khoá, xâm nhập Cloud', 'Chuỗi cung ứng']
+  .map((n, i) => ({ label: `Lab tổng hợp SecOps ${i + 1}: ${n}`, path: `${NS}Network-Security-Giao-trinh.html#b${42 + i}-s1` }));
+const NS_STAGE = {
+  id: 'netsec', name: 'An ninh mạng: giáo trình Network Security (không tính tiến độ CCNA)', weight: 0, optional: true,
+  topics: [
+    ['M01', 'Toàn cảnh an ninh mạng: CIA, rủi ro, xác thực, mật mã', 1, 6, ['s47']],
+    ['M02', 'Bức tranh tấn công: phishing, malware, Layer 2, web, DDoS, APT', 7, 13, ['s41', 's42', 's43', 's46', 's45', 's44'], ['S01', 'S02', 'S03', 'S05']],
+    ['M03', 'Phòng thủ cấp tổ chức: chính sách, MFA, backup, patch, EDR, ransomware', 14, 21],
+    ['M04', 'Bảo vệ hạ tầng: phân đoạn, hardening, Wi-Fi, server, cloud', 22, 26, ['s49'], ['S04', 'S06', 'L20', 'N15', 'N16', 'N17']],
+    ['M05', 'Firewall và VPN: perimeter, NGFW, thiết bị hãng, VPN, Zero Trust', 27, 31, ['s48'], ['F01', 'F02', 'F03', 'F04', 'Z01', 'Z02', 'Z03', 'FG01', 'FG02', 'PA01', 'PA02', 'SP01', 'SP02', 'CP01', 'CP02', 'PF01', 'PF02', 'C05', 'D03']],
+    ['M06', 'Giám sát và ứng phó: SIEM/SOC, IDS/IPS, quét lỗ hổng, IR, forensics', 32, 38],
+    ['M07', 'Thực chiến: mini SOC lab, runbook, Purple Team', 39, 41],
+  ].map(([ref, title, from, to, sc = [], shared = []]) => ({ ref, title, lessons: [], docs: nsDocs(from, to), sc, core: [], more: [], shared }))
+    .concat({ ref: 'SecOps', title: 'Lab tổng hợp SecOps', lessons: [], docs: NS_LABS, sc: [], core: [], more: [] }),
+};
+
+// Thư viện giáo trình ngoài mảng mạng (HTML nằm ở E:\\SAP, ngoài thư mục Mạng máy tính nên đường dẫn bắt đầu bằng ../../).
+// Chỉ có bài đọc: app chưa có lab cho các mảng này.
+const D = (label, path) => ({ label, path });
+const LIB_STAGE = {
+  id: 'library', name: 'Hệ thống, giám sát, phân tích gói: thư viện giáo trình (chỉ có bài đọc)', weight: 0, optional: true,
+  topics: [
+    ['Wireshark', 'Phân tích gói bằng Wireshark', [D('Giáo trình Wireshark', '../Wireshark-Network-Administrator/docs/html/index.html')]],
+    ['Linux', 'Quản trị Linux và vận hành hệ thống', [
+      D('Linux System Administrator', '../../SysOps-DevOps/01-Linux System Administrator/01-Linux-System-Administrator-Giao-trinh.html'),
+      D('System Operations và Infrastructure', '../../SysOps-DevOps/02-System Operations va Infrastructure/02-System-Operations-va-Infrastructure-Giao-trinh.html')]],
+    ['Windows', 'Windows Server và dịch vụ', [
+      D('Windows Server 2022', '../../Windows-Server/System Administrator/Mon-01_Windows-Server-2022/Windows-Server-2022-Giao-trinh.html'),
+      D('IIS Web Server', '../../Windows-Server/System Administrator/Mon-02_IIS-Web-Server/IIS-Web-Server-2022-Giao-trinh.html'),
+      D('Mail Server MDaemon', '../../Windows-Server/System Administrator/Mon-03_Mail-Server-MDaemon/Mail-Server-MDaemon-Giao-trinh.html'),
+      D('Kiwi Syslog Server', '../../Windows-Server/System Administrator/Mon-05_Kiwi-Syslog-Server/Kiwi-Syslog-Server-Giao-trinh.html'),
+      D('Sophos Firewall', '../../Windows-Server/System Administrator/Mon-06_Sophos-Firewall/Sophos-Firewall-Giao-trinh.html')]],
+    ['DevOps', 'Kubernetes và CI/CD', [
+      D('Kubernetes cho SysOps', '../../SysOps-DevOps/03-Kubernetes cho SysOps/03-Kubernetes-cho-SysOps-Giao-trinh.html'),
+      D('DevOps Automation CI/CD', '../../SysOps-DevOps/04-DevOps Automation CI-CD/04-DevOps-Automation-CICD-Giao-trinh.html')]],
+    ['Hạ tầng', 'Ảo hoá, lưu trữ, sao lưu', [
+      D('vSphere Virtualization', '../../Virtualization/vSphere_Virtualization.html'),
+      D('Storage Enterprise', '../../Storage/Storage_Enterprise.html'),
+      D('Veeam Backup và Disaster Recovery', '../../Monitoring/Backup/Veeam_Backup_Disaster_Recovery.html')]],
+    ['SOC', 'Giám sát và phát hiện: Wazuh, Sysmon, SIEM', [
+      D('Wazuh: triển khai và quản trị', '../../Monitoring/Wazuh/Wazuh_Basic_Administration_Deployment.html'),
+      D('Wazuh: detection engineering cho SOC', '../../Monitoring/Wazuh/Wazuh_Advanced_Detection_Engineering_SOC.html'),
+      D('Sysmon: Windows telemetry', '../../Monitoring/Sysmon/Sysmon_Windows_Telemetry.html'),
+      D('SIEM chuyên sâu', '../../Advanced-Architecture/04-SIEM-Chuyen-Sau/Mon-04-SIEM-Chuyen-Sau-Textbook.html')]],
+    ['Chuẩn', 'Quản trị và tiêu chuẩn: ITIL, NIST, ISO 27001', [
+      D('ITIL và COBIT', '../../Advanced-Architecture/01-ITIL-COBIT/Mon-01-ITIL-COBIT-Textbook.html'),
+      D('NIST và ISO 27001', '../../Advanced-Architecture/02-NIST-ISO27001/Mon-02-NIST-ISO27001-Textbook.html')]],
+  ].map(([ref, title, docs]) => ({ ref, title, lessons: [], docs, sc: [], core: [], more: [], gap: 'Chưa có lab trong app.' })),
+};
+
 export const ROADMAP = [
   {
     id: 'infra', name: 'Hạ tầng & kết nối mạng', weight: 25,
     topics: [
       { ref: 'Mở đầu', title: 'Gói tin đi trong mạng như thế nào', lessons: [1, 2], sc: ['s01', 's14'], core: ['A01'], more: ['A25', 'A03', 'A04'] },
       { ref: '1.1', title: 'Cáp và lỗi interface', lessons: [3, 4], sc: [], core: ['C01', 'N10', 'N19'], more: [] },
-      { ref: '1.2', title: 'Hypervisor, máy ảo, container', lessons: [], sc: [], core: ['N12'], more: [], notes: [
+      { ref: '1.2', title: 'Hypervisor, máy ảo, container', lessons: [32], sc: [], core: ['N12'], more: [], notes: [
         'Máy ảo (VM): phần mềm giả lập cả một máy tính, có hệ điều hành riêng, CPU, RAM, ổ đĩa và card mạng ảo (vNIC).',
         'Hypervisor: lớp chia phần cứng cho các VM. Type 1 chạy trực tiếp trên phần cứng (ESXi, Hyper-V). Type 2 chạy trên một hệ điều hành (VirtualBox, VMware Workstation).',
         'Container: chỉ đóng gói ứng dụng và thư viện, dùng chung kernel của máy chủ, nên nhẹ và khởi động nhanh, nhưng cách ly kém hơn VM.',
@@ -29,7 +90,7 @@ export const ROADMAP = [
     id: 'switching', name: 'Switching & truy cập mạng', weight: 25,
     topics: [
       { ref: '2.2', title: 'Cấu hình switch và VLAN cho cổng người dùng', lessons: [7, 8], sc: ['s03', 's23'], core: ['L02', 'L03', 'A05', 'N11'], more: ['B08', 'N07'] },
-      { ref: '2.2.b', title: 'Nối AP và WLC vào switch', lessons: [25], sc: [], core: ['W01', 'W02'], more: [] },
+      { ref: '2.2.b', title: 'Nối AP và WLC vào switch', lessons: [25, 36], sc: [], core: ['W01', 'W02'], more: [] },
       { ref: '2.1.a', title: 'Cổng Layer 2 và cổng định tuyến Layer 3', lessons: [], sc: [], core: ['N23'], more: [] },
       { ref: '2.1.b', title: 'Trunk 802.1Q', lessons: [9], sc: ['s04'], core: ['L04', 'A09'], more: ['A15', 'C04'] },
       { ref: '2.1.c', title: 'EtherChannel LACP', lessons: [10], sc: [], core: ['L05'], more: ['A24'] },
@@ -45,7 +106,7 @@ export const ROADMAP = [
       { ref: '3.1', title: 'Đọc bảng định tuyến', lessons: [11], sc: [], core: ['L06'], more: [] },
       { ref: '3.2', title: 'Static route: default, network, host, floating', lessons: [13], sc: [], core: ['L08', 'L09'], more: ['A17', 'B04', 'B05', 'N03', 'T06'] },
       { ref: '3.3', title: 'OSPF một vùng: OSPFv2 và OSPFv3', lessons: [14], sc: ['s07', 's27'], core: ['L10', 'A14', 'N02'], more: ['L11', 'B09', 'T02', 'T04'] },
-      { ref: '3.4', title: 'Đọc trạng thái HSRP và VRRP', lessons: [21], sc: ['s13'], core: ['L19', 'A22'], more: ['A23', 'T03'] },
+      { ref: '3.4', title: 'Đọc trạng thái HSRP và VRRP', lessons: [21, 23], sc: ['s13'], core: ['L19', 'A22'], more: ['A23', 'T03'] },
     ],
   },
   {
@@ -54,7 +115,7 @@ export const ROADMAP = [
       { ref: '4.1', title: 'Tài khoản local và AAA', lessons: [27], sc: [], core: ['S04', 'N17'], more: [] },
       { ref: '4.2', title: 'Quản lý file cấu hình và IOS', lessons: [], sc: [], core: ['B10', 'N18'], more: ['N08'] },
       { ref: '4.3', title: 'NAT và PAT', lessons: [20], sc: ['s11'], core: ['L17', 'L18'], more: ['A19', 'A20', 'A21'] },
-      { ref: '4.4', title: 'Bản ghi DNS', lessons: [], sc: ['s10'], core: ['N09'], more: [] },
+      { ref: '4.4', title: 'Bản ghi DNS', lessons: [31], sc: ['s10'], core: ['N09'], more: [] },
       { ref: '4.5', title: 'VPN IPsec', lessons: [22], sc: [], core: ['C05'], more: ['D03'] },
       { ref: '4.6', title: 'ACL IPv4', lessons: [16, 17], sc: ['s12'], core: ['L13', 'L14', 'A10'], more: ['A08', 'N06'] },
       { ref: '4.7', title: 'Bảo mật Layer 2', lessons: [26], sc: [], core: ['L20', 'S01', 'S02', 'N15', 'N16'], more: ['B07', 'S03', 'S05', 'S06'] },
@@ -63,7 +124,7 @@ export const ROADMAP = [
   {
     id: 'operations', name: 'AI & vận hành mạng', weight: 10,
     topics: [
-      { ref: '5.1–5.2', title: 'Agentic AI và cách viết prompt cho vận hành', lessons: [], sc: [], core: ['N13'], more: [], notes: [
+      { ref: '5.1–5.2', title: 'Agentic AI và cách viết prompt cho vận hành', lessons: [33], sc: [], core: ['N13'], more: [], notes: [
         'AI tạo sinh trả lời theo prompt. AI agent đi xa hơn: tự chia việc, gọi công cụ như lệnh show hay API, xem kết quả rồi làm bước tiếp theo. Đề thi có thể yêu cầu đánh giá đề xuất của agent và trợ lý mạng.',
         'Bốn thành phần prompt trong đề cương: phân loại dữ liệu (dữ liệu nào được phép gửi), định dạng kết quả, persona (đóng vai ai) và chỉ dẫn (việc cần làm).',
         'Ví dụ: "Bạn là kỹ sư mạng (persona). Dữ liệu nội bộ, đã che IP công khai (phân loại dữ liệu): <output show interfaces>. Liệt kê nguyên nhân khả dĩ và lệnh kiểm chứng, chưa đổi cấu hình (chỉ dẫn). Trả lời dạng bảng (định dạng)."',
@@ -71,7 +132,7 @@ export const ROADMAP = [
         'Không dán mật khẩu, community SNMP, khoá VPN hay dữ liệu khách hàng vào công cụ AI chưa được công ty duyệt.',
         'Cho agent quyền tối thiểu, bắt đầu với quyền chỉ đọc. Thay đổi cấu hình cần người duyệt, có log và có cách hoàn tác.',
       ] },
-      { ref: '5.3', title: 'Các cách quản lý mạng: controller, cloud, IaC', lessons: [29], sc: [], core: ['N22'], more: [], notes: [
+      { ref: '5.3', title: 'Các cách quản lý mạng: controller, cloud, IaC', lessons: [29, 35], sc: [], core: ['N22'], more: [], notes: [
         'Device-based: cấu hình từng thiết bị bằng CLI hoặc giao diện web. Đơn giản, nhưng khó nhất quán khi mạng lớn.',
         'Controller-based: controller như WLC hay Catalyst Center giữ chính sách và đẩy xuống thiết bị.',
         'Cloud-based: bảng điều khiển do nhà cung cấp chạy trên cloud, ví dụ Meraki. Thiết bị chỉ cần kết nối về đó.',
@@ -86,7 +147,7 @@ export const ROADMAP = [
   {
     id: 'capstone', name: 'Tổng hợp trước khi thi', weight: 0,
     topics: [
-      { ref: 'Dự án', title: 'Dựng mạng doanh nghiệp hoàn chỉnh', lessons: [], sc: [], core: ['P01', 'X01'], more: ['X04'] },
+      { ref: 'Dự án', title: 'Dựng mạng doanh nghiệp hoàn chỉnh', lessons: [], docs: IA_LABS, sc: [], core: ['P01', 'X01'], more: ['X04'] },
     ],
   },
   {
@@ -192,12 +253,14 @@ export const ROADMAP = [
       { ref: 'CCNP', title: 'OSPF nhiều vùng, EIGRP, BGP, redistribution', lessons: [15], sc: ['s18', 's08', 's17', 's21'], core: [], more: ['L12', 'D04', 'X03'] },
       { ref: 'CCNP', title: 'VTP, DTP nâng cao, Private VLAN, MST', lessons: [], sc: ['s24'], core: [], more: ['A11', 'D01', 'A26', 'D02'] },
       { ref: 'WAN', title: 'Serial, PPP, GRE', lessons: [], sc: [], core: [], more: ['C02', 'X02'] },
-      { ref: 'QoS', title: 'Đánh dấu và xếp hàng', lessons: [], sc: ['s20', 's25'], core: [], more: [] },
+      { ref: 'QoS', title: 'Đánh dấu và xếp hàng', lessons: [34], sc: ['s20', 's25'], core: [], more: [] },
       { ref: 'Voice', title: 'VoIP: SIP, RTP, codec', lessons: [], sc: ['s40'], core: [], more: [] },
       { ref: 'SP/DC', title: 'MPLS, Segment Routing, VXLAN và EVPN', lessons: [], sc: ['s31', 's32'], core: [], more: [] },
       { ref: 'Firewall', title: 'Firewall nhiều hãng', lessons: [28], sc: [], core: [], more: ['F01', 'F02', 'F03', 'F04', 'Z01', 'Z02', 'Z03', 'FG01', 'FG02', 'PA01', 'PA02', 'SP01', 'SP02', 'CP01', 'CP02', 'PF01', 'PF02'] },
     ],
   },
+  NS_STAGE,
+  LIB_STAGE,
 ];
 
 // Giáo trình CCNP dạng HTML, nằm ngoài repo như giáo trình CCNA. Hai bản nháp lệnh chưa chạy thử nên phải ghi rõ trên nút.

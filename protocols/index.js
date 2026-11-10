@@ -27,6 +27,7 @@ import mpls from './mpls.js';
 import vxlan from './vxlan.js';
 import { igmp, pim, gre, nhrp, lisp, bfd, ldp, esp } from './np.js';
 import { sip, rtp, rtcp } from './voice.js';
+import { tls, ike, eapol, radius } from './sec.js';
 
 export const PROTOCOLS = {
   ethernet,
@@ -63,6 +64,10 @@ export const PROTOCOLS = {
   sip,
   rtp,
   rtcp,
+  tls,
+  ike,
+  eapol,
+  radius,
 };
 
 export function getProtocol(id) {

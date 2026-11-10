@@ -88,3 +88,34 @@ test('LDP: bên LSR ID lớn hơn mở TCP tới cổng 646; LISP Map-Reply tr�
   assert.equal(val(rep, 'udp.src'), '4342');
   assert.equal(val(rep, 'udp.dst'), val(req, 'udp.src'));
 });
+
+test('kịch bản tấn công: gói giả mang đúng dấu hiệu của kiểu tấn công', () => {
+  const arp = pk('s41-arp-spoofing')[0]; // ARP Reply không ai hỏi: IP của gateway đi với MAC kẻ tấn công
+  assert.match(val(arp, 'arp.oper'), /^2/);
+  assert.equal(val(arp, 'arp.spa'), '192.168.1.1');
+  assert.equal(val(arp, 'arp.sha'), '00:de:ad:00:00:66');
+  const [dbl, single, plain] = pk('s46-vlan-hopping'); // mỗi switch gỡ một nhãn
+  assert.deepEqual([dbl, single, plain].map((p) => all(p, 'dot1q.vid')), [['1', '20'], ['20'], []]);
+  const [q, , fake] = pk('s45-dns-spoofing'); // trả lời giả khớp ID, cổng và giả IP resolver
+  assert.equal(val(fake, 'dns.id'), val(q, 'dns.id'));
+  assert.equal(val(fake, 'udp.dst'), val(q, 'udp.src'));
+  assert.equal(val(fake, 'ip.src'), val(q, 'ip.dst'));
+  const syn = pk('s44-syn-flood'); // SYN-ACK đi tới IP giả, không về kẻ tấn công
+  assert.equal(val(syn[2], 'ip.dst'), val(syn[0], 'ip.src'));
+  const offer = pk('s42-dhcp-rogue').find((p) => /192\.168\.1\.66/.test(val(p, 'ip.src')));
+  assert.ok(offer, 'OFFER giả đến từ máy kẻ tấn công');
+});
+
+test('kịch bản bảo mật: TLS tăng seq đúng số byte, IKE đủ 4 bản tin, RADIUS gán VLAN', () => {
+  const tls = pk('s47-tls-handshake');
+  assert.equal(Number(val(tls[1], 'tcp.ack')), Number(val(tls[0], 'tcp.seq')) + tls[0].bytes.length - 54);
+  assert.equal(Number(val(tls[2], 'tcp.seq')), Number(val(tls[1], 'tcp.seq')) + tls[1].bytes.length - 54);
+  assert.match(val(tls[0], 'tls.sni'), /bank\.example\.vn/);
+  const ike = pk('s48-ipsec-ikev2').filter((p) => val(p, 'ike.exch'));
+  assert.deepEqual(ike.map((p) => val(p, 'ike.exch').slice(0, 2) + val(p, 'ike.flags').slice(0, 4)), ['340x08', '340x20', '350x08', '350x20']);
+  assert.ok(ike.every((p) => Number(val(p, 'ike.len')) === p.bytes.length - 42), 'IKE Length khớp số byte');
+  const rad = pk('s49-dot1x-radius').filter((p) => val(p, 'radius.code'));
+  assert.ok(rad.every((p) => Number(val(p, 'radius.len')) === p.bytes.length - 42), 'RADIUS Length khớp số byte');
+  assert.match(val(rad.at(-1), 'radius.code'), /Access-Accept/);
+  assert.equal(val(rad.at(-1), 'radius.attr3'), '20');
+});

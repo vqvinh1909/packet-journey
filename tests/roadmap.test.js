@@ -1,5 +1,5 @@
 // tests/roadmap.test.js — lộ trình CCNA v2.0: không sót, không trùng, tính tiến độ đúng.
-import { readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { scenarioPorts } from '../ui/topo.js';
 import { serialize } from '../packet/serialize.js';
 import { test } from 'node:test';
@@ -90,4 +90,31 @@ test('BGP EVPN: UPDATE type 2 đúng khuôn RFC 7432, độ dài khớp, VNI n�
 test('SR-MPLS: nhãn đỉnh S=0, nhãn đáy S=1, nhãn giữ nguyên qua P1, PHP gỡ dần', () => {
   const stacks = SCENARIOS.find((s) => s.meta.id === 's32-sr-mpls').build().events.filter((e) => e.kind === 'transit').map((e) => e.packet.layers.filter((l) => l.proto === 'mpls').map((l) => [l.fields.label, l.fields.s]));
   assert.deepEqual(stacks, [[], [[16004, 0], [16005, 1]], [[16004, 0], [16005, 1]], [[16005, 1]], [], []]);
+});
+
+test('lộ trình: link tới mọi bài, Mini Lab, Lab tổng hợp trong các giáo trình HTML trên máy và không link hỏng', async (t) => {
+  const { lessonHref } = await import('../ui/i18n.js');
+  const { B } = await import('../lab/kit.js');
+  const byFile = {};
+  const add = (h) => { const [f, a] = decodeURI(h).split('#'); (byFile[f] ||= new Set()).add(a); };
+  for (const tp of topics) {
+    for (const n of tp.lessons) add(lessonHref(`${B}x/Bai-${String(n).padStart(2, '0')}_x.md`));
+    for (const d of tp.docs || []) add(lessonHref(d.path));
+  }
+  const files = Object.keys(byFile).filter((f) => f.endsWith('.html') && existsSync(new URL(f, import.meta.url.replace(/tests\/[^/]*$/, ''))));
+  if (!files.length) return t.skip('máy này không có giáo trình HTML');
+  for (const f of files) {
+    const html = readFileSync(new URL(f, import.meta.url.replace(/tests\/[^/]*$/, '')), 'utf8');
+    const groups = new Map();
+    for (const [, id, g] of html.matchAll(/id="(b\d+-s\d+)" data-group="([^"]*)"/g)) if (!groups.has(g)) groups.set(g, id);
+    const linked = byFile[f];
+    assert.deepEqual([...linked].filter((a) => a && !html.includes(`id="${a}"`)), [], `${f}: link hỏng`);
+    if (![...linked].some(Boolean)) continue; // link cả file (thư viện giáo trình): không đòi từng bài
+    assert.deepEqual([...groups].filter(([, id]) => !linked.has(id)).map(([g]) => g), [], `${f}: bài chưa có trong lộ trình`);
+  }
+});
+
+test('lộ trình: lab dùng chung (shared) phải là lab có thật và đã có chỗ chính ở chặng khác', () => {
+  const placed = new Set(topics.flatMap((t) => [...t.core, ...t.more]));
+  for (const t of topics) for (const id of t.shared || []) assert.ok(placed.has(id) && LABS.some((l) => l.id === id), `${t.ref}: ${id}`);
 });
