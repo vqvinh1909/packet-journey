@@ -43,7 +43,7 @@ test('thiết bị sát nhau: nhãn đứng cạnh dây thay vì đè icon', () 
 
 const tags = (svg) => [...svg.matchAll(/<rect x="([-\d.]+)" y="([-\d.]+)" width="([-\d.]+)" height="15" rx="3"[^>]*\/><text[^>]*>([^<]*)</g)].map((m) => ({ l: +m[1], t: +m[2], r: +m[1] + +m[3], b: +m[2] + 15, s: m[4] }));
 
-test('50 mẫu sơ đồ: dây vật lý có tên cổng, dây luồng ứng dụng thì không; nhãn không chồng nhau', () => {
+test('mọi mẫu sơ đồ: dây vật lý có tên cổng, dây luồng ứng dụng thì không; nhãn không chồng nhau', () => {
   const net = (s) => SHAPES[s?.t]?.group === 'net';
   for (const t of TEMPLATES) {
     const d = t.build();

@@ -593,3 +593,25 @@ test('importJson: file lạ không đưa được mã vào SVG qua ID hay trư�
   // Sơ đồ hợp lệ giữ nguyên qua xuất rồi nhập
   assert.deepEqual(JSON.parse(D.exportJson(D.importJson(D.exportJson(d)))).edges, JSON.parse(D.exportJson(d)).edges);
 });
+
+test('mẫu sơ đồ: dây thẳng không chạy xuyên qua một hình khác', () => {
+  // đoạn p-q có cắt phần trong của hình r (thu vào 6px) không: cắt xén Liang–Barsky
+  const hit = (p, q, r) => {
+    let t0 = 0, t1 = 1; const dx = q.x - p.x, dy = q.y - p.y;
+    for (const [a, b] of [[-dx, p.x - r.x - 6], [dx, r.x + r.w - 6 - p.x], [-dy, p.y - r.y - 6], [dy, r.y + r.h - 6 - p.y]]) {
+      if (a === 0) { if (b < 0) return false; continue; }
+      const t = b / a;
+      if (a < 0) { if (t > t1) return false; t0 = Math.max(t0, t); } else { if (t < t0) return false; t1 = Math.min(t1, t); }
+    }
+    return t0 < t1;
+  };
+  const mid = (s) => ({ x: s.x + s.w / 2, y: s.y + s.h / 2 });
+  for (const t of D.TEMPLATES) {
+    const d = t.build(), ds = d.shapes.filter((s) => !D.isContainer(s) && s.t !== 'note');
+    for (const e of d.edges) {
+      if (e.style === 'ortho' || e.style === 'curve') continue;
+      const a = D.shapeOf(d, e.a), b = D.shapeOf(d, e.b);
+      for (const s of ds) assert.ok(s === a || s === b || !hit(mid(a), mid(b), s), `${t.id}: dây ${a.label} → ${b.label} xuyên qua ${s.label}`);
+    }
+  }
+});
