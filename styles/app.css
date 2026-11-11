@@ -1108,3 +1108,7 @@ html, body {
 .rm-more summary { cursor: pointer; font-size: 12.5px; color: var(--muted); padding: 4px 6px; }
 .rm-gap { margin: 6px 0 0; padding: 4px 8px; font-size: 12.5px; color: var(--warn); background: var(--changed-soft); border-radius: 5px; }
 .rm-exam { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 10px; color: var(--muted); font-size: 12.5px; }
+
+/* danh sách gói trong bài tập Wireshark */
+.quiz-table { margin: 0 0 8px; overflow-x: auto; }
+.quiz-table td, .quiz-table th { padding: 3px 8px; text-align: left; white-space: nowrap; }

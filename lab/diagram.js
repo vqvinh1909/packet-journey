@@ -1055,43 +1055,45 @@ function namePorts(d) {
 }
 const T = (build) => () => { const d = emptyDiagram(); build(d); namePorts(d); return d; };
 const link = (d, a, b, o) => addEdge(d, a.id, b.id, o);
+// Mẫu dạng bảng: hình [khoá, loại, x, y, 'tên|dòng phụ' hoặc tuỳ chọn], dây [a, b, 'nhãn' hoặc tuỳ chọn]. Vùng khai báo trước để nằm dưới thiết bị.
+const G = (group, id, vi, en, shapes, edges) => ({ id, group, vi, en, build: T((d) => {
+  const m = {};
+  for (const [k, t, x, y, o] of shapes) { const [label, sub] = String(o).split('|'); m[k] = addShape(d, t, x, y, typeof o === 'string' ? { label, sub } : o); }
+  for (const [a, b, o] of edges) link(d, m[a], m[b], typeof o === 'string' ? { label: o } : o);
+}) });
+const FO = { cable: 'fiber' }, WIFI = { cable: 'wifi' }, VPN = { cable: 'vpn', dash: 'dash' };
+const zone = (k, x, y, w, h, label, c = '#2f6fde') => [k, 'zone', x, y, { w, h, label, fill: c, stroke: c }];
+const RED = '#d64545', GREEN = '#2e9e57', ORANGE = '#e67e22', PURPLE = '#7c3aed', GRAY = '#475569';
+const GC = 'CCNA', GE = 'Doanh nghiệp & văn phòng', GS = 'Bảo mật', GD = 'Data center & cloud', GA = 'Ứng dụng & DevOps';
 export const TEMPLATES = [
-  { id: 'lan', group: 'Doanh nghiệp & văn phòng', vi: 'LAN văn phòng', en: 'Office LAN', build: T((d) => {
-    const z = addShape(d, 'zone', 60, 40, { w: 560, h: 420, label: 'VĂN PHÒNG — 192.168.1.0/24' });
-    const r = addShape(d, 'router', 300, 80, { sub: '192.168.1.1' }), s = addShape(d, 'switch', 296, 230);
-    const p = [addShape(d, 'pc', 110, 360, { sub: '192.168.1.10' }), addShape(d, 'laptop', 230, 365, { sub: '192.168.1.11' }), addShape(d, 'printer', 370, 365, { sub: '192.168.1.50' }), addShape(d, 'phone', 500, 360, { sub: 'Voice VLAN' })];
-    const c = addShape(d, 'cloud', 650, 60, { label: 'INTERNET' });
-    link(d, c, r, { la: '', lb: 'G0/1', style: 'straight', dash: 'dash' });
-    link(d, r, s, { la: 'G0/0', lb: 'G0/1' });
-    p.forEach((x, i) => link(d, s, x, { la: `Fa0/${i + 1}` }));
-    void z;
-  }) },
-  { id: 'campus', group: 'Doanh nghiệp & văn phòng', vi: 'Campus 3 lớp', en: 'Three-tier campus', build: T((d) => {
-    addShape(d, 'zone', 40, 20, { w: 760, h: 110, label: 'CORE', stroke: '#d64545', fill: '#d64545' });
-    addShape(d, 'zone', 40, 150, { w: 760, h: 110, label: 'DISTRIBUTION', stroke: '#e67e22', fill: '#e67e22' });
-    addShape(d, 'zone', 40, 280, { w: 760, h: 210, label: 'ACCESS', stroke: '#2e9e57', fill: '#2e9e57' });
-    const c1 = addShape(d, 'l3switch', 260, 45), c2 = addShape(d, 'l3switch', 520, 45);
-    const d1 = addShape(d, 'l3switch', 180, 175), d2 = addShape(d, 'l3switch', 600, 175);
-    const a = [addShape(d, 'switch', 90, 305), addShape(d, 'switch', 300, 305), addShape(d, 'switch', 520, 305), addShape(d, 'switch', 690, 305)];
-    link(d, c1, c2, { label: 'Po1', width: 4 });
-    for (const x of [c1, c2]) for (const y of [d1, d2]) link(d, x, y);
-    for (const [i, x] of a.entries()) { link(d, i < 2 ? d1 : d2, x); link(d, i < 2 ? d2 : d1, x, { dash: 'dash' }); }
-    a.forEach((x, i) => link(d, x, addShape(d, i % 2 ? 'laptop' : 'pc', x.x + 4, 410, { label: `VLAN ${10 * (i + 1)}` })));
-  }) },
-  { id: 'wan', group: 'Doanh nghiệp & văn phòng', vi: 'HQ – chi nhánh qua WAN', en: 'HQ – branch over WAN', build: T((d) => {
-    addShape(d, 'zone', 30, 60, { w: 300, h: 360, label: 'HQ — 10.1.0.0/16' });
-    addShape(d, 'zone', 620, 60, { w: 260, h: 360, label: 'CHI NHÁNH — 10.2.0.0/16', stroke: '#2e9e57', fill: '#2e9e57' });
-    const fw = addShape(d, 'firewall', 220, 110), r1x = addShape(d, 'router', 640, 110, { label: 'R-CN' });
-    const core = addShape(d, 'l3switch', 70, 200), srv = addShape(d, 'server', 90, 335, { label: 'SRV-AD' });
-    const sw = addShape(d, 'switch', 650, 220), pc = addShape(d, 'pc', 660, 340);
-    const net = addShape(d, 'cloud', 400, 90, { label: 'INTERNET / MPLS' });
-    link(d, fw, net, { label: 'IPsec VPN', dash: 'dash', color: '#d64545', style: 'curve' });
-    link(d, net, r1x, { dash: 'dash', color: '#d64545', style: 'curve' });
-    link(d, core, fw, { style: 'ortho', la: 'G0/1', lb: 'inside' });
-    link(d, core, srv);
-    link(d, r1x, sw, { la: 'G0/0', lb: 'G0/1' });
-    link(d, sw, pc, { la: 'Fa0/1' });
-  }) },
+  // Văn phòng khoảng 30 người: một firewall UTM, một switch PoE, Wi-Fi tách nhân viên và khách.
+  G(GE, 'lan', 'LAN văn phòng', 'Office LAN', [
+    zone('z', 30, 270, 890, 270, 'VĂN PHÒNG · VLAN 10, 20, 30, 99'),
+    ['net', 'cloud', 420, 0, 'INTERNET|FTTH, IP tĩnh'], ['fw', 'firewall', 430, 130, 'FW-UTM|NAT, VPN, lọc web'], ['sw', 'switch', 430, 305, 'SW-POE|24 cổng, cấp nguồn PoE'],
+    ['ap', 'ap', 720, 305, 'AP-01|SSID nhân viên + khách'], ['m', 'mobile', 840, 440, 'Khách|VLAN 30'],
+    ['pc', 'pc', 60, 440, 'PC-KT|VLAN 10'], ['lt', 'laptop', 200, 445, 'LT-KD|VLAN 10'], ['ph', 'phone', 340, 440, 'IP-Phone|Voice VLAN 20'], ['prn', 'printer', 480, 440, 'PRN|VLAN 10'], ['nas', 'nas', 620, 440, 'NAS|File chung, sao lưu'],
+  ], [['net', 'fw', { ...FO, lb: 'WAN' }], ['fw', 'sw', { la: 'LAN', label: 'trunk' }], ['sw', 'ap', { label: 'PoE' }], ['ap', 'm', WIFI], ['sw', 'pc'], ['sw', 'lt'], ['sw', 'ph'], ['sw', 'prn'], ['sw', 'nas']]),
+  // Campus phân cấp: biên Internet có firewall HA, core gộp cổng, distribution chạy HSRP, access nối hai đường lên.
+  G(GE, 'campus', 'Campus 3 lớp', 'Three-tier campus', [
+    zone('ze', 40, 10, 860, 115, 'BIÊN INTERNET', GRAY), zone('zc', 40, 140, 860, 115, 'CORE', RED), zone('zd', 40, 270, 860, 115, 'DISTRIBUTION', ORANGE), zone('za', 40, 400, 860, 235, 'ACCESS', GREEN),
+    ['net', 'cloud', 110, 30, 'INTERNET'], ['f1', 'firewall', 330, 35, 'FW1|Active'], ['f2', 'firewall', 560, 35, 'FW2|Standby'],
+    ['c1', 'l3switch', 330, 165, 'CORE1'], ['c2', 'l3switch', 560, 165, 'CORE2'], ['wlc', 'wlc', 770, 165, 'WLC|Quản lý AP'],
+    ['d1', 'l3switch', 220, 295, 'DSW1|HSRP Active, STP root'], ['d2', 'l3switch', 670, 295, 'DSW2|HSRP Standby'],
+    ['a1', 'switch', 90, 425, 'ASW1'], ['a2', 'switch', 310, 425, 'ASW2'], ['a3', 'switch', 580, 425, 'ASW3'], ['a4', 'switch', 790, 425, 'ASW4'],
+    ['h1', 'pc', 90, 545, 'PC-KT|VLAN 10'], ['h2', 'phone', 310, 545, 'IP-Phone|Voice VLAN 20'], ['h3', 'ap', 580, 545, 'AP-T3|VLAN 30'], ['h4', 'laptop', 790, 550, 'LT-KD|VLAN 40'],
+  ], [['net', 'f1', FO], ['f1', 'f2', { label: 'HA', dash: 'dash' }], ['f1', 'c1'], ['f2', 'c2'],
+    ['c1', 'c2', { label: 'Po1', width: 4 }], ['c2', 'wlc'], ['c1', 'd1', FO], ['c1', 'd2', FO], ['c2', 'd1', FO], ['c2', 'd2', FO], ['d1', 'd2', { label: 'Po2', width: 4 }],
+    ['d1', 'a1'], ['d1', 'a2'], ['d2', 'a3'], ['d2', 'a4'], ['d2', 'a1', { dash: 'dash' }], ['d2', 'a2', { dash: 'dash' }], ['d1', 'a3', { dash: 'dash' }], ['d1', 'a4', { dash: 'dash' }],
+    ['a1', 'h1'], ['a2', 'h2'], ['a3', 'h3'], ['a4', 'h4']]),
+  // Trụ sở và chi nhánh: MPLS là đường chính, IPsec qua Internet là đường dự phòng.
+  G(GE, 'wan', 'HQ – chi nhánh qua WAN', 'HQ – branch over WAN', [
+    zone('z1', 20, 30, 340, 470, 'HQ · 10.1.0.0/16'), zone('z2', 620, 30, 310, 470, 'CHI NHÁNH · 10.2.0.0/16', GREEN),
+    ['srv', 'server', 50, 80, 'SRV-AD|DNS, DHCP, File'], ['core', 'l3switch', 50, 240, 'SW-CORE|Gateway các VLAN'], ['pc', 'pc', 50, 400, 'PC-HQ'],
+    ['fw', 'firewall', 240, 140, 'FW-HQ|NAT, IPsec'], ['r', 'router', 240, 340, 'R-HQ|BGP với nhà mạng'],
+    ['net', 'cloud', 430, 120, 'INTERNET|IPsec dự phòng'], ['mpls', 'mplsCloud', 430, 320, 'MPLS L3VPN|Đường chính'],
+    ['rb', 'router', 650, 240, 'R-CN|Hai đường WAN'], ['sw', 'switch', 810, 240, 'SW-CN'], ['pb', 'pc', 810, 90, 'PC-CN'], ['ap', 'ap', 810, 400, 'AP-CN'], ['ph', 'phone', 650, 400, 'IP-Phone-CN'],
+  ], [['srv', 'core'], ['pc', 'core'], ['core', 'fw'], ['core', 'r'], ['fw', 'net', { ...VPN, label: 'IPsec', color: RED }], ['net', 'rb', { ...VPN, color: RED }],
+    ['r', 'mpls', { ...FO, label: 'Chính' }], ['mpls', 'rb', FO], ['rb', 'sw', { label: 'trunk' }], ['sw', 'pb'], ['sw', 'ap'], ['sw', 'ph']]),
 ];
 TEMPLATES.push(
   { id: 'ccna-vlan', group: 'CCNA', vi: 'CCNA · VLAN segmentation', en: 'CCNA · VLAN segmentation', build: T((d) => {
@@ -1125,45 +1127,51 @@ TEMPLATES.push(
     const pc=addShape(d,'pc',70,210,{label:'LAN · 10.0.0.10'}), sw=addShape(d,'switch',250,210), r=addShape(d,'router',440,210,{label:'R1 · NAT/PAT'}), fw=addShape(d,'firewall',620,210), net=addShape(d,'cloud',800,190,{label:'INTERNET'});
     link(d,pc,sw); link(d,sw,r,{la:'Fa0/1',lb:'G0/0'}); link(d,r,fw,{label:'Inside → Outside'}); link(d,fw,net,{cable:'fiber',label:'Public IP'});
   }) },
-  { id: 'web-three-tier', group: 'Ứng dụng & DevOps', vi: 'Web · 3 tầng', en: 'Web · Three tier', build: T((d) => {
-    const u=addShape(d,'browser',50,180), lb=addShape(d,'loadBalancer',220,180), web=addShape(d,'webServer',420,80), app=addShape(d,'backend',620,180), db=addShape(d,'database',820,180);
-    link(d,u,lb); link(d,lb,web); link(d,web,app); link(d,app,db);
-  }) },
-  { id: 'dc-spine-leaf', group: 'Data center & cloud', vi: 'Data center · Spine–leaf', en: 'Data center · Spine–leaf', build: T((d) => {
-    const s1=addShape(d,'l3switch',300,50,{label:'SPINE-1'}), s2=addShape(d,'l3switch',550,50,{label:'SPINE-2'});
-    [0,1,2].forEach(i=>{const leaf=addShape(d,'switch',100+i*300,230,{label:`LEAF-${i+1}`});link(d,s1,leaf,{cable:'fiber'});link(d,s2,leaf,{cable:'fiber'});const srv=addShape(d,'server',100+i*300,390,{label:`HOST-${i+1}`});link(d,leaf,srv);});
-  }) },
-  { id: 'sdwan', group: 'Doanh nghiệp & văn phòng', vi: 'SD-WAN · nhiều chi nhánh', en: 'SD-WAN · Branches', build: T((d) => {
-    const hub=addShape(d,'cloud',360,80,{label:'SD-WAN FABRIC'}), hq=addShape(d,'building',90,280,{label:'HQ'});
-    link(d,hq,hub,{cable:'vpn',label:'Overlay'}); [0,1,2].forEach(i=>{const br=addShape(d,'building',390+i*190,300,{label:`Branch ${i+1}`});link(d,hub,br,{cable:'vpn'});});
-  }) },
+  G(GA, 'web-three-tier', 'Web · 3 tầng', 'Web · Three tier', [
+    zone('zw', 410, 30, 150, 440, 'Tầng web'), zone('za', 580, 30, 150, 440, 'Tầng ứng dụng', ORANGE), zone('zd', 750, 30, 180, 440, 'Tầng dữ liệu', GREEN),
+    ['u', 'browser', 20, 220, 'Người dùng'], ['fw', 'firewall', 150, 220, 'FW|Chỉ mở 443'], ['lb', 'loadBalancer', 280, 220, 'LB|HTTPS, kiểm tra sức khoẻ'],
+    ['w1', 'webServer', 450, 110, 'WEB-1'], ['w2', 'webServer', 450, 330, 'WEB-2'], ['a1', 'backend', 620, 110, 'APP-1'], ['a2', 'backend', 620, 330, 'APP-2'],
+    ['db', 'sqlDatabase', 805, 110, 'DB chính|Đọc và ghi'], ['rp', 'sqlDatabase', 805, 330, 'DB bản sao|Chỉ đọc'],
+  ], [['u', 'fw'], ['fw', 'lb'], ['lb', 'w1'], ['lb', 'w2'], ['w1', 'a1'], ['w2', 'a2'], ['a1', 'db'], ['a2', 'db'], ['a2', 'rp', { dash: 'dash', label: 'Đọc' }], ['db', 'rp', { dash: 'dot', label: 'Sao chép' }]]),
+  G(GD, 'dc-spine-leaf', 'Data center · Spine–leaf', 'Data center · Spine–leaf', [
+    ['s1', 'l3switch', 250, 30, 'SPINE-1'], ['s2', 'l3switch', 500, 30, 'SPINE-2'],
+    ['l1', 'switch', 60, 210, 'LEAF-1'], ['l2', 'switch', 250, 210, 'LEAF-2'], ['l3', 'switch', 440, 210, 'LEAF-3'], ['bl', 'switch', 660, 210, 'BORDER-LEAF|Cửa ra ngoài fabric'],
+    ['h1', 'server', 60, 390, 'HOST-1'], ['h2', 'server', 345, 390, 'HOST-2|Hai card, hai leaf'], ['fw', 'firewall', 660, 390, 'FW|Lưu lượng vào ra'], ['net', 'cloud', 800, 380, 'WAN / INTERNET'],
+  ], [['s1', 'l1', FO], ['s1', 'l2', FO], ['s1', 'l3', FO], ['s1', 'bl', FO], ['s2', 'l1', FO], ['s2', 'l2', FO], ['s2', 'l3', FO], ['s2', 'bl', FO],
+    ['l1', 'h1'], ['l2', 'h2'], ['l3', 'h2'], ['bl', 'fw'], ['fw', 'net', FO]]),
+  G(GE, 'sdwan', 'SD-WAN · nhiều chi nhánh', 'SD-WAN · Branches', [
+    zone('z', 20, 150, 250, 350, 'TRỤ SỞ / DC'),
+    ['ctl', 'cloud', 560, 5, 'CONTROLLER|Quản lý, chính sách'],
+    ['e1', 'sdwanEdge', 180, 200, 'EDGE-HQ1'], ['e2', 'sdwanEdge', 180, 390, 'EDGE-HQ2'], ['core', 'l3switch', 45, 290, 'SW-CORE'],
+    ['mpls', 'mplsCloud', 370, 180, 'MPLS|Đường chất lượng cao'], ['inet', 'cloud', 450, 370, 'INTERNET|Băng rộng, 4G'],
+    ['b1', 'sdwanEdge', 660, 130, 'EDGE-CN1'], ['b2', 'sdwanEdge', 660, 275, 'EDGE-CN2'], ['b3', 'sdwanEdge', 660, 420, 'EDGE-CN3|Chỉ Internet + 4G'],
+    ['s1', 'switch', 820, 130, 'SW-CN1'], ['s2', 'switch', 820, 275, 'SW-CN2'], ['s3', 'switch', 820, 420, 'SW-CN3'],
+  ], [['core', 'e1'], ['core', 'e2'], ['e1', 'mpls', FO], ['e2', 'inet', VPN],
+    ['mpls', 'b1', FO], ['mpls', 'b2', FO], ['inet', 'b1', VPN], ['inet', 'b2', VPN], ['inet', 'b3', VPN],
+    ['b1', 's1'], ['b2', 's2'], ['b3', 's3'], ['ctl', 'inet', { dash: 'dot', label: 'Kênh điều khiển' }]]),
   { id: 'cicd', group: 'Ứng dụng & DevOps', vi: 'CI/CD · build đến deploy', en: 'CI/CD · Build to deploy', build: T((d) => {
     const git=addShape(d,'gitRepo',50,180), runner=addShape(d,'runner',170,180), pipe=addShape(d,'pipeline',300,170,{w:440}), env=addShape(d,'cluster',780,130,{label:'Runtime'});
     link(d,git,runner); link(d,runner,pipe); link(d,pipe,env); link(d,pipe,addShape(d,'artifact',500,300));
   }) },
-  { id: 'kubernetes', group: 'Ứng dụng & DevOps', vi: 'Kubernetes · cụm ứng dụng', en: 'Kubernetes · app cluster', build: T((d) => {
-    const frame=addShape(d,'clusterBoundary',80,50,{w:740,h:420,label:'Cluster'}), ing=addShape(d,'ingress',120,120), svc=addShape(d,'service',330,120), pod=addShape(d,'pod',530,120), vol=addShape(d,'volume',650,310);
-    assignContainer(d,ing.id);assignContainer(d,svc.id);assignContainer(d,pod.id);assignContainer(d,vol.id);fitContainers(d,[frame.id]);link(d,ing,svc);link(d,svc,pod);link(d,pod,vol);
-  }) },
-  { id: 'dr-site', group: 'Data center & cloud', vi: 'Site dự phòng · DR', en: 'Disaster recovery site', build: T((d) => {
-    const pri=addShape(d,'datacenter',60,80,{w:300,h:300,label:'Primary DC'}), dr=addShape(d,'datacenter',540,80,{w:300,h:300,label:'DR site'}), a=addShape(d,'serverCluster',150,190), b=addShape(d,'serverCluster',630,190);
-    const db1=addShape(d,'database',100,300),db2=addShape(d,'database',580,300);assignContainer(d,a.id);assignContainer(d,b.id);assignContainer(d,db1.id);assignContainer(d,db2.id);fitContainers(d,[pri.id,dr.id]);link(d,a,b,{cable:'fiber',label:'Replication'});link(d,a,db1);link(d,b,db2);
-  }) },
+  G(GA, 'kubernetes', 'Kubernetes · cụm ứng dụng', 'Kubernetes · app cluster', [
+    ['c', 'clusterBoundary', 150, 20, { w: 780, h: 470, label: 'Cluster' }],
+    ['u', 'user', 20, 220, 'Người dùng'], ['ing', 'ingress', 200, 220, 'INGRESS|TLS, định tuyến theo tên miền'], ['svc', 'service', 380, 220, 'SERVICE|ClusterIP'], ['dep', 'deployment', 380, 70, 'DEPLOYMENT|3 bản sao'],
+    ['p1', 'pod', 560, 70, 'POD-1'], ['p2', 'pod', 560, 220, 'POD-2'], ['p3', 'pod', 560, 370, 'POD-3'],
+    ['n1', 'node', 780, 70, 'NODE-1'], ['n2', 'node', 780, 220, 'NODE-2'], ['v', 'volume', 780, 370, 'PVC|Dữ liệu bền vững'],
+  ], [['u', 'ing'], ['ing', 'svc'], ['svc', 'p1'], ['svc', 'p2'], ['svc', 'p3'], ['dep', 'p1', { dash: 'dot', label: 'quản lý' }],
+    ['p1', 'n1', { dash: 'dot', label: 'chạy trên' }], ['p2', 'n2', { dash: 'dot' }], ['p3', 'n2', { dash: 'dot' }], ['p3', 'v']]),
+  G(GD, 'dr-site', 'Site dự phòng · DR', 'Disaster recovery site', [
+    ['pri', 'datacenter', 30, 250, { w: 360, h: 280, label: 'DC chính · đang chạy' }], ['dr', 'datacenter', 560, 250, { w: 360, h: 280, label: 'Site DR · chờ sẵn' }],
+    ['u', 'user', 440, 0, 'Người dùng'], ['dns', 'dnsServer', 440, 110, 'GSLB / DNS|Chuyển hướng khi sự cố'],
+    ['a', 'serverCluster', 80, 310, 'APP-Chính'], ['d1', 'database', 270, 310, 'DB-Chính'], ['k1', 'backupServer', 175, 435, 'BACKUP-Chính'],
+    ['b', 'serverCluster', 800, 310, 'APP-DR'], ['d2', 'database', 610, 310, 'DB-DR'], ['k2', 'backupServer', 705, 435, 'BACKUP-DR'],
+  ], [['u', 'dns'], ['dns', 'a', 'Bình thường'], ['dns', 'b', { dash: 'dash', label: 'Khi chuyển site' }], ['a', 'd1'], ['b', 'd2'],
+    ['d1', 'd2', { ...FO, label: 'Sao chép liên tục' }], ['d1', 'k1'], ['k1', 'k2', { dash: 'dash', label: 'Bản sao lưu ngoài site' }]]),
   { id: 'home-network', group: 'Doanh nghiệp & văn phòng', vi: 'Mạng gia đình / SOHO', en: 'Home / SOHO network', build: T((d) => {
     const net=addShape(d,'cloud',40,160,{label:'ISP'}), modem=addShape(d,'modem',210,160), wifi=addShape(d,'homeRouter',380,160), pc=addShape(d,'laptop',580,70), phone=addShape(d,'mobile',580,250), cam=addShape(d,'camera',740,160);
     link(d,net,modem);link(d,modem,wifi);link(d,wifi,pc,{cable:'wifi'});link(d,wifi,phone,{cable:'wifi'});link(d,wifi,cam,{cable:'wifi'});
   }) },
 );
-// Mẫu dạng bảng: hình [khoá, loại, x, y, 'tên|dòng phụ' hoặc tuỳ chọn], dây [a, b, 'nhãn' hoặc tuỳ chọn]. Vùng khai báo trước để nằm dưới thiết bị.
-const G = (group, id, vi, en, shapes, edges) => ({ id, group, vi, en, build: T((d) => {
-  const m = {};
-  for (const [k, t, x, y, o] of shapes) { const [label, sub] = String(o).split('|'); m[k] = addShape(d, t, x, y, typeof o === 'string' ? { label, sub } : o); }
-  for (const [a, b, o] of edges) link(d, m[a], m[b], typeof o === 'string' ? { label: o } : o);
-}) });
-const FO = { cable: 'fiber' }, WIFI = { cable: 'wifi' }, VPN = { cable: 'vpn', dash: 'dash' };
-const zone = (k, x, y, w, h, label, c = '#2f6fde') => [k, 'zone', x, y, { w, h, label, fill: c, stroke: c }];
-const RED = '#d64545', GREEN = '#2e9e57', ORANGE = '#e67e22', PURPLE = '#7c3aed', GRAY = '#475569';
-const GC = 'CCNA', GE = 'Doanh nghiệp & văn phòng', GS = 'Bảo mật', GD = 'Data center & cloud', GA = 'Ứng dụng & DevOps';
 TEMPLATES.push(
   G(GC, 'ccna-static', 'CCNA · Static route & floating', 'CCNA · Static & floating route', [
     ['a', 'pc', 40, 200, 'PC-A|10.1.1.10'], ['r1', 'router', 200, 200, 'R1|Default route'], ['r2', 'router', 470, 70, 'R2|Đường chính'], ['r3', 'router', 470, 340, 'R3|Đường dự phòng'], ['r4', 'router', 740, 200, 'R4'], ['s', 'server', 900, 190, 'SRV|10.2.2.10'],
@@ -1194,24 +1202,32 @@ TEMPLATES.push(
     ['core', 'l3switch', 380, 60, 'SW-CORE'], ['d', 'dhcpServer', 680, 60, 'DHCP|Server hợp lệ'], ['sw', 'switch', 380, 220, 'SW-ACC|Snooping + DAI'], ['p1', 'pc', 170, 390, 'PC1|Vào bảng binding'], ['p2', 'pc', 590, 390, 'PC2|Vào bảng binding'], ['bad', 'laptop', 680, 220, 'Kẻ tấn công|DHCP và ARP giả'],
   ], [['core', 'd'], ['core', 'sw', { mode: 'trunk', label: 'trusted' }], ['sw', 'p1', 'untrusted'], ['sw', 'p2', 'untrusted'], ['sw', 'bad', { label: 'untrusted · bị chặn', color: RED, dash: 'dash' }]]),
   G(GC, 'ccna-mgmt', 'CCNA · Mạng quản trị', 'CCNA · Management network', [
-    zone('z', 480, 30, 440, 470, 'VLAN quản trị · 10.99.0.0/24', GRAY),
-    ['r', 'router', 90, 70, 'R1'], ['s1', 'l3switch', 90, 210, 'SW-CORE'], ['s2', 'switch', 90, 360, 'SW-ACC'], ['m', 'switch', 300, 210, 'SW-MGMT'], ['j', 'bastion', 520, 50, 'JUMP|SSH vào thiết bị'], ['n', 'monitor', 760, 50, 'NMS|SNMPv3'], ['l', 'logging', 760, 165, 'SYSLOG|UDP 514'], ['t', 'server', 760, 280, 'NTP|UDP 123'], ['a', 'server', 520, 390, 'TACACS+|TCP 49'], ['f', 'backupServer', 760, 395, 'TFTP/SCP|Sao lưu cấu hình'],
-  ], [['r', 'm'], ['s1', 'm'], ['s2', 'm'], ['r', 's1'], ['s1', 's2'], ['m', 'j'], ['m', 'n'], ['m', 'l'], ['m', 't'], ['m', 'a'], ['m', 'f']]),
+    zone('z', 300, 20, 620, 480, 'VLAN quản trị · 10.99.0.0/24 (tách khỏi mạng người dùng)', GRAY),
+    ['r', 'router', 60, 60, 'R1'], ['s1', 'l3switch', 60, 225, 'SW-CORE'], ['s2', 'switch', 60, 390, 'SW-ACC'], ['m', 'switch', 580, 225, 'SW-MGMT|Cổng quản trị riêng'],
+    ['j', 'bastion', 390, 70, 'JUMP|SSH vào thiết bị'], ['n', 'monitor', 580, 70, 'NMS|SNMPv3'], ['l', 'logging', 770, 70, 'SYSLOG|UDP 514'], ['t', 'server', 390, 380, 'NTP|UDP 123'], ['a', 'server', 580, 380, 'TACACS+|TCP 49'], ['f', 'backupServer', 770, 380, 'TFTP/SCP|Sao lưu cấu hình'],
+  ], [['r', 's1'], ['s1', 's2'], ['r', 'm'], ['s1', 'm'], ['s2', 'm'], ['m', 'j'], ['m', 'n'], ['m', 'l'], ['m', 't'], ['m', 'a'], ['m', 'f']]),
   G(GE, 'ent-small', 'Công ty nhỏ · một văn phòng', 'Small office', [
     ['net', 'cloud', 40, 60, 'INTERNET'], ['fw', 'firewall', 240, 70, 'FW|NAT, lọc truy cập'], ['sw', 'switch', 430, 70, 'SW1|VLAN 10, 20, 30'], ['ap', 'ap', 680, 70, 'AP|Nhân viên + khách'], ['pc', 'pc', 180, 280, 'PC-KT'], ['lt', 'laptop', 330, 290, 'LT-KD'], ['prn', 'printer', 480, 280, 'PRN'], ['nas', 'nas', 620, 280, 'NAS|Dữ liệu chung'], ['m', 'mobile', 800, 280, 'Mobile'],
   ], [['net', 'fw', FO], ['fw', 'sw', 'trunk'], ['sw', 'ap'], ['sw', 'pc'], ['sw', 'lt'], ['sw', 'prn'], ['sw', 'nas'], ['ap', 'm', WIFI]]),
   G(GE, 'ent-dual-isp', 'Hai đường Internet · dự phòng', 'Dual ISP edge', [
-    ['i1', 'isp', 200, 40, 'ISP-A'], ['i2', 'isp', 600, 40, 'ISP-B'], ['r1', 'router', 200, 170, 'R1 · Active|HSRP priority 110'], ['r2', 'router', 600, 170, 'R2 · Standby|IP SLA theo dõi'], ['f1', 'firewall', 200, 300, 'FW1|Active'], ['f2', 'firewall', 600, 300, 'FW2|Standby'], ['c', 'l3switch', 400, 420, 'SW-CORE'],
-  ], [['i1', 'r1', FO], ['i2', 'r2', FO], ['r1', 'r2', 'HSRP VIP'], ['r1', 'f1'], ['r2', 'f2'], ['f1', 'f2', { label: 'HA sync', dash: 'dash' }], ['f1', 'c'], ['f2', 'c']]),
+    ['i1', 'isp', 220, 20, 'ISP-A'], ['i2', 'isp', 620, 20, 'ISP-B'], ['r1', 'router', 220, 150, 'R-EDGE1|eBGP với ISP-A'], ['r2', 'router', 620, 150, 'R-EDGE2|eBGP với ISP-B'],
+    ['f1', 'firewall', 220, 290, 'FW1|Active'], ['f2', 'firewall', 620, 290, 'FW2|Standby'], ['c1', 'l3switch', 220, 430, 'CORE1'], ['c2', 'l3switch', 620, 430, 'CORE2'],
+  ], [['i1', 'r1', FO], ['i2', 'r2', FO], ['r1', 'r2', 'iBGP'], ['r1', 'f1'], ['r2', 'f2'], ['r1', 'f2', { dash: 'dash' }], ['r2', 'f1', { dash: 'dash' }],
+    ['f1', 'f2', { label: 'HA sync', dash: 'dash' }], ['f1', 'c1'], ['f2', 'c2'], ['c1', 'c2', { label: 'Stack', width: 4 }]]),
   G(GE, 'ent-hub-spoke', 'Trụ sở & chi nhánh · MPLS + VPN', 'HQ and branches · MPLS + VPN', [
-    ['hq', 'building', 400, 10, 'HQ'], ['r', 'router', 400, 120, 'R-HQ'], ['m', 'mplsCloud', 80, 250, 'MPLS|Đường chính'], ['n', 'cloud', 700, 250, 'INTERNET|VPN dự phòng'], ['b1', 'router', 400, 230, 'R-CN1'], ['b2', 'router', 400, 340, 'R-CN2'], ['b3', 'router', 400, 450, 'R-CN3'],
-  ], [['hq', 'r'], ['r', 'm', FO], ['r', 'n', VPN], ['m', 'b1', FO], ['m', 'b2', FO], ['m', 'b3', FO], ['n', 'b1', VPN], ['n', 'b2', VPN], ['n', 'b3', VPN]]),
+    zone('z', 20, 60, 290, 400, 'TRỤ SỞ'),
+    ['srv', 'server', 50, 110, 'SRV|ERP, File, AD'], ['core', 'l3switch', 50, 300, 'SW-CORE'], ['r', 'router', 200, 205, 'R-HQ|Hub'],
+    ['m', 'mplsCloud', 410, 90, 'MPLS|Đường chính'], ['n', 'cloud', 410, 350, 'INTERNET|DMVPN dự phòng'],
+    ['b1', 'router', 670, 70, 'R-CN1'], ['b2', 'router', 670, 225, 'R-CN2'], ['b3', 'router', 670, 380, 'R-CN3'], ['s1', 'switch', 830, 70, 'SW-CN1'], ['s2', 'switch', 830, 225, 'SW-CN2'], ['s3', 'switch', 830, 380, 'SW-CN3'],
+  ], [['srv', 'core'], ['core', 'r'], ['r', 'm', FO], ['r', 'n', VPN], ['m', 'b1', FO], ['m', 'b2', FO], ['m', 'b3', FO], ['n', 'b1', VPN], ['n', 'b2', VPN], ['n', 'b3', VPN], ['b1', 's1'], ['b2', 's2'], ['b3', 's3']]),
   G(GE, 'ent-school', 'Trường học', 'School', [
+    ['net', 'cloud', 150, 5, 'INTERNET'],
     ['fw', 'firewall', 400, 10, 'FW|Lọc nội dung'], ['c', 'l3switch', 400, 150, 'SW-CORE'], ['s1', 'switch', 110, 280, 'SW-LAB|VLAN 10'], ['s2', 'switch', 310, 280, 'SW-GV|VLAN 20'], ['s3', 'switch', 510, 280, 'SW-WIFI|VLAN 30, 40'], ['sv', 'server', 740, 270, 'SRV|LMS, AD, DHCP'], ['p1', 'pc', 110, 410, 'Phòng máy'], ['p2', 'laptop', 310, 415, 'Giáo viên'], ['a', 'ap', 510, 410, 'AP'], ['m', 'tablet', 700, 410, 'Học sinh'],
-  ], [['fw', 'c'], ['c', 's1'], ['c', 's2'], ['c', 's3'], ['c', 'sv'], ['s1', 'p1'], ['s2', 'p2'], ['s3', 'a'], ['a', 'm', WIFI]]),
+  ], [['net', 'fw', FO], ['fw', 'c'], ['c', 's1'], ['c', 's2'], ['c', 's3'], ['c', 'sv'], ['s1', 'p1'], ['s2', 'p2'], ['s3', 'a'], ['a', 'm', WIFI]]),
   G(GE, 'ent-hospital', 'Bệnh viện · tách mạng y tế', 'Hospital · segmented network', [
+    ['net', 'cloud', 150, 5, 'INTERNET'],
     ['fw', 'firewall', 400, 10, 'FW|Chặn giữa các vùng'], ['c', 'l3switch', 400, 150, 'SW-CORE|Dự phòng kép'], ['s1', 'switch', 80, 290, 'SW-KHOA|VLAN nhân viên'], ['s2', 'switch', 300, 290, 'SW-YTE|VLAN thiết bị y tế'], ['s3', 'switch', 520, 290, 'SW-DC|VLAN máy chủ'], ['a', 'ap', 740, 290, 'AP|Bác sĩ + bệnh nhân'], ['p', 'pc', 80, 420, 'Máy trạm'], ['i', 'iot', 300, 420, 'Máy xét nghiệm'], ['h', 'database', 450, 420, 'HIS'], ['x', 'nas', 600, 420, 'PACS'], ['t', 'tablet', 740, 420, 'Máy bảng'],
-  ], [['fw', 'c'], ['c', 's1'], ['c', 's2'], ['c', 's3'], ['c', 'a'], ['s1', 'p'], ['s2', 'i'], ['s3', 'h'], ['s3', 'x'], ['a', 't', WIFI]]),
+  ], [['net', 'fw', FO], ['fw', 'c'], ['c', 's1'], ['c', 's2'], ['c', 's3'], ['c', 'a'], ['s1', 'p'], ['s2', 'i'], ['s3', 'h'], ['s3', 'x'], ['a', 't', WIFI]]),
   G(GE, 'ent-hotel', 'Khách sạn · khách, IPTV, tổng đài', 'Hotel · guests, IPTV, PBX', [
     ['net', 'cloud', 40, 60, 'INTERNET'], ['fw', 'firewall', 240, 70, 'FW|Portal đăng nhập'], ['c', 'l3switch', 430, 70, 'SW-CORE'], ['pbx', 'ipPbx', 680, 70, 'PBX'], ['sf', 'switch', 110, 240, 'SW-TANG|Khách · VLAN 100'], ['sb', 'switch', 430, 240, 'SW-LETAN|POS · VLAN 20'], ['st', 'switch', 680, 240, 'SW-PHONG|Thoại, IPTV'], ['a', 'ap', 60, 400, 'AP-Tầng'], ['m', 'mobile', 210, 400, 'Khách'], ['pos', 'pc', 430, 400, 'POS'], ['ph', 'phone', 610, 400, 'Điện thoại'], ['tv', 'television', 760, 400, 'IPTV'],
   ], [['net', 'fw', FO], ['fw', 'c'], ['c', 'pbx'], ['c', 'sf'], ['c', 'sb'], ['c', 'st'], ['sf', 'a'], ['a', 'm', WIFI], ['sb', 'pos'], ['st', 'ph'], ['st', 'tv']]),
@@ -1220,8 +1236,11 @@ TEMPLATES.push(
     ['erp', 'server', 60, 70, 'ERP'], ['pc', 'pc', 60, 370, 'Văn phòng'], ['sw', 'switch', 180, 220, 'SW-IT'], ['f1', 'firewall', 420, 70, 'FW-IT'], ['h', 'database', 420, 210, 'Historian'], ['f2', 'firewall', 420, 370, 'FW-OT'], ['sc', 'server', 650, 80, 'SCADA'], ['hmi', 'television', 810, 80, 'HMI'], ['so', 'switch', 700, 230, 'SW-OT'], ['plc', 'iot', 650, 370, 'PLC-1'], ['plc2', 'iot', 810, 370, 'PLC-2'],
   ], [['erp', 'sw'], ['pc', 'sw'], ['sw', 'f1'], ['f1', 'h'], ['h', 'f2'], ['f2', 'so', 'Chỉ cổng cho phép'], ['so', 'sc'], ['so', 'hmi'], ['so', 'plc'], ['so', 'plc2']]),
   G(GE, 'ent-retail', 'Chuỗi cửa hàng · SD-WAN', 'Retail chain · SD-WAN', [
-    ['dc', 'datacenter', 320, 20, { w: 300, h: 130, label: 'Trung tâm · POS, kho' }], ['e0', 'sdwanEdge', 360, 70, 'EDGE-HQ'], ['db', 'database', 510, 70, 'DB'], ['n', 'cloud', 380, 220, 'Internet + 4G'], ['e1', 'sdwanEdge', 80, 360, 'EDGE-CH1'], ['e2', 'sdwanEdge', 400, 360, 'EDGE-CH2'], ['e3', 'sdwanEdge', 720, 360, 'EDGE-CH3'], ['p1', 'pc', 80, 470, 'POS-1'], ['p2', 'pc', 400, 470, 'POS-2'], ['p3', 'pc', 720, 470, 'POS-3'],
-  ], [['e0', 'db'], ['e0', 'n', VPN], ['n', 'e1', VPN], ['n', 'e2', VPN], ['n', 'e3', VPN], ['e1', 'p1'], ['e2', 'p2'], ['e3', 'p3']]),
+    ['dc', 'datacenter', 300, 20, { w: 330, h: 130, label: 'Trung tâm · POS, kho' }], ['e0', 'sdwanEdge', 340, 70, 'EDGE-HQ'], ['db', 'database', 520, 70, 'DB'],
+    ['n', 'cloud', 410, 210, 'INTERNET|4G dự phòng'],
+    ['e1', 'sdwanEdge', 85, 340, 'EDGE-CH1'], ['e2', 'sdwanEdge', 425, 340, 'EDGE-CH2'], ['e3', 'sdwanEdge', 765, 340, 'EDGE-CH3'],
+    ['p1', 'pc', 30, 460, 'POS-1'], ['w1', 'ap', 145, 460, 'AP-CH1'], ['p2', 'pc', 370, 460, 'POS-2'], ['w2', 'ap', 485, 460, 'AP-CH2'], ['p3', 'pc', 710, 460, 'POS-3'], ['w3', 'ap', 825, 460, 'AP-CH3'],
+  ], [['e0', 'db'], ['e0', 'n', VPN], ['n', 'e1', VPN], ['n', 'e2', VPN], ['n', 'e3', VPN], ['e1', 'p1'], ['e1', 'w1'], ['e2', 'p2'], ['e2', 'w2'], ['e3', 'p3'], ['e3', 'w3']]),
   G(GS, 'sec-dmz', 'Firewall 3 vùng · DMZ', 'Three-zone firewall · DMZ', [
     zone('z1', 480, 20, 460, 220, 'DMZ · 172.16.0.0/24', ORANGE), zone('z2', 480, 260, 460, 230, 'Inside · 10.0.0.0/16', GREEN),
     ['net', 'cloud', 40, 190, 'INTERNET'], ['fw', 'firewall', 280, 200, 'FW|Mặc định chặn'], ['sd', 'switch', 510, 90, 'SW-DMZ'], ['w', 'webServer', 670, 45, 'WEB'], ['m', 'mailServer', 820, 90, 'MAIL'], ['d', 'dnsServer', 670, 160, 'DNS'], ['c', 'l3switch', 510, 350, 'SW-CORE'], ['ad', 'server', 720, 290, 'AD'], ['p', 'pc', 720, 400, 'PC'],

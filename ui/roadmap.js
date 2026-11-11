@@ -6,6 +6,8 @@ import { B } from '../lab/kit.js';
 import { QUIZZES, QUIZ_LEN } from '../scenarios/quizzes.js';
 import { SCENARIOS } from '../scenarios/index.js';
 import { lessonHref } from './i18n.js';
+import { libQuiz, libCount, LIB_LEN } from '../lab/library-quiz.js';
+import { openQuiz } from './quiz.js';
 import { load, save } from './store.js';
 
 const scenarioOf = (short) => SCENARIOS.find((s) => s.meta.id.startsWith(`${short}-`));
@@ -44,6 +46,7 @@ export function openRoadmap(o = {}) {
       (optional ? '' : `<label><input type="checkbox" data-read="${esc(topicKey(t))}"${st.read[topicKey(t)] ? ' checked' : ''}> Đã nắm lý thuyết</label>`) + `</div>` +
       (t.notes ? `<details class="rm-notes"><summary>📝 Bài đọc ngắn</summary><ul>${t.notes.map((n) => `<li>${esc(n)}</li>`).join('')}</ul></details>` : '') +
       t.sc.map((id) => { const d = !optional && scenarioDone(id, st); return `<button class="rm-item${d ? ' done' : ''}" data-sc="${id}"><span>${d ? '✓' : '○'}</span><b>Xem gói tin</b> ${esc(scenarioOf(id).meta.titleVi)}, rồi làm 🎯 Quiz</button>`; }).join('') +
+      (t.quiz ? `<button class="rm-item" data-libquiz="${esc(t.quiz)}" data-title="${esc(t.title)}"><span>🎯</span><b>${t.quiz === 'Wireshark' ? 'Bài tập đọc gói' : 'Quiz ôn tập'}</b> ${Math.min(LIB_LEN, libCount(t.quiz))} câu mỗi lượt · ngân hàng ${libCount(t.quiz)} câu, lượt sau ưu tiên câu chưa gặp</button>` : '') +
       t.core.map((id) => labRow(id, !!st.labsDone[id])).join('') +
       (more.length ? `<details class="rm-more"><summary>${optional ? 'Lab' : 'Lab luyện thêm'} (${more.filter((id) => st.labsDone[id]).length}/${more.length})</summary>${more.map((id) => labRow(id, !!st.labsDone[id])).join('')}</details>` : '') +
       (t.gap ? `<p class="rm-gap">⚠ App ${esc(t.gap)}.</p>` : '') + `</article>`;
@@ -69,6 +72,14 @@ export function openRoadmap(o = {}) {
     if (go) go.onclick = () => modal.querySelector('#rm-next')?.scrollIntoView({ block: 'center', behavior: 'smooth' });
     modal.querySelectorAll('.rm-stage').forEach((d) => (d.ontoggle = () => { if (d.open) openStages.add(d.dataset.stage); else openStages.delete(d.dataset.stage); }));
     modal.querySelectorAll('[data-lab]').forEach((b) => (b.onclick = () => { close(); o.openLab?.(b.dataset.lab); }));
+    modal.querySelectorAll('[data-libquiz]').forEach((b) => (b.onclick = () => {
+      // nhớ các câu đã ra để lượt sau rút câu khác; đi hết ngân hàng thì bắt đầu vòng mới
+      const ref = b.dataset.libquiz, key = `libseen_${ref}`, seen = load(key, []);
+      const quiz = libQuiz(ref, Math.random, LIB_LEN, new Set(seen));
+      const all = [...new Set([...seen, ...quiz.map((q) => q.q)])];
+      save(key, all.length >= libCount(ref) ? quiz.map((q) => q.q) : all);
+      close(); openQuiz('lib-' + ref, b.dataset.title, quiz);
+    }));
     modal.querySelectorAll('[data-sc]').forEach((b) => (b.onclick = () => { close(); o.openScenario?.(scenarioOf(b.dataset.sc).meta.id); }));
     modal.querySelectorAll('[data-read]').forEach((c) => (c.onchange = () => {
       const read = load('roadmap-read', {});

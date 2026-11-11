@@ -34,10 +34,10 @@ const NS_STAGE = {
 };
 
 // Thư viện giáo trình ngoài mảng mạng (HTML nằm ở E:\\SAP, ngoài thư mục Mạng máy tính nên đường dẫn bắt đầu bằng ../../).
-// Chỉ có bài đọc: app chưa có lab cho các mảng này.
+// Không có lab cho các mảng này; mỗi chủ đề có quiz hoặc bài tập trong lab/library-quiz.js (`quiz` = khoá tra).
 const D = (label, path) => ({ label, path });
 const LIB_STAGE = {
-  id: 'library', name: 'Hệ thống, giám sát, phân tích gói: thư viện giáo trình (chỉ có bài đọc)', weight: 0, optional: true,
+  id: 'library', name: 'Hệ thống, giám sát, phân tích gói: thư viện giáo trình (bài đọc + quiz)', weight: 0, optional: true,
   topics: [
     ['Wireshark', 'Phân tích gói bằng Wireshark', [D('Giáo trình Wireshark', '../Wireshark-Network-Administrator/docs/html/index.html')]],
     ['Linux', 'Quản trị Linux và vận hành hệ thống', [
@@ -64,7 +64,7 @@ const LIB_STAGE = {
     ['Chuẩn', 'Quản trị và tiêu chuẩn: ITIL, NIST, ISO 27001', [
       D('ITIL và COBIT', '../../Advanced-Architecture/01-ITIL-COBIT/Mon-01-ITIL-COBIT-Textbook.html'),
       D('NIST và ISO 27001', '../../Advanced-Architecture/02-NIST-ISO27001/Mon-02-NIST-ISO27001-Textbook.html')]],
-  ].map(([ref, title, docs]) => ({ ref, title, lessons: [], docs, sc: [], core: [], more: [], gap: 'Chưa có lab trong app.' })),
+  ].map(([ref, title, docs]) => ({ ref, title, lessons: [], docs, sc: [], core: [], more: [], quiz: ref, gap: ref === 'Wireshark' ? 'chưa mở được file .pcap ngoài; bài tập dùng gói của các kịch bản' : 'chưa có lab cho mảng này, chỉ có quiz ôn lý thuyết' })),
 };
 
 export const ROADMAP = [

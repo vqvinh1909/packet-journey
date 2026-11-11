@@ -31,6 +31,8 @@ export function openQuiz(scenarioId, titleVi, quiz) {
     const q = document.createElement('div');
     q.className = 'quiz-q';
     q.innerHTML = `<div class="quiz-qt"><b>Câu ${qi + 1}.</b> ${esc(item.q)}${item.from ? ` <span class="quiz-from">${esc(item.from)}</span>` : ''}</div>`;
+    // bài tập Wireshark: danh sách gói đi kèm câu hỏi
+    if (item.table) q.insertAdjacentHTML('beforeend', `<div class="dev-table quiz-table"><table><tr>${item.table.cols.map((c) => `<th>${esc(c)}</th>`).join('')}</tr>${item.table.rows.map((r) => `<tr>${r.map((c) => `<td>${esc(String(c))}</td>`).join('')}</tr>`).join('')}</table></div>`);
     const opts = document.createElement('div');
     opts.className = 'quiz-opts';
     item.options.forEach((opt, oi) => {
