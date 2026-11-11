@@ -2,6 +2,13 @@
 // Bộ câu hỏi quiz theo từng kịch bản (id → mảng câu hỏi). Tách riêng để dễ bổ sung.
 // Mỗi câu: { q, options:[...], correct: index, explainVi }
 
+import { HARD } from './quizzes-hard.js';
+import { QGEN, SC_GENS } from './quiz-gen.js';
+import { getScenario } from './index.js';
+import { BANK } from '../lab/ccna-exam.js';
+import { GENS } from '../lab/ccna-gen.js';
+import { ROADMAP } from '../lab/roadmap.js';
+
 export const QUIZZES = {
   's01-ping-same-subnet': [
     { q: 'PC1 ping PC2 cùng mạng. Khung ARP Request có MAC đích là gì?', options: ['MAC của PC2', 'ff:ff:ff:ff:ff:ff (broadcast)', 'MAC của switch', '00:00:00:00:00:00'], correct: 1, explainVi: 'ARP Request gửi broadcast vì chưa biết MAC đích.' },
@@ -218,8 +225,128 @@ export const QUIZZES = {
     { q: 'Vì sao BFD có ích khi có switch giữa hai router?', options: ['Cổng của router vẫn up khi đoạn kia đứt', 'Switch chặn OSPF', 'Router không có MAC', 'Để giảm TTL'], correct: 0, explainVi: 'Không có tín hiệu lớp 1 để báo.' },
     { q: 'BFD điều khiển một chặng dùng cổng nào?', options: ['UDP 3784', 'TCP 179', 'UDP 4789', 'IP 89'], correct: 0, explainVi: 'BFD đa chặng dùng UDP 4784.' },
   ],
+  's40-voip-call': [
+    { q: 'Trong cuộc gọi có tổng đài SIP proxy, âm thanh RTP thường đi thế nào?', options: ['Thẳng giữa hai điện thoại', 'Luôn qua tổng đài', 'Qua switch STP root', 'Trong bản tin SIP'], correct: 0, explainVi: 'SDP cho mỗi bên biết IP và cổng của bên kia. Tổng đài chỉ xử lý báo hiệu, trừ khi được cấu hình để giữ media.' },
+    { q: 'Phần nào cho biết IP, cổng nhận RTP và codec?', options: ['SDP', 'Header Via', 'RTCP', 'CSeq'], correct: 0, explainVi: 'Dòng c= chứa IP, dòng m= chứa cổng và payload type.' },
+    { q: 'Thứ tự bắt tay một cuộc gọi SIP là?', options: ['INVITE, 200 OK, ACK', 'SYN, SYN-ACK, ACK', 'Discover, Offer, Ack', 'REGISTER, BYE, ACK'], correct: 0, explainVi: '100 Trying và 180 Ringing là các bản tin tạm thời xen giữa.' },
+    { q: 'Băng thông IP mỗi chiều của G.711 với gói 20 ms là?', options: ['64 kbps', '80 kbps', '8 kbps', '24 kbps'], correct: 1, explainVi: '(160 + 40 byte) × 8 × 50 gói = 80 kbps. 24 kbps là của G.729.' },
+    { q: 'Vì sao RTP chạy trên UDP?', options: ['Gói đến muộn không còn giá trị, gửi lại chỉ thêm trễ', 'UDP mã hoá âm thanh', 'TCP không có cổng', 'UDP chọn codec'], correct: 0, explainVi: 'Số thứ tự và timestamp của RTP giúp phát hiện mất gói và phát đều.' },
+  ],
+  's41-arp-spoofing': [
+    { q: 'Vì sao ARP spoofing làm được?', options: ['ARP không xác thực người gửi', 'Switch không có bảng MAC', 'IP nguồn bị mã hoá', 'Gateway tắt ICMP'], correct: 0, explainVi: 'Máy nhận tin mọi ARP Reply, kể cả khi không hỏi.' },
+    { q: 'Sau khi bị đầu độc, khung PC gửi ra Internet có gì sai?', options: ['IP đích', 'MAC đích', 'TTL', 'Checksum'], correct: 1, explainVi: 'IP đích vẫn đúng. MAC đích là MAC của kẻ tấn công vì PC tra ARP cache sai.' },
+    { q: 'DAI dựa vào bảng nào để kiểm gói ARP?', options: ['Bảng định tuyến', 'Bảng NAT', 'DHCP snooping binding', 'Bảng STP'], correct: 2, explainVi: 'DAI so IP–MAC trong gói ARP với binding do DHCP snooping ghi lại.' },
+    { q: 'Dấu hiệu ARP spoofing khi xem `arp -a` trên PC?', options: ['Không có dòng nào', 'Gateway và một máy khác có cùng MAC', 'MAC toàn ff', 'IP gateway đổi'], correct: 1, explainVi: 'Hai IP khác nhau cùng trỏ về một MAC là dấu hiệu điển hình.' },
+  ],
+  's42-dhcp-rogue': [
+    { q: 'DHCP server giả cấp thông số nào để nghe lén?', options: ['Subnet mask sai', 'Default gateway và DNS là chính nó', 'Lease time ngắn', 'IP trùng'], correct: 1, explainVi: 'Gateway giả cho nghe lén gói; DNS giả cho dẫn tới trang giả.' },
+    { q: 'Client thường nhận OFFER nào?', options: ['OFFER đến trước', 'OFFER có IP lớn nhất', 'OFFER của server có MAC nhỏ nhất', 'OFFER cuối cùng'], correct: 0, explainVi: 'Client không kiểm được server thật hay giả, nên nhận OFFER đầu tiên.' },
+    { q: 'Trên cổng untrusted, DHCP snooping loại gói nào?', options: ['DISCOVER', 'REQUEST', 'OFFER và ACK', 'Mọi gói UDP'], correct: 2, explainVi: 'Gói của server chỉ được đi vào từ cổng trusted.' },
+    { q: 'Cổng nào nên đặt `ip dhcp snooping trust`?', options: ['Mọi cổng người dùng', 'Cổng nối tới DHCP server thật hoặc uplink', 'Cổng đang shutdown', 'Không cổng nào'], correct: 1, explainVi: 'Chỉ hướng có DHCP server hợp lệ mới được tin.' },
+  ],
+  's43-mac-flooding': [
+    { q: 'Khi bảng MAC đầy, switch xử lý khung unicast có MAC đích chưa biết thế nào?', options: ['Loại', 'Flood ra mọi cổng trong VLAN', 'Gửi về root bridge', 'Gửi ICMP báo lỗi'], correct: 1, explainVi: 'Unknown unicast được flood giống broadcast.' },
+    { q: 'Mục tiêu của MAC flooding là gì?', options: ['Đổi root bridge', 'Nghe lén lưu lượng của máy khác', 'Chiếm IP gateway', 'Tắt trunk'], correct: 1, explainVi: 'Switch flood khung nên cổng của kẻ tấn công cũng nhận bản sao.' },
+    { q: 'Tính năng nào giới hạn số MAC trên một cổng?', options: ['Port security', 'PortFast', 'UDLD', 'LACP'], correct: 0, explainVi: '`switchport port-security maximum N`.' },
+    { q: 'Với violation shutdown, cổng vi phạm vào trạng thái nào?', options: ['blocking', 'err-disabled', 'listening', 'trunking'], correct: 1, explainVi: 'Cổng bị err-disabled, cần `shutdown` rồi `no shutdown` hoặc errdisable recovery.' },
+  ],
+  's44-syn-flood': [
+    { q: 'SYN flood làm cạn tài nguyên nào của server?', options: ['Dung lượng đĩa', 'Hàng đợi kết nối nửa mở', 'Bảng ARP', 'Bảng định tuyến'], correct: 1, explainVi: 'Mỗi SYN chiếm một dòng nửa mở chờ ACK.' },
+    { q: 'Vì sao kẻ tấn công giả IP nguồn?', options: ['Để nhận SYN-ACK nhanh hơn', 'Để khó truy vết và không phải xử lý SYN-ACK', 'Để vượt NAT', 'Để tăng MSS'], correct: 1, explainVi: 'SYN-ACK đi tới IP giả; kẻ tấn công không cần trả lời.' },
+    { q: 'SYN cookies hoạt động thế nào?', options: ['Chặn SYN theo quốc gia', 'Không lưu trạng thái cho tới khi ACK hợp lệ quay về', 'Mã hoá payload', 'Tăng thời gian chờ SYN'], correct: 1, explainVi: 'Thông tin kết nối được mã hoá vào số thứ tự của SYN-ACK.' },
+    { q: 'Biện pháp nào của nhà mạng chặn gói giả IP nguồn?', options: ['uRPF / BCP 38', 'PortFast', 'HSRP', 'DHCP relay'], correct: 0, explainVi: 'uRPF loại gói có IP nguồn không thể đến từ cổng đó.' },
+  ],
+  's45-dns-spoofing': [
+    { q: 'Client so những gì để chấp nhận một câu trả lời DNS thường?', options: ['Chữ ký số', 'Transaction ID, cổng và IP nguồn', 'MAC nguồn', 'TTL của IP'], correct: 1, explainVi: 'DNS thường không có xác thực mật mã.' },
+    { q: 'Vì sao kẻ tấn công đặt TTL bản ghi giả rất dài?', options: ['Để gói đi xa hơn', 'Để bản ghi giả nằm lâu trong cache', 'Để vượt firewall', 'Để tránh phân mảnh'], correct: 1, explainVi: 'TTL của bản ghi DNS là thời gian lưu cache.' },
+    { q: 'Cơ chế nào kiểm chữ ký số của bản ghi DNS?', options: ['DNSSEC', 'DHCP snooping', 'NAT', 'SNMPv3'], correct: 0, explainVi: 'DNSSEC cho resolver kiểm tra bản ghi có đúng do chủ tên miền ký.' },
+    { q: 'Điều gì giúp người dùng phát hiện trang giả dù DNS đã bị giả?', options: ['Tốc độ tải trang', 'Cảnh báo chứng chỉ HTTPS', 'Biểu tượng Wi-Fi', 'Số hop traceroute'], correct: 1, explainVi: 'Trang giả không có khoá riêng của chứng chỉ thật.' },
+  ],
+  's46-vlan-hopping': [
+    { q: 'Điều kiện để double tagging thành công?', options: ['Kẻ tấn công ở VLAN trùng native VLAN của trunk', 'Kẻ tấn công có quyền admin switch', 'Trunk dùng ISL', 'STP bị tắt'], correct: 0, explainVi: 'Nhãn ngoài phải là native VLAN để SW1 gỡ mà không thêm nhãn mới.' },
+    { q: 'Switch đầu tiên làm gì với khung hai nhãn?', options: ['Gỡ nhãn ngoài, giữ nhãn trong', 'Gỡ cả hai', 'Loại khung', 'Đổi nhãn trong'], correct: 0, explainVi: 'Khung native VLAN đi lên trunk không nhãn, nên nhãn trong lộ ra.' },
+    { q: 'Double tagging có nhận được gói trả lời không?', options: ['Có', 'Không, chỉ đi một chiều', 'Có nếu dùng TCP', 'Có nếu cùng subnet'], correct: 1, explainVi: 'Chiều về không có nhãn kép nên ở lại VLAN đích.' },
+    { q: 'Lệnh nào chặn switch spoofing qua DTP trên cổng người dùng?', options: ['switchport nonegotiate', 'spanning-tree bpduguard enable', 'ip dhcp snooping', 'storm-control broadcast'], correct: 0, explainVi: 'Đặt `switchport mode access` và `switchport nonegotiate` để cổng không tự thành trunk.' },
+  ],
+  's47-tls-handshake': [
+    { q: 'Trong TLS 1.3, phần nào của bắt tay đi dạng rõ?', options: ['ClientHello và ServerHello', 'Chứng chỉ của server', 'Finished', 'Dữ liệu HTTP'], correct: 0, explainVi: 'Hai gói Hello phải đi rõ để trao khoá. Từ sau ServerHello mọi thứ đều mã hoá.' },
+    { q: 'Vì sao firewall lọc được trang HTTPS theo tên miền mà không giải mã?', options: ['Đọc cookie', 'Đọc SNI trong ClientHello', 'Đọc đường dẫn URL', 'Đọc chứng chỉ đã mã hoá'], correct: 1, explainVi: 'SNI nằm trong ClientHello dạng rõ.' },
+    { q: 'Forward secrecy nghĩa là gì?', options: ['Khoá riêng của server lộ sau này cũng không giải mã được phiên cũ', 'Chứng chỉ không bao giờ hết hạn', 'Client không cần kiểm chứng chỉ', 'Dữ liệu được nén trước khi mã hoá'], correct: 0, explainVi: 'Khoá phiên sinh từ khoá Diffie-Hellman tạm, dùng xong là bỏ.' },
+    { q: 'Điều gì ngăn kẻ tấn công dùng bản sao chứng chỉ thật?', options: ['Chứng chỉ được giữ bí mật', 'Nó không có khoá riêng để ký CertificateVerify', 'Chứng chỉ gắn với địa chỉ MAC', 'TLS kiểm địa chỉ IP'], correct: 1, explainVi: 'Chứng chỉ là công khai. Chỉ chủ thật mới có khoá riêng tương ứng.' },
+  ],
+  's48-ipsec-ikev2': [
+    { q: 'IKEv2 cần mấy bản tin để dựng xong đường hầm đầu tiên?', options: ['2', '4', '6', '9'], correct: 1, explainVi: 'Hai gói IKE_SA_INIT và hai gói IKE_AUTH.' },
+    { q: 'IKE dùng cổng nào khi không có NAT?', options: ['TCP 443', 'UDP 500', 'UDP 1812', 'TCP 179'], correct: 1, explainVi: 'UDP 500. Có NAT thì chuyển sang UDP 4500 (NAT-T).' },
+    { q: 'Hai đầu không có bộ thuật toán nào chung thì lỗi gì?', options: ['NO_PROPOSAL_CHOSEN', 'AUTHENTICATION_FAILED', 'TS_UNACCEPTABLE', 'TTL exceeded'], correct: 0, explainVi: 'Lỗi xảy ra ngay ở IKE_SA_INIT.' },
+    { q: 'Trong ESP tunnel mode, IP nào hiện ra trên Internet?', options: ['IP nội bộ của hai PC', 'IP công khai của hai router', 'IP loopback', 'Không có IP'], correct: 1, explainVi: 'Gói IP gốc nằm trong phần đã mã hoá.' },
+  ],
+  's49-dot1x-radius': [
+    { q: 'Trong 802.1X, switch đóng vai gì?', options: ['Supplicant', 'Authenticator', 'Authentication server', 'Certificate authority'], correct: 1, explainVi: 'Switch chuyển tiếp EAP giữa máy trạm và RADIUS, rồi mở hoặc đóng cổng.' },
+    { q: 'Trước khi xác thực xong, cổng cho loại khung nào đi qua?', options: ['Mọi khung', 'Chỉ EAPOL', 'Chỉ DHCP', 'Chỉ ARP'], correct: 1, explainVi: 'Cổng Unauthorized chỉ nhận EAPOL (EtherType 0x888e).' },
+    { q: 'RADIUS gán VLAN cho người dùng bằng cách nào?', options: ['Gửi lệnh CLI tới switch', 'Thuộc tính Tunnel-Private-Group-ID trong Access-Accept', 'Qua DHCP option', 'Qua VTP'], correct: 1, explainVi: 'Kèm Tunnel-Type = VLAN và Tunnel-Medium-Type = 802.' },
+    { q: 'Máy in không có supplicant thì dùng cách nào?', options: ['MAB: dùng địa chỉ MAC làm danh tính', 'PEAP', 'EAP-TLS', 'Không thể vào mạng'], correct: 0, explainVi: 'MAC Authentication Bypass yếu hơn vì MAC giả được, nên thường gán vào VLAN hạn chế.' },
+  ],
 };
 
 export function quizFor(id) {
   return QUIZZES[id] || null;
+}
+
+for (const [id, qs] of Object.entries(HARD)) QUIZZES[id] = [...(QUIZZES[id] || []), ...qs];
+
+/** Số câu mỗi lần làm quiz; Lộ trình tính đạt khi đúng từ 60% số này. */
+export const QUIZ_LEN = 40;
+
+// nhóm của Lộ trình CCNA → mảng của ngân hàng Thi thử và các dạng câu sinh cùng mảng
+const CCNA_STAGES = { infra: 'infra', switching: 'sw', routing: 'rt', services: 'svc' };
+const DOMAIN_GENS = { infra: ['broadcast', 'hosts', 'validHost', 'dhcp'], rt: ['wildcard', 'summary', 'lpm', 'ad'], svc: ['acl', 'wildcard'], sw: [] };
+const DOMAIN_QGEN = { infra: ['tcpAck', 'frag', 'solicited'], sw: ['stpRoot'], rt: ['eigrpFs', 'hsrpMac'], svc: ['natPat', 'dnsTtl'] };
+const fullId = (short) => Object.keys(QUIZZES).find((k) => k.startsWith(short));
+const stageOf = (short) => ROADMAP.find((st) => st.topics.some((t) => (t.sc || []).includes(short)));
+const ccnaShorts = new Set(ROADMAP.filter((st) => CCNA_STAGES[st.id]).flatMap((st) => st.topics.flatMap((t) => t.sc || [])));
+const titleOf = (id) => getScenario(id)?.meta.titleVi || id;
+
+function shuffle(a, rnd) {
+  const b = [...a];
+  for (let i = b.length - 1; i > 0; i--) { const j = Math.floor(rnd() * (i + 1)); [b[i], b[j]] = [b[j], b[i]]; }
+  return b;
+}
+/** Sinh tối đa n biến thể khác nhau của một dạng câu (bỏ biến thể trùng chữ). */
+function variants(gen, n, rnd) {
+  const out = new Map();
+  for (let t = 0; t < n * 6 && out.size < n; t++) { const q = gen(rnd); if (q) out.set(q.q, q); }
+  return [...out.values()];
+}
+const fromGen = (g) => g && { q: g.text, options: g.opts, correct: g.ans, explainVi: g.explain };
+
+/**
+ * Một lượt quiz QUIZ_LEN câu: câu của kịch bản và câu sinh với số liệu mới, rồi câu của các kịch bản cùng nhóm Lộ trình,
+ * câu cùng mảng trong ngân hàng Thi thử. Câu chưa có trong `seen` được lấy trước nên các lượt liên tiếp ít trùng nhau.
+ * Thứ tự câu và đáp án đều được trộn. Mỗi câu có `from`: tên nguồn khi không phải câu của chính kịch bản này.
+ */
+export function buildQuiz(id, rnd = Math.random, n = QUIZ_LEN, seen = new Set()) {
+  if (!QUIZZES[id]) return null;
+  const short = id.slice(0, 3), stage = stageOf(short), dom = CCNA_STAGES[stage?.id];
+  const own = [...QUIZZES[id], ...(SC_GENS[short] || []).flatMap((g) => variants(QGEN[g], 3, rnd))];
+  // CCNA: kịch bản cùng nhóm; ngoài CCNA: mọi kịch bản CCNP với nhau
+  const peers = Object.keys(QUIZZES).filter((k) => k !== id && (dom ? stageOf(k.slice(0, 3)) === stage : !ccnaShorts.has(k.slice(0, 3))));
+  const extra = [
+    ...peers.flatMap((k) => QUIZZES[k].map((q) => ({ ...q, from: `Cùng nhóm: ${titleOf(k)}` }))),
+    ...(dom ? BANK.filter((b) => b[0] === dom && Array.isArray(b[2]) && Number.isInteger(b[3])).map(([, q, options, correct, explainVi]) => ({ q, options, correct, explainVi, from: 'Ngân hàng thi thử' })) : []),
+  ];
+  const fresh = (q) => !seen.has(q.q);
+  // câu của chính kịch bản luôn có; phần còn lại ưu tiên câu chưa gặp
+  const first = [...shuffle(own, rnd), ...shuffle(extra, rnd).filter(fresh)];
+  // chưa đủ thì bù bằng câu sinh cùng mảng (số liệu mới nên luôn là câu mới), mỗi dạng tối đa 6 câu cho khỏi lệch đề
+  const gens = dom ? [...DOMAIN_GENS[dom].map((g) => (r) => fromGen(GENS[g](r))), ...DOMAIN_QGEN[dom].map((g) => QGEN[g])] : [];
+  const made = new Set(first.map((q) => q.q)), cap = gens.length * 6;
+  for (let t = 0, k = 0; gens.length && first.length < n && k < cap && t < n * 30; t++) {
+    const q = gens[t % gens.length](rnd);
+    if (q && !made.has(q.q)) { made.add(q.q); k++; first.push({ ...q, from: 'Câu sinh tự động' }); }
+  }
+  const picked = [...first, ...shuffle(extra, rnd).filter((q) => !fresh(q))].slice(0, n);
+  return shuffle(picked, rnd).map((q) => {
+    const o = shuffle(q.options.map((t, i) => ({ t, ok: i === q.correct })), rnd);
+    return { ...q, options: o.map((x) => x.t), correct: o.findIndex((x) => x.ok) };
+  });
 }

@@ -149,3 +149,15 @@ test('đề có câu sinh tự động khác nhau giữa các seed, giống nhau
   assert.equal(E.makeExam(3, 'quick').qs.filter((q) => q.gen).length, 4);
   for (const q of E.makeExam(77, 'full').qs.filter((x) => x.gen)) assert.equal(q.optionsEn.length, q.options.length);
 });
+
+test('đề Security: đủ ngân hàng theo tỉ trọng, 2 câu lab, chấm theo mảng riêng, tái hiện theo seed', () => {
+  const ex = E.makeExam(9, 'sec');
+  assert.deepEqual(E.makeExam(9, 'sec'), ex);
+  const mc = ex.qs.filter((q) => q.kind === 'one'), sims = ex.qs.filter((q) => q.kind === 'sim');
+  assert.equal(mc.length, 40); assert.equal(sims.length, 2);
+  for (const d of E.SEC_DOMAINS) assert.equal(mc.filter((q) => q.domain === d.id).length, d.w * 40 / 100, d.id);
+  for (const q of mc) { assert.equal(q.options.length, 4, q.text); assert.equal(new Set(q.options).size, 4, q.text); assert.ok(q.answer >= 0 && q.answer < 4); }
+  const all = E.gradeExam(ex, ex.qs.map((q) => (q.kind === 'sim' ? 1 : q.answer)));
+  assert.equal(all.score, 1000); assert.deepEqual(all.domains.map((d) => d.id), E.SEC_DOMAINS.map((d) => d.id));
+  assert.equal(E.gradeExam(ex, []).score, 300);
+});

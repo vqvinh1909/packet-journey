@@ -36,8 +36,8 @@ export function build() {
     links: [
       { id: 'r1r3', a: 'r1', b: 'r3', labelMid: 'cost 10' },
       { id: 'r1r2', a: 'r1', b: 'r2', labelMid: 'cost 20' },
-      { id: 'r2r3', a: 'r2', b: 'r3', labelMid: 'cost 10' },
-      { id: 'r3net', a: 'r3', b: 'net', bp: '' },
+      { id: 'r2r3', a: 'r2', b: 'r3', labelMid: 'cost 5' },
+      { id: 'r3net', a: 'r3', b: 'net', bp: '', labelMid: 'cost 10' },
     ],
   };
 
@@ -91,7 +91,7 @@ export function build() {
     packet: upd,
     explanationVi:
       'R3 quảng bá mạng 192.168.9.0/24 bằng gói Update (Opcode 1), gửi TIN CẬY qua RTP (có Sequence, bên nhận phải ACK). ' +
-      'R1 nhận trực tiếp từ R3 (cost 10) và cả gián tiếp qua R2 (cost 20 + 10).',
+      'R1 nhận route từ R3 (R3 báo khoảng cách 10) và cả từ R2 (R2 báo 15 = link R2–R3 5 + 10).',
     lesson: LESSON,
   });
 
@@ -110,8 +110,8 @@ export function build() {
     },
     explanationVi:
       'R1 tính Feasible Distance (FD) tới 192.168.9.0/24: ' +
-      'qua R3 trực tiếp = 20 (nhỏ nhất) → SUCCESSOR, nạp vào bảng định tuyến. ' +
-      'Qua R2: Reported Distance của R2 = 10 (khoảng cách R2→đích). Điều kiện khả thi (FC): RD < FD hiện tại → 10 < 20 → ĐÚNG ' +
+      'qua R3 = link 10 + RD 10 = 20 (nhỏ nhất) → SUCCESSOR, nạp vào bảng định tuyến. Qua R2 = link 20 + RD 15 = 35. ' +
+      'Reported Distance của R2 = 15 (khoảng cách R2→đích). Điều kiện khả thi (FC): RD < FD của Successor → 15 < 20 → ĐÚNG ' +
       '→ đường qua R2 là FEASIBLE SUCCESSOR (backup không gây loop).',
     lesson: LESSON,
   });

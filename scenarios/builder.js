@@ -4,7 +4,7 @@
 // hoặc sai/không có gateway (ARP gateway không ai trả lời → thất bại).
 
 import { Sim, diffFields } from '../engine/simulate.js';
-import { sameSubnet } from '../packet/addr.js';
+import { sameSubnet, ipToInt, intToIp, networkInt } from '../packet/addr.js';
 import { arpFrame, echoFrame, ARP_OP, ICMP_TYPE, BROADCAST_MAC } from './_common.js';
 
 const PC1 = { mac: '00:1a:2b:c0:00:01' };
@@ -16,7 +16,45 @@ export const meta = { id: 'custom', titleVi: 'Tự tạo (Builder)' };
 
 /** p: { pc1Ip, pc1Prefix, pc1Gw, pc2Ip, pc2Prefix, routerIp } */
 export function buildCustom(p) {
-  return sameSubnet(p.pc1Ip, p.pc2Ip, p.pc1Prefix) ? sameSubnetSim(p) : crossSubnetSim(p);
+  return predictOutcome(p).kind === 'same' ? sameSubnetSim(p) : crossSubnetSim(p);
+}
+
+/** Dải địa chỉ của mạng chứa ip, dạng "a.b.c.d – e.f.g.h". */
+const range = (ip, prefix) => {
+  const n = networkInt(ip, prefix);
+  return `${intToIp(n)} – ${intToIp(n + 2 ** (32 - prefix) - 1)}`;
+};
+
+/** Kết quả ping PC1 → PC2: 'same' (ARP thẳng, OK), 'cross' (qua gateway, OK) hoặc 'fail' (ARP gateway không ai trả lời), kèm lý do. */
+export function predictOutcome(p) {
+  const net = `Mạng của PC1 (/${p.pc1Prefix}) là ${range(p.pc1Ip, p.pc1Prefix)}.`;
+  if (sameSubnet(p.pc1Ip, p.pc2Ip, p.pc1Prefix)) return { kind: 'same', why: `${net} PC2 ${p.pc2Ip} nằm trong dải này → cùng mạng, PC1 ARP thẳng tìm MAC của PC2.` };
+  const head = `${net} PC2 ${p.pc2Ip} nằm ngoài → PC1 phải gửi qua gateway.`;
+  if (!p.pc1Gw) return { kind: 'fail', why: `${head} Nhưng PC1 chưa đặt gateway nên không gửi được.` };
+  if (!sameSubnet(p.pc1Ip, p.pc1Gw, p.pc1Prefix)) return { kind: 'fail', why: `${head} Gateway ${p.pc1Gw} không nằm trong dải của PC1 nên ARP tới nó không ai trả lời.` };
+  if (p.pc1Gw !== p.routerIp) return { kind: 'fail', why: `${head} Gateway ${p.pc1Gw} cùng mạng nhưng không phải IP của R1 (${p.routerIp || 'chưa có'}) nên ARP không ai trả lời.` };
+  return { kind: 'cross', why: `${head} Gateway ${p.pc1Gw} đúng là cổng R1 → ARP gateway, R1 định tuyến sang PC2, ping OK.` };
+}
+
+/** Bài ngẫu nhiên: mask lẻ, số sát biên mạng, khoảng 1/3 cùng mạng, 1/3 qua gateway đúng, 1/3 có lỗi. */
+export function randomBuilder(rnd = Math.random) {
+  const int = (a, b) => a + Math.floor(rnd() * (b - a + 1));
+  const prefix = int(22, 28), size = 2 ** (32 - prefix);
+  const base = [ipToInt('10.0.0.0') + int(0, 255) * 65536, ipToInt('172.16.0.0') + int(0, 15) * 65536, ipToInt('192.168.0.0')][int(0, 2)];
+  const net = base + Math.floor(int(0, 65535 - 2 * size) / size) * size; // chừa chỗ cho mạng kế bên
+  const pc1 = net + int(2, size - 3), gw = intToIp(net + 1);
+  const kind = ['same', 'cross', 'fail'][int(0, 2)];
+  let pc2 = net + int(2, size - 2);
+  while (pc2 === pc1) pc2 = net + int(2, size - 2);
+  if (kind !== 'same') pc2 = net + size + int(1, size - 2); // mạng kế bên, nhìn số rất giống
+  const p = { pc1Ip: intToIp(pc1), pc1Prefix: prefix, pc1Gw: gw, pc2Ip: intToIp(pc2), pc2Prefix: prefix, routerIp: gw };
+  if (kind === 'fail') {
+    const f = int(0, 2);
+    if (f === 0) p.pc1Gw = intToIp(net + size + 1); // gateway ở mạng kế bên
+    else if (f === 1) p.pc1Gw = intToIp(net + size - 2); // cùng mạng nhưng không phải R1
+    else p.pc1Gw = '';
+  }
+  return p;
 }
 
 // ---------- Cùng mạng: PC1 — SW — PC2 ----------
@@ -53,7 +91,7 @@ function sameSubnetSim(p) {
 
 // ---------- Khác mạng: PC1 — R1 — PC2 ----------
 function crossSubnetSim(p) {
-  const gwOk = !!p.pc1Gw && sameSubnet(p.pc1Ip, p.pc1Gw, p.pc1Prefix) && p.pc1Gw === p.routerIp;
+  const gwOk = predictOutcome(p).kind === 'cross';
   const topo = {
     viewBox: '0 0 1000 260',
     devices: [

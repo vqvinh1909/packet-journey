@@ -24,6 +24,8 @@ export const GLOSSARY = [
   { term: 'HSRP / FHRP', en: 'gateway dự phòng', def: 'Nhiều router chung 1 IP+MAC ảo làm gateway. Active nhận gói; Active chết thì Standby tiếp quản (trong suốt với host).' },
   { term: 'MTU / Fragmentation', en: 'phân mảnh', def: 'Gói lớn hơn MTU bị cắt mảnh (cùng ID, cờ MF, Fragment Offset đơn vị 8 byte). DF=1 thì bị drop + ICMP Frag Needed (PMTUD).' },
   { term: 'DSCP / QoS', en: 'chất lượng dịch vụ', def: '6 bit đầu byte ToS trong IP header đánh dấu ưu tiên (EF=46 cho thoại). Router xếp hàng ưu tiên (LLQ) khi nghẽn.' },
+  { term: 'SIP / SDP', en: 'báo hiệu cuộc gọi', def: 'SIP đăng ký, gọi, kết thúc cuộc gọi (UDP/TCP 5060, dạng chữ). SDP nằm trong SIP, báo IP, cổng RTP và codec.' },
+  { term: 'RTP / RTCP', en: 'truyền âm thanh', def: 'RTP mang âm thanh trên UDP, có số thứ tự và timestamp. RTCP dùng cổng kế tiếp, báo mất gói và jitter.' },
   { term: 'TCP 3-way handshake', en: 'bắt tay 3 bước', def: 'SYN → SYN-ACK → ACK thiết lập kết nối, đồng bộ seq/ack; đóng bằng FIN (4 bước).' },
   { term: 'Redistribution', en: 'bơm route liên giao thức', def: 'ASBR bơm route giữa 2 giao thức (vd OSPF↔EIGRP). Cần seed metric; cẩn thận loop (route-tag, administrative distance).' },
 ];
@@ -44,6 +46,8 @@ export const PORTS = [
   { port: '443', proto: 'TCP', name: 'HTTPS' },
   { port: '514', proto: 'UDP', name: 'Syslog' },
   { port: '1985', proto: 'UDP', name: 'HSRP' },
+  { port: '5060', proto: 'UDP/TCP', name: 'SIP' },
+  { port: '16384–32767', proto: 'UDP', name: 'RTP (dải của Cisco)' },
 ];
 
 // Bảng tra nhanh: OSI ↔ TCP/IP

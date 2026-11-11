@@ -572,3 +572,46 @@ test('mẫu sơ đồ: id không trùng, có nhóm, thiết bị không đè lê
     assert.ok(t.build().shapes.every((s) => s.x >= 0 && s.y >= 0), t.id);
   }
 });
+
+test('importJson: file lạ không đưa được mã vào SVG qua ID hay trường số', () => {
+  const X = '"><image href=x onerror="window.pwned=1"></image>';
+  const d = D.emptyDiagram(), a = D.addShape(d, 'router', 0, 0), b = D.addShape(d, 'rect', 300, 0);
+  D.addShape(d, 'rack', 600, 0);
+  D.addEdge(d, a.id, b.id);
+  const raw = JSON.parse(D.exportJson(d));
+  const poison = (o) => { const out = { ...o }; for (const k of Object.keys(out)) if (!['id', 't', 'a', 'b', 'x', 'y', 'w', 'h'].includes(k)) out[k] = X; return out; };
+  const nums = { sw: X, fs: X, op: X, radius: X, rackUnits: X, rackU: X, rackStartU: X, rackBase: X, width: X };
+  raw.shapes = raw.shapes.map((s) => ({ ...poison(s), ...nums })).concat({ ...raw.shapes[0], id: X }, { ...raw.shapes[0], id: 's99', t: 'constructor' });
+  raw.edges = raw.edges.map((e) => ({ ...poison(e), ...nums })).concat({ ...raw.edges[0], id: X });
+  const got = D.importJson(JSON.stringify(raw));
+  assert.equal(got.shapes.length, 3); // bỏ hình có ID lạ và loại hình lạ
+  assert.equal(got.edges.length, 1);
+  assert.ok(!D.toSvg(got).includes('<image href=x'));
+  for (const x of [...got.shapes, ...got.edges]) for (const k of Object.keys(nums)) assert.ok(!(k in x) || Number.isFinite(x[k]), k);
+  assert.equal(got.shapes[0].fs, 12);
+  assert.equal(got.edges[0].width, 2);
+  // Sơ đồ hợp lệ giữ nguyên qua xuất rồi nhập
+  assert.deepEqual(JSON.parse(D.exportJson(D.importJson(D.exportJson(d)))).edges, JSON.parse(D.exportJson(d)).edges);
+});
+
+test('mẫu sơ đồ: dây thẳng không chạy xuyên qua một hình khác', () => {
+  // đoạn p-q có cắt phần trong của hình r (thu vào 6px) không: cắt xén Liang–Barsky
+  const hit = (p, q, r) => {
+    let t0 = 0, t1 = 1; const dx = q.x - p.x, dy = q.y - p.y;
+    for (const [a, b] of [[-dx, p.x - r.x - 6], [dx, r.x + r.w - 6 - p.x], [-dy, p.y - r.y - 6], [dy, r.y + r.h - 6 - p.y]]) {
+      if (a === 0) { if (b < 0) return false; continue; }
+      const t = b / a;
+      if (a < 0) { if (t > t1) return false; t0 = Math.max(t0, t); } else { if (t < t0) return false; t1 = Math.min(t1, t); }
+    }
+    return t0 < t1;
+  };
+  const mid = (s) => ({ x: s.x + s.w / 2, y: s.y + s.h / 2 });
+  for (const t of D.TEMPLATES) {
+    const d = t.build(), ds = d.shapes.filter((s) => !D.isContainer(s) && s.t !== 'note');
+    for (const e of d.edges) {
+      if (e.style === 'ortho' || e.style === 'curve') continue;
+      const a = D.shapeOf(d, e.a), b = D.shapeOf(d, e.b);
+      for (const s of ds) assert.ok(s === a || s === b || !hit(mid(a), mid(b), s), `${t.id}: dây ${a.label} → ${b.label} xuyên qua ${s.label}`);
+    }
+  }
+});

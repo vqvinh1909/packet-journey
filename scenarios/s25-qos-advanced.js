@@ -40,7 +40,7 @@ export function build() {
   const tagged = (srcMac, pcp, dscp, proto) => sim.frame([
     { proto: 'ethernet', fields: { dst: R1MAC, src: srcMac, etherType: 0x8100 } },
     { proto: 'dot1q', fields: { pcp, dei: 0, vid: 10, innerType: 0x0800 } },
-    { proto: 'ipv4', fields: { src: '10.0.0.9', dst: DST, ttl: 64, id: 0x3300 + dscp, protocol: proto, dscp } },
+    { proto: 'ipv4', fields: { src: `10.0.0.${pcp === 5 ? 11 : pcp === 4 ? 12 : 13}`, dst: DST, ttl: 64, id: 0x3300 + dscp, protocol: proto, dscp } },
     proto === 17
       ? { proto: 'udp', fields: { srcPort: 16400, dstPort: 16400 } }
       : { proto: 'tcp', fields: { srcPort: 50000, dstPort: 80, seq: 1, ack: 1, flags: { ack: true, psh: true } } },

@@ -44,10 +44,10 @@ export function build() {
     { proto: 'ethernet', fields: { dst: BPDU_MAC, src: SW1.mac, mode: '802.3' } },
     { proto: 'llc', fields: {} },
     { proto: 'stp', fields: { version: 3, type: 2, flags: 0x7c, rootPriority: 4096, rootMac: SW1.mac, rootPathCost: 0, bridgePriority: 4096, bridgeMac: SW1.mac, portNumber: 1, maxAge: 20, hello: 2, fwdDelay: 15 } },
-    { proto: 'mstp', fields: { regionName: 'CAMPUS', revision: 1, cistMac: SW1.mac,
+    { proto: 'mstp', fields: { regionName: 'CAMPUS', revision: 1, cistPrio: 4096, cistMac: SW1.mac,
       mstis: [
-        { instance: 1, rootPrio: 4096, rootMac: SW1.mac },
-        { instance: 2, rootPrio: 4096, rootMac: SW2.mac },
+        { instance: 1, rootPrio: 4096, rootMac: SW1.mac, bridgePrio: 0x10 }, // SW1 là root MSTI 1: priority 4096
+        { instance: 2, rootPrio: 4096, rootMac: SW2.mac, cost: 20000 }, // SW1 cách root MSTI 2 (SW2) một link 1G
       ] } },
   ]);
 

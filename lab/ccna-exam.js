@@ -7,6 +7,11 @@
 
 import { BANK_EN } from './ccna-exam-en.js';
 import { genQuestions } from './ccna-gen.js';
+import { SEC_DOMAINS, SEC_BANK } from './sec-exam.js';
+
+export { SEC_DOMAINS };
+// Đề Security (mode 'sec'): 2 câu lab IOS về bảo mật Layer 2 và hardening.
+const SEC_SIMS = [{ lab: 'S01', domain: 'satk', pts: 3 }, { lab: 'S04', domain: 'snet', pts: 3 }];
 
 export const DOMAINS = [
   { id: 'infra', name: 'Network Infrastructure and Connectivity', vi: 'Hạ tầng & kết nối mạng', w: 25 },
@@ -152,6 +157,14 @@ function shuffle(arr, r) { const a = [...arr]; for (let i = a.length - 1; i > 0;
  */
 export function makeExam(seed = 1, mode = 'full') {
   const r = rng(seed);
+  if (mode === 'sec') { // toàn bộ ngân hàng Security + 2 câu lab, 50 phút; chỉ có tiếng Việt
+    const qs = shuffle(SEC_BANK.map((q, i) => ({ q, i })), r).map(({ q: [domain, text, opts, ans, explain], i }) => {
+      const order = shuffle(opts.map((_, k) => k), r), options = order.map((k) => opts[k]);
+      return { i: 'sec:' + i, kind: 'one', domain, text, textEn: text, options, optionsEn: options, answer: order.indexOf(ans), pts: 1, explain, explainEn: explain };
+    });
+    SEC_SIMS.forEach((s, k) => qs.splice(Math.round(((k + 1) * qs.length) / 3) + k, 0, { i: 'sim:' + s.lab, kind: 'sim', domain: s.domain, lab: s.lab, pts: s.pts }));
+    return { seed, mode, minutes: 50, qs };
+  }
   const want = mode === 'quick' ? quota(30) : null;
   let pool = BANK.map((q, i) => ({ q, i }));
   if (want) pool = DOMAINS.flatMap((d) => shuffle(pool.filter((x) => x.q[0] === d.id), r).slice(0, want[d.id]));
@@ -194,7 +207,8 @@ export function scoreQ(q, ans) {
 
 /** Chấm đề: { score (300–1000), pass, pct, domains: [{ id, name, vi, pct, got, max }], wrong: [chỉ số câu chưa đạt trọn] }. */
 export function gradeExam(exam, answers) {
-  const per = Object.fromEntries(DOMAINS.map((d) => [d.id, { got: 0, max: 0 }]));
+  const doms = exam.mode === 'sec' ? SEC_DOMAINS : DOMAINS;
+  const per = Object.fromEntries(doms.map((d) => [d.id, { got: 0, max: 0 }]));
   let got = 0, max = 0;
   const wrong = [];
   exam.qs.forEach((q, k) => {
@@ -207,7 +221,7 @@ export function gradeExam(exam, answers) {
   const score = Math.round(300 + 700 * pct);
   return {
     score, pass: score >= PASS, pct,
-    domains: DOMAINS.map((d) => ({ id: d.id, name: d.name, vi: d.vi, got: per[d.id].got, max: per[d.id].max, pct: per[d.id].max ? per[d.id].got / per[d.id].max : null })),
+    domains: doms.map((d) => ({ id: d.id, name: d.name, vi: d.vi, got: per[d.id].got, max: per[d.id].max, pct: per[d.id].max ? per[d.id].got / per[d.id].max : null })),
     wrong,
   };
 }

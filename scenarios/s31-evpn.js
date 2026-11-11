@@ -54,9 +54,9 @@ export function build() {
     { proto: 'bgp', fields: { type: 2, evpn: { rd: vtep.ip, mac: host.mac, ip: host.ip, vni: VNI, nextHop: vtep.ip, rt: [65000, VNI] } } },
   ]);
   const inner = () => echoFrame({ ethDst: HB.mac, ethSrc: HA.mac, srcIp: HA.ip, dstIp: HB.ip, ttl: 64, ipId: 0x9101, identifier: 1, seq: 1, type: ICMP_TYPE.ECHO_REQUEST });
-  const vxlan = (dst, src) => sim.frame([
+  const vxlan = (dst, src, ttl = 64) => sim.frame([
     { proto: 'ethernet', fields: { dst: dst.mac, src: src.mac, etherType: 0x0800 } },
-    { proto: 'ipv4', fields: { src: V1.ip, dst: V2.ip, ttl: 64, id: 0x5150, protocol: 17 } },
+    { proto: 'ipv4', fields: { src: V1.ip, dst: V2.ip, ttl, id: 0x5150, protocol: 17 } },
     { proto: 'udp', fields: { srcPort: 54321, dstPort: 4789 } },
     { proto: 'vxlan', fields: { vni: VNI } },
     ...inner(),
@@ -113,7 +113,7 @@ export function build() {
     titleVi: 'Dữ liệu: VTEP1 đóng gói VXLAN gửi thẳng tới VTEP2', packet: d1,
     overlay: { links: { l2: { cls: 'forwarding', label: 'VXLAN VNI 5000' } } },
     explanationVi: 'Mặt phẳng dữ liệu vẫn là VXLAN như s30: UDP 4789, VNI 5000. EVPN chỉ thay cách các VTEP biết nhau. Gói đi thẳng tới 10.0.0.2 ngay từ khung đầu tiên.', lesson: LESSON });
-  const d2 = vxlan(V2, SP);
+  const d2 = vxlan(V2, SP, 63); // Spine định tuyến IP ngoài: TTL 64→63
   sim.emit({ kind: 'transit', fromDevice: 'sp', toDevice: 'v2', side: 'forward', activeLayer: 3,
     titleVi: 'Spine định tuyến theo IP ngoài, không biết VNI', packet: d2,
     overlay: { links: { l3: { cls: 'forwarding', label: 'VXLAN VNI 5000' } } },

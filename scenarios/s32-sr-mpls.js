@@ -58,7 +58,7 @@ export function build() {
   // labels: nhãn đỉnh trước. Nhãn cuối mảng là nhãn đáy, bit S = 1.
   const labeled = (ethDst, ethSrc, labels, ttl) => sim.frame([
     { proto: 'ethernet', fields: { dst: ethDst, src: ethSrc, etherType: 0x8847 } },
-    ...labels.map((label, i) => ({ proto: 'mpls', fields: { label, tc: 0, s: i === labels.length - 1 ? 1 : 0, ttl } })),
+    ...labels.map((label, i) => ({ proto: 'mpls', fields: { label, tc: 0, s: i === labels.length - 1 ? 1 : 0, ttl: i === 0 ? ttl : 255 } })), // chỉ nhãn đỉnh bị giảm TTL
     { proto: 'ipv4', fields: { src: CE1.ip, dst: CE2.ip, ttl: 63, id: 0x7201, protocol: 1 } },
     { proto: 'icmp', fields: { type: ICMP_TYPE.ECHO_REQUEST, code: 0, identifier: 1, seq: 1, data: [] } },
   ]);

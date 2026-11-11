@@ -53,7 +53,7 @@ export function build() {
     { proto: 'ethernet', fields: { dst: p.ethDst, src: p.ethSrc, etherType: 0x0800 } },
     { proto: 'ipv4', fields: { src: p.srcIp, dst: p.dstIp, ttl: 64, id: 0, protocol: 17 } },
     { proto: 'udp', fields: { srcPort: p.sport, dstPort: p.dport } },
-    { proto: 'dns', fields: { id: ID, response: p.response, qname: QNAME, qtype: 1, answers: p.answers } },
+    { proto: 'dns', fields: { id: ID, response: p.response, flags: p.flags, qname: QNAME, qtype: 1, answers: p.answers } },
   ]);
 
   // 1. Client -> Resolver (RD=1)
@@ -70,35 +70,35 @@ export function build() {
     lesson: LESSON });
 
   // 2. Resolver -> Root
-  const q2 = dns({ ethDst: ROOT.mac, ethSrc: RES.mac, srcIp: RES.ip, dstIp: ROOT.ip, sport: 33001, dport: 53, response: false });
+  const q2 = dns({ ethDst: ROOT.mac, ethSrc: RES.mac, srcIp: RES.ip, dstIp: ROOT.ip, sport: 33001, dport: 53, response: false, flags: 0x0000 }); // hỏi lặp: RD=0
   sim.capture(q2, 'DNS Query → Root');
   sim.emit({ kind: 'transit', fromDevice: 'res', toDevice: 'root', side: 'encap', activeLayer: 7, titleVi: 'Hỏi Root server', packet: q2,
-    explanationVi: 'Root không biết www.example.com nhưng biết ai quản .com → trả về REFERRAL (NS của .com). (Đơn giản hóa: app mô tả referral bằng lời.)' });
+    explanationVi: 'Root không biết www.example.com nhưng biết ai quản .com → trả về REFERRAL (NS của .com). Truy vấn này để RD = 0: resolver tự đi hỏi từng nơi, không nhờ ai hỏi hộ. (Đơn giản hóa: app mô tả referral bằng lời.)' });
 
   // 3. Resolver -> TLD
-  const q3 = dns({ ethDst: TLD.mac, ethSrc: RES.mac, srcIp: RES.ip, dstIp: TLD.ip, sport: 33002, dport: 53, response: false });
+  const q3 = dns({ ethDst: TLD.mac, ethSrc: RES.mac, srcIp: RES.ip, dstIp: TLD.ip, sport: 33002, dport: 53, response: false, flags: 0x0000 }); // hỏi lặp: RD=0
   sim.capture(q3, 'DNS Query → TLD .com');
   sim.emit({ kind: 'transit', fromDevice: 'res', toDevice: 'tld', side: 'encap', activeLayer: 7, titleVi: 'Hỏi TLD .com', packet: q3,
     explanationVi: '.com cũng không có bản ghi cuối, nhưng biết name server authoritative của example.com → referral tiếp.' });
 
   // 4. Resolver -> Auth
-  const q4 = dns({ ethDst: AUTH.mac, ethSrc: RES.mac, srcIp: RES.ip, dstIp: AUTH.ip, sport: 33003, dport: 53, response: false });
+  const q4 = dns({ ethDst: AUTH.mac, ethSrc: RES.mac, srcIp: RES.ip, dstIp: AUTH.ip, sport: 33003, dport: 53, response: false, flags: 0x0000 }); // hỏi lặp: RD=0
   sim.capture(q4, 'DNS Query → Authoritative');
   sim.emit({ kind: 'transit', fromDevice: 'res', toDevice: 'auth', side: 'encap', activeLayer: 7, titleVi: 'Hỏi Authoritative (example.com)', packet: q4,
     explanationVi: 'Name server authoritative của example.com GIỮ bản ghi thật → sẽ trả lời có kết quả A.' });
 
   // 5. Auth -> Resolver (answer)
-  const r1 = dns({ ethDst: RES.mac, ethSrc: AUTH.mac, srcIp: AUTH.ip, dstIp: RES.ip, sport: 53, dport: 33003, response: true, answers: [{ ip: ANSWER, ttl: 300 }] });
+  const r1 = dns({ ethDst: RES.mac, ethSrc: AUTH.mac, srcIp: AUTH.ip, dstIp: RES.ip, sport: 53, dport: 33003, response: true, flags: 0x8400, answers: [{ ip: ANSWER, ttl: 300 }] });
   sim.capture(r1, 'DNS Response (A record)');
   sim.emit({ kind: 'transit', fromDevice: 'auth', toDevice: 'res', side: 'decap', activeLayer: 7, titleVi: 'Authoritative trả bản ghi A', packet: r1,
-    explanationVi: `Trả lời: www.example.com → A = ${ANSWER}, TTL 300s. Answer dùng con trỏ nén 0xC00C để khỏi lặp lại tên.`,
+    explanationVi: `Trả lời: www.example.com → A = ${ANSWER}, TTL 300s, cờ AA = 1 (Authoritative Answer: câu trả lời từ chính máy chủ giữ vùng). Answer dùng con trỏ nén 0xC00C để khỏi lặp lại tên.`,
     lesson: LESSON });
 
   // 6. Resolver -> Client (final)
   const r2 = dns({ ethDst: CLIENT.mac, ethSrc: RES.mac, srcIp: RES.ip, dstIp: CLIENT.ip, sport: 53, dport: 50000, response: true, answers: [{ ip: ANSWER, ttl: 300 }] });
   sim.capture(r2, 'DNS Response → Client');
   sim.emit({ kind: 'transit', fromDevice: 'res', toDevice: 'cli', side: 'decap', activeLayer: 7, titleVi: 'Resolver trả Client + cache theo TTL', packet: r2,
-    explanationVi: `Resolver trả kết quả về client (RA = 1) và LƯU CACHE 300s: trong thời gian đó, ai hỏi lại cũng trả ngay, không đi hỏi root nữa. Client giờ biết ${ANSWER} để mở kết nối TCP.`,
+    explanationVi: `Resolver trả kết quả về client (RA = 1, AA = 0 vì đây là câu trả lời qua trung gian) và LƯU CACHE 300s: trong thời gian đó, ai hỏi lại cũng trả ngay, không đi hỏi root nữa. Client giờ biết ${ANSWER} để mở kết nối TCP.`,
     lesson: LESSON });
 
   return sim.result();

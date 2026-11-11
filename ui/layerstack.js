@@ -8,6 +8,8 @@ const ROWS = [
   { osi: 2, key: 2 },
   { osi: 1, key: 1 },
 ];
+// Tầng 5, 6 không có hàng riêng: gộp vào Application như mô hình TCP/IP (RTP, BFD).
+const rowOf = (layer) => (layer >= 5 ? 7 : Math.floor(layer));
 
 export function renderLayerStack(container, step, t) {
   container.innerHTML = '';
@@ -17,14 +19,14 @@ export function renderLayerStack(container, step, t) {
   // Gom protocol theo tầng hiển thị (2.5 xếp vào hàng L2 với ghi chú).
   const byRow = { 7: [], 4: [], 3: [], 2: [], 1: [] };
   for (const l of tree) {
-    const row = l.osiLayer === 2.5 ? 2 : Math.floor(l.osiLayer);
+    const row = l.osiLayer === 2.5 ? 2 : rowOf(l.osiLayer);
     if (byRow[row]) byRow[row].push(l.osiLayer === 2.5 ? `${l.name} (L2↔L3)` : l.name);
   }
   byRow[1].push('Bits trên dây (đồng/quang/sóng)');
 
   for (const r of ROWS) {
     const div = document.createElement('div');
-    const isActive = active != null && Math.floor(active) === r.key;
+    const isActive = active != null && rowOf(active) === r.key;
     div.className = 'layer' + (isActive ? ' active' : '');
     const protos = byRow[r.key];
     div.innerHTML =

@@ -15,14 +15,28 @@ export function plEval(d, name, net, prefix) {
   }
   return false;
 }
+/** Regex kiểu IOS, "_" là ranh giới. Mẫu sai trả null: một mẫu đã lưu không được làm hỏng mọi lần tính BGP. */
+export function iosRegex(s) {
+  try { return new RegExp(s.replace(/_/g, '(^| |$)')); } catch { return null; }
+}
 function asPathOk(d, name, asPath) {
   const list = d.asPathAcls?.[name];
   if (!list) return true;
   const s = asPath.join(' ');
-  for (const e of list) if (new RegExp(e.re.replace(/_/g, '(^| |$)')).test(s)) return e.action === 'permit';
+  for (const e of list) if (iosRegex(e.re)?.test(s)) return e.action === 'permit';
+  return false;
+}
+/** Community-list: dòng đầu tiên khớp quyết định, không khớp thì deny. Standard cần đủ mọi giá trị, expanded là regex. */
+export function commOk(d, name, comm) {
+  const have = comm || [];
+  for (const e of d.commLists?.[name] || []) {
+    const hit = e.expanded ? iosRegex(e.vals.join(' '))?.test(have.join(' ')) : e.vals.every((v) => have.includes(v));
+    if (hit) return e.action === 'permit';
+  }
   return false;
 }
 const matchRoute = (d, m, r) => {
+  if (m.k === 'comm') return m.vals.some((n) => commOk(d, n, r.comm));
   if (m.k === 'pl') return m.vals.some((n) => plEval(d, n, r.net, r.prefix));
   if (m.k === 'acl') return m.vals.some((n) => aclEval(d, n, { src: r.net, dst: r.net, proto: 'ip' }).action === 'permit');
   if (m.k === 'tag') return m.vals.includes(r.tag ?? 0);
@@ -61,6 +75,7 @@ export function ribPolicy(d, rt) {
   }
   let ad = rt.ad;
   if (rt.code[0] === 'O' && p.distance != null) ad = p.distance;
+  if (rt.code[0] === 'O' && p.distanceBy) ad = p.distanceBy[/[EN]\d/.test(rt.code) ? 'external' : rt.code.includes('IA') ? 'inter-area' : 'intra-area'] ?? ad;
   if (rt.code[0] === 'D' && p.distanceInt != null) ad = rt.code === 'D EX' ? p.distanceExt : p.distanceInt;
   if (rt.code === 'B' && p.distanceE != null) ad = rt.ad === 20 ? p.distanceE : p.distanceI;
   return ad === rt.ad ? rt : { ...rt, ad };

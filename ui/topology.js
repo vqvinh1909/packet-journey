@@ -48,10 +48,20 @@ export function renderTopology(svgEl, topology) {
   // node
   for (const d of topology.devices) drawNode(d);
   drawPorts(topology);
+  fitView();
 
   // dot gói tin (ẩn ban đầu)
   dot = el('circle', { class: 'pkt-dot', r: 9, cx: 0, cy: 0, opacity: 0 });
   svg.appendChild(dot);
+}
+
+/** Khung nhìn ôm sát các thiết bị để sơ đồ to nhất trong cột; sơ đồ ít máy vẫn giữ tối thiểu 600 đơn vị cho khỏi phóng quá to. */
+function fitView() {
+  let b;
+  try { b = svg.getBBox(); } catch { return; } // svg đang ẩn thì giữ viewBox gốc
+  if (!b.width) return;
+  const w = Math.max(b.width + 48, 600), h = b.height + 60;
+  svg.setAttribute('viewBox', `${Math.round(b.x + b.width / 2 - w / 2)} ${Math.round(b.y - 34)} ${Math.round(w)} ${Math.round(h)}`);
 }
 
 /** Nhãn tên cổng ở hai đầu dây, vẽ sau thiết bị để nền của thiết bị không che mất. */

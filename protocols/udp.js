@@ -4,7 +4,7 @@
 
 import { BitWriter } from '../packet/bytes.js';
 
-const PORT_NAME = { 53: 'DNS', 67: 'DHCP server', 68: 'DHCP client', 123: 'NTP', 161: 'SNMP', 520: 'RIP' };
+const PORT_NAME = { 53: 'DNS', 67: 'DHCP server', 68: 'DHCP client', 123: 'NTP', 161: 'SNMP', 500: 'IKE', 520: 'RIP', 1812: 'RADIUS', 4500: 'IPsec NAT-T' };
 function portLabel(p) { return PORT_NAME[p] ? `${p} — ${PORT_NAME[p]}` : String(p); }
 
 export default {
